@@ -98,7 +98,7 @@ internal static class Keys
 internal sealed class Loc
 {
     public string Step = "ШАГ", Waiting = "ОЖИДАНИЕ", Tutorial = "Туториал", Preparing = "Готовлю следующий шаг…";
-    public string Back = "Назад", Skip = "Пропустить", Done = "Готово", Got = "Есть!";
+    public string Back = "Назад", Skip = "Пропустить", Done = "Готово", Got = "Есть!", Undo = "Отменить", Help = "Помощь";
     public string Marked = "Отмечено {0} из {1}", Target = "Цель {0}";
     public string HintDone = "готово", HintBack = "назад", HintSkip = "пропустить", HintUndo = "отменить", HintStop = "завершить";
     public string PickTitle = "Укажите точку", PickText = "Кликните в нужное место. Esc — отмена.", PickCount = "Точка {0} из {1}";
@@ -116,7 +116,7 @@ internal sealed class Loc
     public static readonly Loc En = new()
     {
         Step = "STEP", Waiting = "WAITING", Tutorial = "Tutorial", Preparing = "Preparing the next step…",
-        Back = "Back", Skip = "Skip", Done = "Done", Got = "Got it!",
+        Back = "Back", Skip = "Skip", Done = "Done", Got = "Got it!", Undo = "Undo", Help = "Help",
         Marked = "{0} of {1} done", Target = "Target {0}",
         HintDone = "done", HintBack = "back", HintSkip = "skip", HintUndo = "undo", HintStop = "finish",
         PickTitle = "Pick a point", PickText = "Click the spot. Esc cancels.", PickCount = "Point {0} of {1}",

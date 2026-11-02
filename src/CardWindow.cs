@@ -96,6 +96,8 @@ internal sealed class CardWindow : NoActivateForm
         public bool Custom, Enabled = true;
         public RectangleF Rect;
         public string Icon = "";
+        public bool Tile;          // equal-width tile: icon on top, caption below
+        public bool Status;        // shows a state ("Got it!"): drawn bright, but not clickable
     }
 
     private CardModel _model = new();
@@ -246,42 +248,37 @@ internal sealed class CardWindow : NoActivateForm
             y += h;
             return;
         }
-        var left = new List<Btn>();
-        var rightGroup = new List<Btn>();
+        // every secondary action is a same-size tile with an icon AND a caption, so nothing is a mystery glyph
+        var tiles = new List<Btn>();
         if (m.Controls.Contains("back"))
-            left.Add(new Btn { Id = "back", Action = "back", Icon = "back", Text = loc.Back, Enabled = m.CanBack });
+            tiles.Add(new Btn { Id = "back", Action = "back", Icon = "back", Text = loc.Back, Enabled = m.CanBack, Tile = true });
         if (m.Controls.Contains("undo"))
-            left.Add(new Btn { Id = "undo", Action = "undo", Icon = "undo", Style = "ghost", Enabled = m.CanUndo });
-        if (m.Controls.Contains("help"))
-            left.Add(new Btn { Id = "help", Action = "help_open", Icon = "help", Style = m.HelpPending ? "secondary" : "ghost" });
-        Btn? skip = null;
+            tiles.Add(new Btn { Id = "undo", Action = "undo", Icon = "undo", Text = loc.Undo, Enabled = m.CanUndo, Tile = true });
         if (m.Controls.Contains("skip"))
-            rightGroup.Add(skip = new Btn { Id = "skip", Action = "skip", Icon = "skip", Text = loc.Skip, Style = "ghost", Enabled = !m.Completed });
-        if (m.Controls.Contains("done"))
-            rightGroup.Add(new Btn { Id = "done", Action = "done", Icon = "check", Text = m.Completed ? loc.Got : loc.Done, Style = m.Completed ? "success" : "primary", Enabled = !m.Completed });
-
-        float Width(Btn b) => b.Text.Length == 0 ? h : Math.Max(h, TextW(b.Text) + (b.Icon.Length > 0 ? 24 * s : 0) + 30 * s);
-        float RowWidth(List<Btn> l) => l.Count == 0 ? 0 : l.Sum(Width) + gap * (l.Count - 1);
-        bool Fits() => RowWidth(left) + (left.Count > 0 && rightGroup.Count > 0 ? gap * 2 : 0) + RowWidth(rightGroup) <= ContentWidth;
-
-        if (!Fits() && skip != null) skip.Text = "";               // 1) "Skip" becomes an icon
-        if (!Fits() && left.FirstOrDefault(b => b.Id == "back") is Btn back) back.Text = "";   // 2) so does "Back"
-        bool wrap = !Fits();                                        // 3) still too wide: right group on its own row
-
-        float lx = x0;
-        foreach (var b in left) { float w = Width(b); b.Rect = new RectangleF(lx, y, w, h); lx += w + gap; _buttons.Add(b); }
-        if (wrap && left.Count > 0) y += h + gap;
-        float rx = right;
-        for (int i = rightGroup.Count - 1; i >= 0; i--)
+            tiles.Add(new Btn { Id = "skip", Action = "skip", Icon = "skip", Text = loc.Skip, Enabled = !m.Completed, Tile = true });
+        if (m.Controls.Contains("help"))
+            tiles.Add(new Btn { Id = "help", Action = "help_open", Icon = "help", Text = loc.Help, Style = m.HelpPending ? "active" : "secondary", Tile = true });
+        if (tiles.Count > 0)
         {
-            var b = rightGroup[i];
-            float w = Width(b);
-            rx -= w;
-            b.Rect = new RectangleF(rx, y, w, h);
-            rx -= gap;
-            _buttons.Add(b);
+            float th = 54 * s, tw = (ContentWidth - gap * (tiles.Count - 1)) / tiles.Count;
+            for (int i = 0; i < tiles.Count; i++)
+            {
+                tiles[i].Rect = new RectangleF(x0 + i * (tw + gap), y, tw, th);
+                _buttons.Add(tiles[i]);
+            }
+            y += th + gap;
         }
-        y += h;
+        if (m.Controls.Contains("done"))
+        {
+            float dh = 42 * s;
+            _buttons.Add(new Btn
+            {
+                Id = "done", Action = "done", Icon = "check", Text = m.Completed ? loc.Got : loc.Done,
+                Style = m.Completed ? "success" : "primary", Enabled = !m.Completed, Status = m.Completed, Rect = new RectangleF(x0, y, ContentWidth, dh),
+            });
+            y += dh;
+        }
+        else if (tiles.Count > 0) y -= gap;
     }
 
     private float TextW(string t) => Theme.Measure(t, Theme.Font(13.5f * _s, true), 600 * _s).Width;
@@ -482,8 +479,10 @@ internal sealed class CardWindow : NoActivateForm
     {
         float s = _s;
         bool hover = _hover == b;
-        Pill(g, b.Rect, b.Style, hover, b.Enabled, Palette.Accent, s);
-        var fg = Palette.WithAlpha(TextOn(b.Style), b.Enabled ? 1 : 0.45f);
+        if (b.Tile) { DrawTile(g, b, hover); return; }
+        bool lit = b.Enabled || b.Status;
+        Pill(g, b.Rect, b.Style, hover && b.Enabled, lit, Palette.Accent, s);
+        var fg = Palette.WithAlpha(TextOn(b.Style), lit ? 1 : 0.45f);
         var f = Theme.Font(13.5f * s, true);
         float iconW = b.Icon.Length > 0 ? 18 * s : 0;
         float textW = b.Text.Length > 0 ? Theme.Measure(b.Text, f, b.Rect.Width).Width : 0;
@@ -504,6 +503,31 @@ internal sealed class CardWindow : NoActivateForm
         if (textW > 0)
             using (var tb = new SolidBrush(fg))
                 g.DrawString(b.Text, f, tb, new RectangleF(tx, b.Rect.Y, textW + 2, b.Rect.Height), new StringFormat(Theme.Center) { Alignment = StringAlignment.Near });
+    }
+
+    private void DrawTile(Graphics g, Btn b, bool hover)
+    {
+        float s = _s;
+        var r = b.Rect;
+        using (var path = Theme.Rounded(r, 10 * s))
+        {
+            Color fill = b.Style == "active" ? Palette.WithAlpha(Palette.Accent, 0.22f) : hover && b.Enabled ? Palette.InkHover : Palette.InkRaised;
+            using (var br = new SolidBrush(b.Enabled ? fill : Palette.WithAlpha(Palette.InkRaised, 0.5f))) g.FillPath(br, path);
+            var edge = b.Style == "active" ? Palette.Accent : hover && b.Enabled ? Palette.WithAlpha(Palette.Accent, 0.6f) : Palette.Line;
+            using var pen = new Pen(b.Enabled ? edge : Palette.WithAlpha(Palette.Line, 0.5f), 1 * s);
+            g.DrawPath(pen, path);
+        }
+        var fg = Palette.WithAlpha(Palette.Text, b.Enabled ? 1 : 0.35f);
+        var ic = new PointF(r.X + r.Width / 2, r.Y + 19 * s);
+        switch (b.Icon)
+        {
+            case "back": Theme.IconChevron(g, ic, 14 * s, true, fg, 2.3f * s); break;
+            case "undo": Theme.IconUndo(g, ic, 19 * s, fg, 2.1f * s); break;
+            case "skip": Theme.IconSkip(g, ic, 12 * s, fg, 2.1f * s); break;
+            case "help": Theme.IconQuestion(g, ic, 17 * s, fg, 2.1f * s); break;
+        }
+        using var tb = new SolidBrush(Palette.WithAlpha(b.Enabled ? Palette.Text : Palette.TextDim, b.Enabled ? 0.92f : 0.5f));
+        g.DrawString(b.Text, Theme.Font(12 * s, true), tb, new RectangleF(r.X + 2 * s, r.Y + 33 * s, r.Width - 4 * s, 18 * s), Theme.Center);
     }
 
     // ------------------------------------------------------------------ input
