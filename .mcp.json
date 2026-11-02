@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "tutorial-overlay": {
+      "type": "http",
+      "url": "http://127.0.0.1:7788/mcp",
+      "headers": { "Authorization": "Bearer ${TUTORIAL_OVERLAY_KEY}" }
+    }
+  }
+}

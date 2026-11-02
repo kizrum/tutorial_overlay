@@ -1,0 +1,143 @@
+using System;
+using System.IO;
+using System.Security.Cryptography;
+using System.Text.Json.Nodes;
+using System.Threading;
+using System.Windows.Forms;
+
+namespace TutorialOverlay;
+
+internal static class Program
+{
+    public const string Version = "0.1.0";
+    private static System.Windows.Forms.Control? _ui;
+
+    /// <summary>Lets screenshot(includeOverlay) see our own windows for a moment.</summary>
+    public static void SetCapturable(bool capturable)
+    {
+        var ui = _ui;
+        if (ui == null) return;
+        ui.Invoke(() =>
+        {
+            // the canvas is shown with ShowWindow, so it is not in OpenForms
+            var handles = new System.Collections.Generic.HashSet<IntPtr> { ui.Handle };
+            foreach (System.Windows.Forms.Form f in System.Windows.Forms.Application.OpenForms) handles.Add(f.Handle);
+            foreach (var h in handles) Native.SetWindowDisplayAffinity(h, capturable ? 0u : Native.WDA_EXCLUDEFROMCAPTURE);
+        });
+    }
+
+    [STAThread]
+    private static int Main(string[] args)
+    {
+        Native.SetProcessDpiAwarenessContext(Native.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+        Events.Init();
+
+        int port = 7788;
+        string? key = Environment.GetEnvironmentVariable("TUTORIAL_OVERLAY_KEY");
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--port" when i + 1 < args.Length: port = int.Parse(args[++i]); break;
+                case "--key" when i + 1 < args.Length: key = args[++i]; break;
+                case "--no-anim": Engine.Animate = false; break;
+                case "--show-inactive": Engine.HideWhenInactiveDefault = false; break;
+                case "--verbose": Log.Verbose = true; break;
+                case "--help" or "-h" or "/?":
+                    Console.Error.WriteLine("TutorialOverlay [--port 7788] [--key KEY] [--no-anim] [--show-inactive] [--verbose]\n" +
+                                            "  key: --key, env TUTORIAL_OVERLAY_KEY, or %LOCALAPPDATA%\\TutorialOverlay\\key.txt (created on first run)\n" +
+                                            "  stdout: one JSON event per line; stderr: diagnostics");
+                    return 0;
+            }
+        }
+        key ??= LoadOrCreateKey();
+
+        using var single = new Mutex(true, $"TutorialOverlay.{port}", out bool first);
+        if (!first) { Log.Warn($"another TutorialOverlay is already serving port {port}"); return 2; }
+
+        var overlay = new OverlayWindow();
+        var card = new CardWindow();
+        var buttons = new ButtonHost();
+        _ = overlay.Handle;
+        _ = card.Handle;
+        _ui = overlay;
+
+        Resolver.Start();
+        MouseHook.Start();
+        var consumer = new Thread(() =>
+        {
+            foreach (var c in MouseHook.Queue.GetConsumingEnumerable())
+            {
+                try { Engine.HandleClick(c); }
+                catch (Exception e) { Log.Warn("click: " + e.Message); }
+            }
+        }) { IsBackground = true, Name = "click-consumer", Priority = ThreadPriority.AboveNormal };
+        consumer.Start();
+
+        var server = new McpServer(port, key);
+        try { server.StartAsync().GetAwaiter().GetResult(); }
+        catch (Exception e)
+        {
+            Log.Warn($"cannot listen on 127.0.0.1:{port}: {e.Message}");
+            return 3;
+        }
+        server.Stopping += () => { try { overlay.BeginInvoke(Application.Exit); } catch { } };
+        Console.CancelKeyPress += (_, e) => { e.Cancel = true; try { overlay.BeginInvoke(Application.Exit); } catch { } };
+
+        Log.Info($"TutorialOverlay {Version} listening on http://127.0.0.1:{port}/mcp (key from {KeySource(args)})");
+        Events.Emit("ready", new JsonObject { ["port"] = port, ["version"] = Version, ["pid"] = Environment.ProcessId });
+
+        var timer = new System.Windows.Forms.Timer { Interval = 30 };
+        timer.Tick += (_, _) =>
+        {
+            try
+            {
+                var frame = Engine.Tick();
+                if (frame.Changed) overlay.Present(frame.Scene);
+                buttons.Update(frame.Buttons);
+                card.UpdateModel(frame.Card);
+            }
+            catch (Exception e) { Log.Warn("frame: " + e); }
+        };
+        timer.Start();
+
+        Application.Run();
+
+        timer.Stop();
+        MouseHook.Stop();
+        Resolver.Stop();
+        try { server.StopAsync().Wait(2000); } catch { }
+        Events.Emit("exit");
+        return 0;
+    }
+
+    private static string KeyFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TutorialOverlay", "key.txt");
+
+    private static string KeySource(string[] args) =>
+        Array.IndexOf(args, "--key") >= 0 ? "--key" :
+        Environment.GetEnvironmentVariable("TUTORIAL_OVERLAY_KEY") != null ? "TUTORIAL_OVERLAY_KEY" : KeyFile;
+
+    private static string LoadOrCreateKey()
+    {
+        try
+        {
+            if (File.Exists(KeyFile))
+            {
+                var k = File.ReadAllText(KeyFile).Trim();
+                if (k.Length >= 16) return k;
+            }
+            var key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(24)).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+            Directory.CreateDirectory(Path.GetDirectoryName(KeyFile)!);
+            File.WriteAllText(KeyFile, key);
+            Log.Info($"generated a new key in {KeyFile}");
+            return key;
+        }
+        catch (Exception e)
+        {
+            throw new InvalidOperationException("cannot read or create " + KeyFile + ": " + e.Message);
+        }
+    }
+}
