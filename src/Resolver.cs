@@ -12,7 +12,7 @@ namespace TutorialOverlay;
 
 internal sealed record TopWindow(IntPtr Hwnd, int Pid, string Title, string Class, Rectangle Frame);
 
-internal sealed record AnchorResult(bool Found, IntPtr Root, RectangleF? Rel, int[] Pids, string Reason, DateTime At)
+internal sealed record AnchorResult(bool Found, IntPtr Root, RectangleF? Rel, int[] Pids, string Reason, DateTime At, string? Value = null)
 {
     public static AnchorResult Missing(string reason, int[] pids) => new(false, IntPtr.Zero, null, pids, reason, DateTime.UtcNow);
 }
@@ -44,6 +44,12 @@ internal static class Resolver
     private static bool _windowsBaseline;
     private static string _watchKey = "";
     private static readonly int OwnPid = Environment.ProcessId;
+
+    /// <summary>
+    /// The watched apps' secondary top-level windows (context menus, dialogs, detached plugin windows):
+    /// everything but each process's largest window. The step card keeps out of their way.
+    /// </summary>
+    public static volatile TopWindow[] Popups = Array.Empty<TopWindow>();
 
     public static void Start()
     {
@@ -93,6 +99,8 @@ internal static class Resolver
             Results[a.Key] = r;
             if (prev != null && prev.Found != r.Found && (a.Path.Count > 0 || a.Window != null || a.Title != null))
                 Events.Emit(r.Found ? "anchor_found" : "anchor_lost", new() { ["anchor"] = a.Describe(), ["reason"] = r.Reason });
+            if (a.Read != null && prev != null && r.Found && prev.Value != r.Value)
+                Events.Emit("uia_changed", new() { ["anchor"] = a.Describe(), ["property"] = a.Read, ["value"] = r.Value, ["was"] = prev.Value });
         }
         foreach (var k in Results.Keys.Where(k => !liveKeys.Contains(k)).ToList()) Results.TryRemove(k, out _);
         lock (Cache) foreach (var k in Cache.Keys.Where(k => !liveKeys.Contains(k)).ToList()) Cache.Remove(k);
@@ -106,7 +114,7 @@ internal static class Resolver
         var procs = _watchedProcesses;
         var key = string.Join(",", procs);
         if (key != _watchKey) { _watchKey = key; _windowsBaseline = false; KnownWindows.Clear(); }
-        if (procs.Length == 0) return;
+        if (procs.Length == 0) { Popups = Array.Empty<TopWindow>(); return; }
         var pids = new Dictionary<int, string>();
         foreach (var p in procs) foreach (var pid in Pids(p, pidCache)) pids[pid] = p;
         var now = windows.Where(w => pids.ContainsKey(w.Pid) && w.Frame.Width > 1 && w.Frame.Height > 1).ToDictionary(w => w.Hwnd);
@@ -120,6 +128,10 @@ internal static class Resolver
         KnownWindows.Clear();
         foreach (var kv in now) KnownWindows[kv.Key] = kv.Value;
         _windowsBaseline = true;
+        Popups = now.Values.GroupBy(w => w.Pid)
+            .SelectMany(g => g.OrderByDescending(w => (long)w.Frame.Width * w.Frame.Height).Skip(1))
+            .Where(w => !Native.IsIconic(w.Hwnd))
+            .ToArray();
     }
 
     private static System.Text.Json.Nodes.JsonObject WinJson(TopWindow w, string proc) => new()
@@ -162,6 +174,24 @@ internal static class Resolver
         return list;
     }
 
+    /// <summary>Top-level windows matching an anchor's process / window title / class / top-level title (no UIA).</summary>
+    public static HashSet<IntPtr> MatchingWindows(AnchorSpec a)
+    {
+        int[]? pids = a.Process != null ? Pids(a.Process) : null;
+        var set = new HashSet<IntPtr>();
+        foreach (var w in EnumTopWindows())
+        {
+            if (pids != null && !pids.Contains(w.Pid)) continue;
+            if (a.Hwnd is long h && w.Hwnd != (IntPtr)h) continue;
+            if (a.WindowClass != null && !w.Class.Contains(a.WindowClass, StringComparison.OrdinalIgnoreCase)) continue;
+            if (a.Window != null && !w.Title.Contains(a.Window, StringComparison.OrdinalIgnoreCase)) continue;
+            if (a.Title != null && !w.Title.Contains(a.Title, StringComparison.OrdinalIgnoreCase)) continue;
+            if (w.Frame.Width <= 1 || w.Frame.Height <= 1) continue;
+            set.Add(w.Hwnd);
+        }
+        return set;
+    }
+
     /// <summary>One-shot synchronous resolution (screenshot / describe) without touching the cache.</summary>
     public static AnchorResult ResolveNow(AnchorSpec a) => Resolve(a, EnumTopWindows(), new(StringComparer.OrdinalIgnoreCase), useCache: false);
 
@@ -188,7 +218,7 @@ internal static class Resolver
             // "window or pane": a top-level window title, or (apps that draw their own UI) a Window/Pane element name
             var top = wins.FirstOrDefault(w => w.Title.Contains(a.Title, StringComparison.OrdinalIgnoreCase));
             if (top != null && a.Path.Count == 0)
-                return new AnchorResult(true, top.Hwnd, null, pids.Length > 0 ? pids : new[] { top.Pid }, "window", DateTime.UtcNow);
+                return new AnchorResult(true, top.Hwnd, null, pids.Length > 0 ? pids : new[] { top.Pid }, "window", DateTime.UtcNow, WindowValue(a, top));
             var paneSpec = new List<ElementSpec> { new() { Name = a.Title, Role = "Window|Pane" } };
             paneSpec.AddRange(a.Path);
             return ResolvePath(a, paneSpec, a.Process == null ? wins.Where(w => w.Title.Length >= 0).ToList() : wins, pids, useCache);
@@ -198,7 +228,7 @@ internal static class Resolver
         {
             if (wins.Count == 0) return AnchorResult.Missing(a.Window != null ? "window not found" : "no visible window", pids);
             var w = wins[0];
-            return new AnchorResult(true, w.Hwnd, null, pids.Length > 0 ? pids : new[] { w.Pid }, "window", DateTime.UtcNow);
+            return new AnchorResult(true, w.Hwnd, null, pids.Length > 0 ? pids : new[] { w.Pid }, "window", DateTime.UtcNow, WindowValue(a, w));
         }
         if (wins.Count == 0) return AnchorResult.Missing("no visible window", pids);
         return ResolvePath(a, a.Path, wins, pids, useCache);
@@ -215,8 +245,10 @@ internal static class Resolver
             if (c.Element != null && Native.IsWindow(c.Root) && DateTime.UtcNow - c.LastSearch < TimeSpan.FromSeconds(2))
             {
                 var rect = SafeRect(c.Element, cached: false);
-                if (rect is RectangleF r && r.Width > 0 && r.Height > 0)
-                    return Found(c.Root, r, pids);
+                bool hidden = false;
+                try { hidden = c.Element.Current.IsOffscreen; } catch (Exception ex) when (IsGone(ex) || ex is InvalidOperationException) { rect = null; }
+                if (!hidden && rect is RectangleF r && r.Width > 0 && r.Height > 0)
+                    return Found(c.Root, r, pids, a.Read != null ? ReadProperty(c.Element, a.Read) : null);
                 c.Element = null;
             }
             if (c.Element == null && DateTime.UtcNow < c.NextSearch)
@@ -229,7 +261,7 @@ internal static class Resolver
             if (el != null && rect is RectangleF r)
             {
                 if (c != null) { c.Element = el; c.Root = w.Hwnd; c.LastSearch = DateTime.UtcNow; c.Misses = 0; }
-                return Found(w.Hwnd, r, pids);
+                return Found(w.Hwnd, r, pids, a.Read != null ? ReadProperty(el, a.Read) : null);
             }
         }
         if (c != null)
@@ -240,11 +272,58 @@ internal static class Resolver
         return AnchorResult.Missing("element not found", pids);
     }
 
-    private static AnchorResult Found(IntPtr root, RectangleF screenRect, int[] pids)
+    private static AnchorResult Found(IntPtr root, RectangleF screenRect, int[] pids, string? value)
     {
         var frame = Native.FrameRect(root);
         var rel = new RectangleF(screenRect.X - frame.X, screenRect.Y - frame.Y, screenRect.Width, screenRect.Height);
-        return new AnchorResult(true, root, rel, pids.Length > 0 ? pids : new[] { Native.ProcessId(root) }, "element", DateTime.UtcNow);
+        return new AnchorResult(true, root, rel, pids.Length > 0 ? pids : new[] { Native.ProcessId(root) }, "element", DateTime.UtcNow, value);
+    }
+
+    private static string? WindowValue(AnchorSpec a, TopWindow w) => a.Read switch
+    {
+        "name" or "title" => w.Title,
+        "enabled" => "true",
+        _ => null,
+    };
+
+    /// <summary>
+    /// UIA state for "uia" conditions. Toggle/expand states are normalised to on/off/indeterminate and
+    /// expanded/collapsed; booleans to true/false. Null when the element has no such pattern.
+    /// </summary>
+    public static string? ReadProperty(AutomationElement el, string prop)
+    {
+        try
+        {
+            switch (prop)
+            {
+                case "name" or "title": return el.Current.Name;
+                case "enabled": return el.Current.IsEnabled ? "true" : "false";
+                case "focused": return el.Current.HasKeyboardFocus ? "true" : "false";
+                case "offscreen": return el.Current.IsOffscreen ? "true" : "false";
+                case "value":
+                    if (el.TryGetCurrentPattern(ValuePattern.Pattern, out var vp)) return ((ValuePattern)vp).Current.Value;
+                    if (el.TryGetCurrentPattern(RangeValuePattern.Pattern, out var rp))
+                        return ((RangeValuePattern)rp).Current.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    return null;
+                case "toggle" or "checked":
+                    if (!el.TryGetCurrentPattern(TogglePattern.Pattern, out var tp)) return null;
+                    return ((TogglePattern)tp).Current.ToggleState switch { ToggleState.On => "on", ToggleState.Off => "off", _ => "indeterminate" };
+                case "selected":
+                    return el.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var sp) ? (((SelectionItemPattern)sp).Current.IsSelected ? "true" : "false") : null;
+                case "expanded":
+                    if (!el.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out var ep)) return null;
+                    return ((ExpandCollapsePattern)ep).Current.ExpandCollapseState is ExpandCollapseState.Expanded or ExpandCollapseState.PartiallyExpanded ? "expanded" : "collapsed";
+                case "text":
+                    if (el.TryGetCurrentPattern(TextPattern.Pattern, out var txp)) return ((TextPattern)txp).DocumentRange.GetText(4000);
+                    if (el.TryGetCurrentPattern(ValuePattern.Pattern, out var vp2)) return ((ValuePattern)vp2).Current.Value;
+                    return el.Current.Name;
+                default: return null;
+            }
+        }
+        catch (Exception ex) when (IsGone(ex) || ex is InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     // ---------------- UI Automation ----------------
@@ -257,10 +336,11 @@ internal static class Resolver
         cr.Add(AutomationElement.ControlTypeProperty);
         cr.Add(AutomationElement.AutomationIdProperty);
         cr.Add(AutomationElement.ClassNameProperty);
+        cr.Add(AutomationElement.IsOffscreenProperty);
         return cr;
     }
 
-    public sealed record ElInfo(string Name, string Role, string AutomationId, string ClassName, RectangleF? Rect);
+    public sealed record ElInfo(string Name, string Role, string AutomationId, string ClassName, RectangleF? Rect, bool Offscreen = false);
 
     /// <summary>Reads element properties; null if the element vanished meanwhile.</summary>
     public static ElInfo? Read(AutomationElement e, bool cached)
@@ -268,7 +348,9 @@ internal static class Resolver
         try
         {
             var info = cached ? e.Cached : e.Current;
-            return new ElInfo(info.Name ?? "", RoleName(info.ControlType), info.AutomationId ?? "", info.ClassName ?? "", ToRect(info.BoundingRectangle));
+            bool off = false;
+            try { off = info.IsOffscreen; } catch (InvalidOperationException) { }
+            return new ElInfo(info.Name ?? "", RoleName(info.ControlType), info.AutomationId ?? "", info.ClassName ?? "", ToRect(info.BoundingRectangle), off);
         }
         catch (Exception ex) when (IsGone(ex))
         {
@@ -332,7 +414,7 @@ internal static class Resolver
 
     private static bool Matches(ElementSpec s, ElInfo i)
     {
-        if (i.Rect == null) return false;
+        if (i.Rect == null || i.Offscreen) return false;   // apps like FL hide closed windows instead of destroying them
         if (s.Name != null && !(s.NameExact ? i.Name.Equals(s.Name, StringComparison.OrdinalIgnoreCase)
                                             : i.Name.Contains(s.Name, StringComparison.OrdinalIgnoreCase))) return false;
         if (s.Role != null && !s.Role.Split('|').Any(r => r.Trim().Equals(i.Role, StringComparison.OrdinalIgnoreCase))) return false;

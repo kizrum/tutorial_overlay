@@ -18,6 +18,8 @@ internal sealed class CardModel
     public int Done, Required;
     public bool Completed;
     public bool CanBack, CanUndo;
+    public string? Hint, HintTitle, Issue;
+    public bool HelpPending, Highlighting, Review;
     public List<(string label, bool done)> Checklist = new();
     public List<CardButton> Extra = new();
     public HashSet<string> Controls = new();
@@ -31,7 +33,7 @@ internal sealed class CardModel
 /// All mutable state lives here behind one lock. Tool calls, the click consumer and the UI tick all take it;
 /// the UI thread then renders from the snapshot it built.
 /// </summary>
-internal static class Engine
+internal static partial class Engine
 {
     public static readonly object Sync = new();
     public static bool Animate = true;
@@ -49,6 +51,9 @@ internal static class Engine
 
     public static Tutorial? Tutorial => _tut;
 
+    /// <summary>Where the step card currently is (boxed Rectangle, set by the UI thread; null = hidden).</summary>
+    public static volatile object? CardRect;
+
     // =========================================================== free marks (draw / clear)
 
     public static List<string> Draw(JsonNode args)
@@ -59,7 +64,7 @@ internal static class Engine
             var defaults = J.Has(args, "anchor") ? AnchorSpec.Parse(J.Get(args, "anchor"), _tut?.Defaults) : _tut?.Defaults;
             var markNodes = J.Items(J.Get(args, "marks")).ToList();
             if (markNodes.Count == 0) markNodes.Add(args);
-            foreach (var n in markNodes)
+            foreach (var n in markNodes.SelectMany(Grid.Expand))
             {
                 var m = Mark.Parse(n, defaults, J.Str(n, "id") ?? $"m{++_freeCounter}");
                 if (!J.Has(n, "anchor") && defaults != null) m.Anchor = defaults;
@@ -91,6 +96,7 @@ internal static class Engine
         lock (Sync)
         {
             spec = J.Unwrap(J.Get(spec, "spec")) ?? spec;
+            ApplySettings(Settings.Global.Clone().Apply(spec));
             var t = new Tutorial
             {
                 Title = J.Str(spec, "title") ?? "",
@@ -98,7 +104,7 @@ internal static class Engine
                 Toggle = J.Bool(spec, "toggle") ?? false,
                 Dim = J.Num(spec, "dim") is double d ? (float)d : null,
                 AdvanceDelayMs = J.Int(spec, "advanceDelayMs") ?? 450,
-                HideWhenInactive = J.Bool(spec, "hideWhenInactive") ?? HideWhenInactiveDefault,
+                HideWhenInactive = J.Bool(spec, "hideWhenInactive") ?? Settings.Current.HideWhenInactive ?? HideWhenInactiveDefault,
             };
             t.Defaults = AnchorSpec.Parse(J.Get(spec, "anchor") ?? new JsonObject { ["process"] = J.Str(spec, "app") ?? J.Str(spec, "process") }, null);
             if (J.Str(spec, "window") is string w && t.Defaults.Window == null) t.Defaults.Window = w;
@@ -164,6 +170,7 @@ internal static class Engine
             if (_tut is { Active: true })
             {
                 _tut.State = "stopped";
+                ApplySettings(Settings.Global);
                 Events.Emit("tutorial_stopped", new() { ["title"] = _tut.Title, ["index"] = _tut.Index, ["reason"] = "agent" });
             }
             _stepVersion++;
@@ -197,8 +204,16 @@ internal static class Engine
                 case "undo":
                     Undo(source);
                     break;
+                case "help":
+                case "cant_find":
+                    RequestHelp("cant_find", source);
+                    break;
+                case "dont_understand":
+                    RequestHelp("dont_understand", source);
+                    break;
                 case "stop":
                     t.State = "stopped";
+                    ApplySettings(Settings.Global);
                     Events.Emit("tutorial_stopped", new() { ["title"] = t.Title, ["index"] = t.Index, ["reason"] = source });
                     _stepVersion++;
                     break;
@@ -231,16 +246,25 @@ internal static class Engine
         }
     }
 
+    public static void ApplySettings(Settings s)
+    {
+        Settings.Current = s;
+        Palette.Accent = s.Accent;
+    }
+
     private static Tutorial Require() => _tut is { Active: true } t ? t : throw new InvalidOperationException("no active tutorial");
 
     private static void Enter(int idx, string? source = null)
     {
         var t = _tut!;
+        bool back = t.Index >= 0 && idx < t.Index;
         t.Index = idx;
         t.AdvanceAt = null;
         t.CompletedHow = null;
         var s = t.Steps[idx];
         s.ResetRuntime();
+        // coming back must not bounce straight forward again because the step's goal is already true
+        s.Review = back;
         _stepVersion++;
         Events.Emit("step_started", new()
         {
@@ -279,6 +303,7 @@ internal static class Engine
         else
         {
             t.State = "finished";
+            ApplySettings(Settings.Global);
             Events.Emit("tutorial_finished", new() { ["title"] = t.Title, ["total"] = t.Steps.Count });
         }
         _stepVersion++;
@@ -297,7 +322,7 @@ internal static class Engine
 
     // =========================================================== clicks (click-consumer thread)
 
-    public static void HandleClick(ClickEvent c)
+    private static void HandleClick(InputEvent c)
     {
         var pt = new PointF(c.X, c.Y);
         var (_, rootPid, childPid) = Native.HitWindow(pt);
@@ -326,9 +351,16 @@ internal static class Engine
 
             if (best != null)
             {
+                // a modal dialog of the app is open: the click never reaches the main window
+                if (step != null && step.Targets.Contains(best) && BlockingDialog(step) is string dialog && Native.HitWindow(pt).root != GetForegroundWindow())
+                {
+                    Events.Emit("blocked", new() { ["step"] = t!.Index, ["mark"] = best.Id, ["dialog"] = dialog, ["x"] = c.X, ["y"] = c.Y });
+                    return;
+                }
                 OnHit(best, step, pt, c.Button);
                 return;
             }
+            if (step != null && step.Targets.Any(m => m.OpensArmedAt != null)) return;
             if (step != null && step.Targets.Any(m => m.Geo != null && (m.Geo.A.Pids.Contains(rootPid) || m.Geo.A.Pids.Contains(childPid))))
             {
                 var nearest = step.Targets.Where(m => m.Geo != null && m.Geo.Hits.Count > 0 && !m.Satisfied)
@@ -340,8 +372,15 @@ internal static class Engine
                     ev["distance"] = (int)nearest.d;
                     ev["rel"] = J.PtJson(new PointF(pt.X - nearest.m.Geo!.A.P.X, pt.Y - nearest.m.Geo.A.P.Y));
                     if (nearest.m.Geo.A.Bounds is RectangleF ab) ev["relToBounds"] = J.PtJson(new PointF(pt.X - ab.X, pt.Y - ab.Y));
+                    if (nearest.d <= 5 * nearest.m.Geo.A.Scale && nearest.m.Button != "any" && nearest.m.Button != c.Button)
+                    {
+                        ev["wrongButton"] = true;
+                        ev["expectedButton"] = nearest.m.Button;
+                    }
                 }
                 Events.Emit("miss", ev);
+                step.Misses.Add((JsonObject)ev.DeepClone());
+                if (step.Misses.Count > 8) step.Misses.RemoveAt(0);
             }
         }
     }
@@ -354,7 +393,15 @@ internal static class Engine
         var g = m.Geo!;
         m.Hits++;
         string kind;
-        if (m.Check != null) kind = "hit";
+        if (m.Opens != null && !m.Satisfied)
+        {
+            // the click only counts once the window / pane it should open actually shows up
+            kind = "hit";
+            m.OpensArmedAt = DateTime.UtcNow;
+            m.OpensBefore = Resolver.MatchingWindows(m.Opens);
+            m.OpensPresentBefore = Resolver.Get(m.Opens.Key)?.Found == true;
+        }
+        else if (m.Check != null) kind = "hit";
         else if (!m.Dismissed)
         {
             kind = "hit";
@@ -391,6 +438,7 @@ internal static class Engine
             ev["required"] = step.Required.Count();
         }
         if (m.Check != null) ev["checkPending"] = true;
+        if (m.OpensArmedAt != null) ev["waitingFor"] = m.Opens!.Describe();
         Events.Emit(kind, ev);
     }
 
@@ -416,21 +464,29 @@ internal static class Engine
 
             // what the resolver should keep fresh
             var anchors = marks.Select(m => m.Anchor)
+                .Concat(marks.Where(m => m.Opens != null).Select(m => m.Opens!))
                 .Concat(marks.Where(m => m.Check?.Anchor != null).Select(m => m.Check!.Anchor!))
                 .Concat(step?.Until.Select(c => c.Anchor ?? c.Pixel?.Anchor).OfType<AnchorSpec>() ?? Enumerable.Empty<AnchorSpec>())
                 // the tutorial's main window stays resolved so the card can pick the right monitor
-                .Concat(t is { Active: true } && t.Defaults.Process != null ? new[] { t.Defaults } : Array.Empty<AnchorSpec>());
+                .Concat(t is { Active: true } && t.Defaults.Process != null ? new[] { t.Defaults } : Array.Empty<AnchorSpec>())
+                .Concat(InputAnchors(step));
             Resolver.SetWanted(anchors, t is { Active: true } && t.Defaults.Process != null ? new[] { t.Defaults.Process } : Array.Empty<string>());
 
+            InputHook.KeysWanted = WantsKeys(step);
             int fgPid = ForegroundPid();
             foreach (var m in marks) ComputeMark(m, step != null && step.Targets.Contains(m) ? t : null, fgPid, now);
+            if (step is { Sequence: true }) ApplySequence(step, now);
             var visible = marks.Where(m => m.Geo != null).ToList();
             Declutter(visible);
 
-            if ((now - _lastPixel).TotalMilliseconds >= 150)
+            bool sampleNow = (now - _lastPixel).TotalMilliseconds >= 150;
+            if (sampleNow) _lastPixel = now;
+            var probes = new List<(PointF p, int r)>();
+            foreach (var m in visible.Where(m => m.Check != null))
             {
-                _lastPixel = now;
-                foreach (var m in visible.Where(m => m.Check != null)) RunPixelCheck(m);
+                if (ProbePoint(m) is not { } pp) continue;
+                probes.Add((pp.pt, m.Check!.Radius));
+                if (sampleNow) RunPixelCheck(m, pp.pt, pp.ag);
             }
 
             // compose the canvas
@@ -457,7 +513,33 @@ internal static class Engine
                 f.Card.Avoid.Add(g.Bounds);
             }
             foreach (var m in marks.Where(m => m.Geo == null)) m.ShownAt = null;
+            if (step != null) AddDragVisuals(step, sc, f.Card.Avoid, fgPid);
+            if (step != null && t!.AdvanceAt == null) AddDialogVisuals(step, sc, f.Card.Avoid);
+            CheckOpens(marks, step, now);
+            AddPickVisuals(sc, f.Card.Avoid);
+            if (step?.HighlightUntil is DateTime hu)
+            {
+                if (now < hu)
+                {
+                    dim = Math.Max(dim, 0.55f);
+                    if (now >= step.NextPing)
+                    {
+                        step.NextPing = now.AddMilliseconds(700);
+                        foreach (var m in step.Targets.Where(m => m.Geo != null && !m.Satisfied))
+                        {
+                            var h0 = m.Geo!.Hits.FirstOrDefault();
+                            var c0 = h0 == null ? m.Geo.Center : h0.Circle ? h0.C : new PointF(h0.Rect.X + h0.Rect.Width / 2, h0.Rect.Y + h0.Rect.Height / 2);
+                            float r0 = h0 == null ? 20 * m.Geo.A.Scale : h0.Circle ? h0.R : Math.Max(h0.Rect.Width, h0.Rect.Height) / 2;
+                            Ripples.Add(new Ripple { C = c0, R0 = r0, Color = Palette.Accent, T0 = now, Scale = m.Geo.A.Scale * 2.2f });
+                        }
+                    }
+                }
+                else step.HighlightUntil = null;
+            }
             sc.Dim = dim;
+            sc.Probes.AddRange(probes);
+            if (step != null) sc.Probes.AddRange(ConditionProbes(step));
+            if (_pick != null && Native.GetCursorPos(out var cur)) sc.Probes.Add((new PointF(cur.X, cur.Y), 1));
             if (dim > 0) sc.Pulse = 1f;    // keep full-screen frames static
             Ripples.RemoveAll(r => (now - r.T0).TotalMilliseconds > Ripple.DurationMs);
             sc.Ripples.AddRange(Ripples);
@@ -485,10 +567,77 @@ internal static class Engine
         return sb.ToString();
     }
 
+    /// <summary>Screenshot / recording tools: their windows neither take the user "out of the app" nor cover marks.</summary>
+    private static readonly HashSet<string> CaptureTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ScreenClippingHost", "SnippingTool", "ScreenSketch", "ShareX", "Greenshot", "Lightshot", "Snagit32", "SnagitEditor",
+        "obs64", "obs32", "flameshot", "PicPick", "Monosnap",
+    };
+
+    private static int _lastAppFgPid;
+
+    /// <summary>
+    /// A titled window of the same app is in front of the window the step's targets live in — typically a modal
+    /// dialog ("Pattern 2 name"): clicks on the main window are swallowed by the app until it is closed.
+    /// Context menus have no title and sequence targets inside the dialog are fine.
+    /// </summary>
+    private static string? BlockingDialog(Step s) => BlockingDialogWindow(s)?.title;
+
+    private static (IntPtr hwnd, string title, Rectangle frame)? BlockingDialogWindow(Step s)
+    {
+        var fg = GetForegroundWindow();
+        if (fg == IntPtr.Zero) return null;
+        var roots = s.Targets.Where(m => m.Geo != null && !m.Satisfied).Select(m => m.Geo!.A.Root).Where(r => r != IntPtr.Zero).ToHashSet();
+        int[] pids = s.Targets.Where(m => m.Geo != null).SelectMany(m => m.Geo!.A.Pids).ToArray();
+        if (roots.Count == 0 && _tut?.Defaults is { Process: not null } d && AnchorNow(d, out _) is AnchorGeo main0)
+        {
+            // a step without visible targets (e.g. "press F4"): compare against the app's main window
+            roots.Add(main0.Root);
+            pids = main0.Pids;
+        }
+        if (roots.Count == 0 || roots.Contains(fg)) return null;
+        int pid = Native.ProcessId(fg);
+        if (!pids.Contains(pid)) return null;
+        // a sequence step that points into this very window is not "blocked" by it
+        if (s.Targets.Any(m => !m.Satisfied && m.Geo?.A.Root == fg)) return null;
+        var title = Native.WindowTitle(fg);
+        if (title.Length == 0) return null;
+        var frame = Native.FrameRect(fg);
+        var main = Native.FrameRect(roots.First());
+        if ((long)frame.Width * frame.Height >= (long)main.Width * main.Height * 0.6) return null;   // another big window, not a dialog
+        return (fg, title, frame);
+    }
+
+    /// <summary>Frames the app's blocking dialog so the user sees what has to be answered first.</summary>
+    private static void AddDialogVisuals(Step s, Scene sc, List<RectangleF> avoid)
+    {
+        if (BlockingDialogWindow(s) is not { } d) return;
+        var center = new PointF(d.frame.X + d.frame.Width / 2f, d.frame.Y + d.frame.Height / 2f);
+        float k = Native.ScaleAt(center);
+        var r = (RectangleF)d.frame;
+        r.Inflate(6 * k, 6 * k);
+        sc.Prims.Add((new Prim { Kind = PrimKind.Rect, Rect = r, Color = Palette.Warn, Width = 3.5f * k, Radius = 8 * k, Scale = k }, 1f));
+        var text = Settings.Current.Text.DialogMark;
+        float px = 15 * k;
+        var sz = Theme.Measure(text, Theme.Font(px), 360 * k);
+        float w = sz.Width + 24 * k + 4 * k, h = sz.Height + 16 * k;
+        var mon = Native.MonitorRectAt(center);
+        float x = Math.Clamp(center.X - w / 2, mon.Left + 4 * k, mon.Right - w - 4 * k);
+        float y = r.Top - 10 * k - h;
+        if (y < mon.Top + 4 * k) y = r.Bottom + 10 * k;
+        var box = new RectangleF(x, y, w, h);
+        sc.Prims.Add((new Prim { Kind = PrimKind.Label, Rect = box, Text = text, Size = px, Color = Palette.Warn, Scale = k, Radius = 8 * k }, 1f));
+        avoid.Add(r);
+        avoid.Add(box);
+    }
+
     private static int ForegroundPid()
     {
         var fg = GetForegroundWindow();
-        return fg == IntPtr.Zero ? 0 : Native.ProcessId(fg);
+        int pid = fg == IntPtr.Zero ? 0 : Native.ProcessId(fg);
+        if (pid != 0 && CaptureTools.Contains(ProcName(pid))) return _lastAppFgPid;
+        _lastAppFgPid = pid;
+        return pid;
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
@@ -510,6 +659,63 @@ internal static class Engine
         if (fgPid == 0) return false;
         if (pids.Contains(fgPid)) return true;
         return process != null && ProcName(fgPid).Equals(process, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Is the user in one of the apps this step is about? (the tutorial's app, any target's app, the window a
+    /// click should open, condition anchors). A step whose click opens another program keeps running there.
+    /// </summary>
+    private static bool StepActive(Tutorial t, Step s, int fgPid)
+    {
+        var procs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (t.Defaults.Process != null) procs.Add(t.Defaults.Process);
+        foreach (var m in s.Targets)
+        {
+            if (m.Anchor.Process != null) procs.Add(m.Anchor.Process);
+            if (m.Opens != null)
+            {
+                if (m.Opens.Process == null && m.OpensArmedAt != null) return true;   // "any process" while waiting
+                if (m.Opens.Process != null) procs.Add(m.Opens.Process);
+            }
+        }
+        foreach (var c in s.Until)
+            foreach (var a in new[] { c.Anchor, c.Pixel?.Anchor, c.From?.Anchor, c.To?.Anchor })
+                if (a?.Process != null) procs.Add(a.Process);
+        if (procs.Count == 0) return true;
+        return fgPid != 0 && procs.Contains(ProcName(fgPid));
+    }
+
+    /// <summary>Armed "opens" targets: satisfied by a NEW matching window, or a pane that was absent at click time.</summary>
+    private static void CheckOpens(List<Mark> marks, Step? step, DateTime now)
+    {
+        foreach (var m in marks.Where(m => m.OpensArmedAt != null))
+        {
+            var a = m.Opens!;
+            bool opened = false;
+            string? what = null;
+            if (a.Path.Count > 0 || a.Title != null)
+            {
+                var r = Resolver.Get(a.Key);
+                if (r is { Found: true } && !m.OpensPresentBefore) { opened = true; what = Native.WindowTitle(r.Root); }
+            }
+            if (!opened && a.Path.Count == 0)
+            {
+                var fresh = Resolver.MatchingWindows(a).Where(h => m.OpensBefore == null || !m.OpensBefore.Contains(h)).ToList();
+                if (fresh.Count > 0) { opened = true; what = Native.WindowTitle(fresh[0]); }
+            }
+            if (opened)
+            {
+                m.OpensArmedAt = null;
+                m.Dismissed = true;
+                if (step != null && step.Targets.Contains(m)) step.History.Push((m, false));
+                Events.Emit("opened", new() { ["mark"] = m.Id, ["name"] = m.Label, ["window"] = what, ["expected"] = a.Describe(), ["step"] = _tut?.Index });
+            }
+            else if ((now - m.OpensArmedAt!.Value).TotalMilliseconds > m.OpensTimeoutMs)
+            {
+                m.OpensArmedAt = null;
+                Events.Emit("no_effect", new() { ["mark"] = m.Id, ["name"] = m.Label, ["expected"] = a.Describe(), ["step"] = _tut?.Index, ["waitedMs"] = m.OpensTimeoutMs });
+            }
+        }
     }
 
     public static AnchorGeo? AnchorNow(AnchorSpec a, out string reason)
@@ -554,8 +760,33 @@ internal static class Engine
             if (!OnAnyMonitor(geo.Center)) { m.Geo = null; m.Visibility = "offscreen"; return; }
             if (!ShowsAnchorWindow(geo.Center, ag)) { m.Geo = null; m.Visibility = "occluded"; return; }
         }
+        if (m.AutoColor == null && Settings.Current.AutoColor && !m.Anchor.IsScreen)
+        {
+            // one colour per step, so its targets don't look like different kinds of things
+            var st = t?.Current;
+            m.AutoColor = st?.AutoColor ?? PickContrast(geo);
+            if (st != null) st.AutoColor ??= m.AutoColor;
+            geo = Layout.Build(m, ag, m.Satisfied);
+        }
         m.Geo = geo;
         m.Visibility = "visible";
+    }
+
+    /// <summary>Samples the app around the target (a ring just outside it, plus its centre) once per mark.</summary>
+    private static Color PickContrast(MarkGeo geo)
+    {
+        var tb = geo.TargetBounds;
+        var c = new PointF(tb.X + tb.Width / 2, tb.Y + tb.Height / 2);
+        float rx = tb.Width / 2 + 10 * geo.A.Scale, ry = tb.Height / 2 + 10 * geo.A.Scale;
+        var samples = new List<Color> { ScreenCapture.Sample(c, 1) };
+        for (int i = 0; i < 8; i++)
+        {
+            double a = i * Math.PI / 4;
+            var p = new PointF(c.X + (float)Math.Cos(a) * rx, c.Y + (float)Math.Sin(a) * ry);
+            if (Native.HitWindow(p).rootPid == OwnPid) continue;     // our card is not the app
+            samples.Add(ScreenCapture.Sample(p, 1));
+        }
+        return Contrast.Pick(samples);
     }
 
     private static bool OnAnyMonitor(PointF p) => Native.VirtualScreen().Contains((int)p.X, (int)p.Y)
@@ -572,6 +803,7 @@ internal static class Engine
         if (root == IntPtr.Zero) return false;
         if (rootPid == OwnPid) return true;
         if (root == ag.Root) return true;
+        if (CaptureTools.Contains(ProcName(rootPid))) return true;
         if (ag.Pids.Contains(rootPid) || ag.Pids.Contains(childPid))
         {
             var cls = Native.ClassName(root);
@@ -580,13 +812,30 @@ internal static class Engine
         return false;
     }
 
-    private static void RunPixelCheck(Mark m)
+    private static (PointF pt, AnchorGeo ag)? ProbePoint(Mark m)
     {
         var chk = m.Check!;
         AnchorGeo? ag = chk.Anchor == null ? m.Geo!.A : AnchorNow(chk.Anchor, out _);
-        if (ag == null) return;
+        if (ag == null) return null;
         var pt = chk.At is PointF at ? new PointF(ag.P.X + at.X, ag.P.Y + at.Y) : m.Geo!.Center;
-        if (!ShowsAnchorWindow(pt, ag)) return;          // covered: don't conclude anything
+        return (pt, ag);
+    }
+
+    private static IEnumerable<(PointF p, int r)> ConditionProbes(Step s)
+    {
+        foreach (var c in s.Until.Where(c => c.Type == "pixel" && c.Pixel?.Anchor != null))
+        {
+            var ag = AnchorNow(c.Pixel!.Anchor!, out _);
+            if (ag == null) continue;
+            yield return (c.Pixel.At is PointF pa ? new PointF(ag.P.X + pa.X, ag.P.Y + pa.Y) : ag.P, c.Pixel.Radius);
+        }
+    }
+
+    private static void RunPixelCheck(Mark m, PointF pt, AnchorGeo ag)
+    {
+        var chk = m.Check!;
+        if (!m.Anchor.IsScreen && !ShowsAnchorWindow(pt, ag)) return;   // covered: don't conclude anything
+        if (Native.HitWindow(pt).rootPid == OwnPid) return; // under our card / a button: can't see the app there
         var color = ScreenCapture.Sample(pt, chk.Radius);
         bool ok = chk.Evaluate(color);
         if (m.CheckOk != ok)
@@ -721,7 +970,7 @@ internal static class Engine
             return;
         }
         // frozen while the user is elsewhere: a minimised / backgrounded app must not look "closed"
-        if (t.Defaults.Process != null && !AppActive(Array.Empty<int>(), t.Defaults.Process, fgPid)) return;
+        if (!StepActive(t, s, fgPid)) return;
         if ((now - _lastCond).TotalMilliseconds < 100) return;
         _lastCond = now;
 
@@ -735,6 +984,9 @@ internal static class Engine
                     break;
                 case "count":
                     c.Met = s.Targets.Sum(m => m.Hits) >= Math.Max(1, c.Count);
+                    break;
+                case "uia":
+                    EvalUia(c);
                     break;
                 case "appear":
                 case "disappear":
@@ -758,7 +1010,8 @@ internal static class Engine
                 }
             }
         }
-        var active = s.Until.Where(c => c.Type != "manual").ToList();
+        foreach (var c in s.Until) if (!c.Met) c.SeenUnmet = true;
+        var active = s.Until.Where(c => c.Type != "manual" && (!s.Review || c.SeenUnmet)).ToList();
         if (active.Count == 0) return;
         var met = active.FirstOrDefault(c => c.Met);
         bool done = s.UntilAll ? active.All(c => c.Met) : met != null;
@@ -771,9 +1024,14 @@ internal static class Engine
         if (t == null || !t.Active) return;
         var s = t.Current;
         // the card follows the same rule as the marks: only while the user is in the app
-        if (t.HideWhenInactive && t.Defaults.Process != null && !AppActive(Array.Empty<int>(), t.Defaults.Process, fgPid)) return;
+        if (t.HideWhenInactive && s != null && !StepActive(t, s, fgPid)) return;
+        if (t.HideWhenInactive && s == null && t.Defaults.Process != null && !AppActive(Array.Empty<int>(), t.Defaults.Process, fgPid)) return;
         var appGeo = t.Defaults.Process != null ? AnchorNow(t.Defaults, out _) : null;
         card.Visible = true;
+        // menus / dialogs / plugin windows of the app: the card must not cover them either
+        var vs = Native.VirtualScreen();
+        foreach (var w in Resolver.Popups)
+            if (w.Frame.IntersectsWith(vs)) card.Avoid.Add(w.Frame);
         card.State = t.State;
         card.Index = t.Index;
         card.Total = t.Steps.Count;
@@ -781,8 +1039,8 @@ internal static class Engine
         card.Completed = t.AdvanceAt != null;
         if (t.State == "waiting" || s == null)
         {
-            card.Title = t.Title.Length > 0 ? t.Title : "Туториал";
-            card.Text = "Готовлю следующий шаг…";
+            card.Title = t.Title.Length > 0 ? t.Title : Settings.Current.Text.Tutorial;
+            card.Text = Settings.Current.Text.Preparing;
             card.Controls = new HashSet<string> { "stop" };
         }
         else
@@ -795,13 +1053,118 @@ internal static class Engine
             card.CanBack = t.Index > 0;
             card.CanUndo = s.History.Count > 0;
             if (s.Checklist ?? req.Count(m => m.Label != null) >= 2)
-                for (int i = 0; i < req.Count; i++) card.Checklist.Add((req[i].Label ?? $"Цель {i + 1}", req[i].Satisfied));
+                for (int i = 0; i < req.Count; i++) card.Checklist.Add((req[i].Label ?? string.Format(Settings.Current.Text.Target, i + 1), req[i].Satisfied));
             card.Extra = s.Buttons;
-            card.Controls = s.Controls ?? new HashSet<string> { "back", "undo", "skip", "done", "stop" };
+            card.Hint = s.Hint;
+            card.HintTitle = s.HintTitle;
+            card.HelpPending = s.HelpPending;
+            card.Highlighting = s.HighlightUntil != null;
+            card.Issue = TargetIssue(s);
+            card.Review = s.Review && !s.Until.Any(c => c.SeenUnmet && c.Type != "manual");
+            card.Controls = s.Controls ?? new HashSet<string> { "back", "undo", "skip", "done", "stop", "help" };
             var firstVisible = s.Targets.FirstOrDefault(m => m.Geo != null);
             if (firstVisible != null) card.Focus = firstVisible.Geo!.Center;
         }
         if (card.Focus == default && appGeo?.Bounds is RectangleF ab) card.Focus = new PointF(ab.X + ab.Width / 2, ab.Y + ab.Height / 2);
+    }
+
+    // =========================================================== sequence
+
+    /// <summary>
+    /// Sequence steps show only the first unfinished target. If that target's window vanishes (the context menu
+    /// was closed without choosing) the previous click is taken back, so the chain starts over.
+    /// </summary>
+    private static void ApplySequence(Step s, DateTime now)
+    {
+        int k = s.Targets.FindIndex(m => !m.Satisfied && !m.Optional);
+        for (int i = k + 1; k >= 0 && i < s.Targets.Count; i++)
+        {
+            s.Targets[i].Geo = null;
+            s.Targets[i].Visibility = "later";
+        }
+        if (k <= 0) { s.SeqMissingSince = null; return; }
+        var cur = s.Targets[k];
+        var prev = s.Targets[k - 1];
+        bool gone = cur.Visibility.Contains("not found") || cur.Visibility is "no visible window" or "closed" or "hidden";
+        if (!gone || cur.OpensArmedAt != null || prev.Check != null) { s.SeqMissingSince = null; return; }
+        s.SeqMissingSince ??= now;
+        if ((now - s.SeqMissingSince.Value).TotalMilliseconds < 1200) return;   // menus take a moment to appear
+        s.SeqMissingSince = null;
+        prev.Dismissed = false;
+        prev.ShownAt = null;
+        Events.Emit("sequence_reset", new()
+        {
+            ["step"] = _tut?.Index, ["from"] = cur.Id, ["back"] = prev.Id, ["reason"] = cur.Visibility,
+            ["note"] = "the follow-up target's window disappeared (menu closed?) — the previous target is shown again",
+        });
+        _stepVersion++;
+    }
+
+    // =========================================================== help
+
+    /// <summary>Why the user can't see this step's targets (null when at least one is visible).</summary>
+    private static string? TargetIssue(Step s)
+    {
+        if (BlockingDialog(s) is string dialog) return string.Format(Settings.Current.Text.IssueDialog, dialog);
+        var open = s.Targets.Where(m => !m.Satisfied && (m.HasHitArea || m.HasButtons || m.Check != null)).ToList();
+        if (open.Count == 0 || open.Any(m => m.Visibility == "visible")) return null;
+        var t = Settings.Current.Text;
+        var v = open[0].Visibility;
+        return v switch
+        {
+            "minimized" => t.IssueMinimized,
+            "occluded" => t.IssueOccluded,
+            "inactive" => t.IssueInactive,
+            "offscreen" => t.IssueOffscreen,
+            "process not running" => t.IssueNotRunning,
+            "resolving" or "searching" => null,
+            _ => t.IssueMissing,
+        };
+    }
+
+    /// <summary>The user says they can't find the target / don't understand the step.</summary>
+    public static void RequestHelp(string reason, string source)
+    {
+        lock (Sync)
+        {
+            var t = _tut;
+            var s = t is { State: "running" } ? t.Current : null;
+            if (s == null) return;
+            s.HelpPending = true;
+            if (reason == "cant_find") { s.HighlightUntil = DateTime.UtcNow.AddSeconds(6); s.NextPing = default; }
+            Native.GetCursorPos(out var cur);
+            Events.Emit("help", new()
+            {
+                ["reason"] = reason, ["source"] = source, ["step"] = t!.Index, ["id"] = s.Id, ["title"] = s.Title,
+                ["targets"] = new JsonArray(s.Targets.Select(m => (JsonNode)MarkJson(m)).ToArray()),
+                ["issue"] = TargetIssue(s),
+                ["blockingDialog"] = BlockingDialog(s),
+                ["recentMisses"] = new JsonArray(s.Misses.Select(x => (JsonNode)x.DeepClone()).ToArray()),
+                ["cursor"] = new JsonArray(cur.X, cur.Y),
+                ["foreground"] = ForegroundInfo(),
+                ["advice"] = reason == "cant_find"
+                    ? "targets are being highlighted for 6 s; consider screenshot(includeOverlay) to verify placement, then hint() or re-draw"
+                    : "explain the step in simpler words with hint(text), or split it with append_steps/insertAt",
+            });
+            _stepVersion++;
+        }
+    }
+
+    /// <summary>The agent's answer on the card (cleared when the step changes).</summary>
+    public static JsonObject SetHint(JsonNode args)
+    {
+        lock (Sync)
+        {
+            var t = Require();
+            if (J.Int(args, "expectIndex") is int e && e != t.Index) throw new InvalidOperationException($"current step is {t.Index}, not {e}");
+            var s = t.Current ?? throw new InvalidOperationException("no current step");
+            s.Hint = J.Str(args, "text");
+            s.HintTitle = J.Str(args, "title");
+            s.HelpPending = false;
+            if (J.Bool(args, "highlight") == true) { s.HighlightUntil = DateTime.UtcNow.AddSeconds(J.Int(args, "seconds") ?? 6); s.NextPing = default; }
+            _stepVersion++;
+            return TutorialJson();
+        }
     }
 
     // =========================================================== status
@@ -816,6 +1179,7 @@ internal static class Engine
                 ["marks"] = new JsonArray(Free.Select(m => (JsonNode)MarkJson(m)).ToArray()),
                 ["virtualScreen"] = J.RectJson(Native.VirtualScreen()),
                 ["foreground"] = ForegroundInfo(),
+                ["card"] = CardRect is Rectangle cr ? J.RectJson(cr) : null,
                 ["lastEventSeq"] = Events.LastSeq,
             };
             return o;

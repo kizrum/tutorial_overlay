@@ -1,0 +1,235 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Text.Json.Nodes;
+
+namespace TutorialOverlay;
+
+/// <summary>A key chord such as Ctrl+Alt+Right.</summary>
+internal readonly record struct Chord(uint Mods, uint Vk)
+{
+    public override string ToString() => Keys.Format(this);
+}
+
+/// <summary>Key names ⇄ virtual-key codes. Used for card hotkeys and for "key" step conditions.</summary>
+internal static class Keys
+{
+    private static readonly Dictionary<string, uint> Named = BuildNames();
+
+    private static Dictionary<string, uint> BuildNames()
+    {
+        var d = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["left"] = 0x25, ["up"] = 0x26, ["right"] = 0x27, ["down"] = 0x28,
+            ["enter"] = 0x0D, ["return"] = 0x0D, ["space"] = 0x20, ["tab"] = 0x09, ["esc"] = 0x1B, ["escape"] = 0x1B,
+            ["backspace"] = 0x08, ["delete"] = 0x2E, ["del"] = 0x2E, ["insert"] = 0x2D, ["ins"] = 0x2D,
+            ["home"] = 0x24, ["end"] = 0x23, ["pageup"] = 0x21, ["pgup"] = 0x21, ["pagedown"] = 0x22, ["pgdn"] = 0x22,
+            ["plus"] = 0xBB, ["minus"] = 0xBD, ["comma"] = 0xBC, ["period"] = 0xBE, ["slash"] = 0xBF,
+            ["numpad+"] = 0x6B, ["numpad-"] = 0x6D, ["numpad*"] = 0x6A, ["numpad/"] = 0x6F,
+            ["capslock"] = 0x14, ["printscreen"] = 0x2C, ["pause"] = 0x13,
+            ["→"] = 0x27, ["←"] = 0x25, ["↑"] = 0x26, ["↓"] = 0x28,
+        };
+        for (int i = 1; i <= 24; i++) d["f" + i] = (uint)(0x70 + i - 1);
+        for (int i = 0; i <= 9; i++) d["numpad" + i] = (uint)(0x60 + i);
+        return d;
+    }
+
+    private static readonly Dictionary<uint, string> Display = new()
+    {
+        [0x25] = "←", [0x26] = "↑", [0x27] = "→", [0x28] = "↓", [0x0D] = "Enter", [0x20] = "Space", [0x09] = "Tab",
+        [0x1B] = "Esc", [0x08] = "Backspace", [0x2E] = "Del", [0x2D] = "Ins", [0x24] = "Home", [0x23] = "End",
+        [0x21] = "PgUp", [0x22] = "PgDn", [0xBB] = "+", [0xBD] = "-",
+    };
+
+    public static Chord? Parse(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return null;
+        uint mods = 0, vk = 0;
+        // "Ctrl++" style: a trailing '+' is the key itself
+        var parts = s.Trim().EndsWith("++") ? s.Trim()[..^2].Split('+').Append("plus").ToArray() : s.Split('+');
+        foreach (var raw in parts)
+        {
+            var p = raw.Trim();
+            if (p.Length == 0) continue;
+            switch (p.ToLowerInvariant())
+            {
+                case "ctrl" or "control" or "ctl": mods |= Native.MOD_CONTROL; break;
+                case "alt": mods |= Native.MOD_ALT; break;
+                case "shift": mods |= Native.MOD_SHIFT; break;
+                case "win" or "meta" or "cmd": mods |= Native.MOD_WIN; break;
+                default:
+                    if (Named.TryGetValue(p, out var v)) vk = v;
+                    else if (p.Length == 1 && char.IsLetterOrDigit(p[0])) vk = char.ToUpperInvariant(p[0]);
+                    else return null;
+                    break;
+            }
+        }
+        return vk == 0 ? null : new Chord(mods, vk);
+    }
+
+    public static string Format(Chord c)
+    {
+        var mods = FormatMods(c.Mods);
+        return mods.Length > 0 ? mods + "+" + KeyName(c.Vk) : KeyName(c.Vk);
+    }
+
+    public static string FormatMods(uint mods)
+    {
+        var parts = new List<string>();
+        if ((mods & Native.MOD_CONTROL) != 0) parts.Add("Ctrl");
+        if ((mods & Native.MOD_ALT) != 0) parts.Add("Alt");
+        if ((mods & Native.MOD_SHIFT) != 0) parts.Add("Shift");
+        if ((mods & Native.MOD_WIN) != 0) parts.Add("Win");
+        return string.Join("+", parts);
+    }
+
+    public static string KeyName(uint vk)
+    {
+        if (Display.TryGetValue(vk, out var d)) return d;
+        if (vk >= 0x70 && vk <= 0x87) return "F" + (vk - 0x70 + 1);
+        if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) return ((char)vk).ToString();
+        return $"0x{vk:X2}";
+    }
+}
+
+/// <summary>User-visible strings of the card and helpers (ru / en).</summary>
+internal sealed class Loc
+{
+    public string Step = "ШАГ", Waiting = "ОЖИДАНИЕ", Tutorial = "Туториал", Preparing = "Готовлю следующий шаг…";
+    public string Back = "Назад", Skip = "Пропустить", Done = "Готово", Got = "Есть!";
+    public string Marked = "Отмечено {0} из {1}", Target = "Цель {0}";
+    public string HintDone = "готово", HintBack = "назад", HintSkip = "пропустить", HintUndo = "отменить", HintStop = "завершить";
+    public string PickTitle = "Укажите точку", PickText = "Кликните в нужное место. Esc — отмена.", PickCount = "Точка {0} из {1}";
+    public string Review = "Повтор шага — нажмите «Готово», чтобы продолжить.";
+    public string IssueDialog = "Сначала закройте окно «{0}» — пока оно открыто, программа не принимает клики.";
+    public string DialogMark = "Сначала подтвердите это окно (Enter) или закройте его";
+    public string CantFind = "Не вижу, куда жать", DontGet = "Не понимаю, что делать", Cancel = "Отмена", HintHelp = "помощь";
+    public string HelpSent = "Передал ассистенту — сейчас подскажу.", Highlighting = "Подсвечиваю, куда нажать…";
+    public string IssueMinimized = "Окно свёрнуто — разверните его.", IssueOccluded = "Нужное место закрыто другим окном.",
+        IssueInactive = "Переключитесь в нужное приложение.", IssueMissing = "Не нахожу нужный элемент на экране.",
+        IssueOffscreen = "Нужное место за пределами экрана.", IssueNotRunning = "Приложение не запущено.";
+
+    public static readonly Loc Ru = new();
+
+    public static readonly Loc En = new()
+    {
+        Step = "STEP", Waiting = "WAITING", Tutorial = "Tutorial", Preparing = "Preparing the next step…",
+        Back = "Back", Skip = "Skip", Done = "Done", Got = "Got it!",
+        Marked = "{0} of {1} done", Target = "Target {0}",
+        HintDone = "done", HintBack = "back", HintSkip = "skip", HintUndo = "undo", HintStop = "finish",
+        PickTitle = "Pick a point", PickText = "Click the spot. Esc cancels.", PickCount = "Point {0} of {1}",
+        Review = "Repeating this step — press Done to continue.",
+        IssueDialog = "Close the \"{0}\" window first — the app ignores clicks while it is open.",
+        DialogMark = "Confirm this window first (Enter) or close it",
+        CantFind = "I can't find where to click", DontGet = "I don't get what to do", Cancel = "Cancel", HintHelp = "help",
+        HelpSent = "Told the assistant — a hint is coming.", Highlighting = "Highlighting where to click…",
+        IssueMinimized = "The window is minimized — restore it.", IssueOccluded = "Another window covers the spot.",
+        IssueInactive = "Switch to the app.", IssueMissing = "Can't find the element on screen.",
+        IssueOffscreen = "The spot is off screen.", IssueNotRunning = "The app is not running.",
+    };
+
+    public static Loc For(string? lang) => (lang ?? "ru").StartsWith("en", StringComparison.OrdinalIgnoreCase) ? En : Ru;
+}
+
+/// <summary>
+/// Global defaults from %LOCALAPPDATA%\TutorialOverlay\config.json; a tutorial spec can override
+/// lang / accent / hotkeys for its own run.
+/// </summary>
+internal sealed class Settings
+{
+    public string Lang = "ru";
+    public Color Accent = Palette.DefaultAccent;
+    public Dictionary<string, Chord> Hotkeys = DefaultHotkeys();
+    public bool? Animate, HideWhenInactive;
+    /// <summary>
+    /// true: our windows are excluded from every capture (also the user's screenshots and recordings).
+    /// false (default): visible to the user's tools; our own probes look through holes, screenshot() hides briefly.
+    /// </summary>
+    public bool HideFromCapture;
+    /// <summary>Pick mark colours that contrast with the app around each target (explicit "color" still wins).</summary>
+    public bool AutoColor = true;
+
+    public static readonly string[] Actions = { "done", "back", "skip", "undo", "stop", "help" };
+
+    public static Dictionary<string, Chord> DefaultHotkeys() => new()
+    {
+        ["done"] = new Chord(Native.MOD_CONTROL | Native.MOD_ALT, 0x27),
+        ["back"] = new Chord(Native.MOD_CONTROL | Native.MOD_ALT, 0x25),
+        ["skip"] = new Chord(Native.MOD_CONTROL | Native.MOD_ALT, 0x28),
+        ["undo"] = new Chord(Native.MOD_CONTROL | Native.MOD_ALT, 'Z'),
+        ["stop"] = new Chord(Native.MOD_CONTROL | Native.MOD_ALT, 'X'),
+        ["help"] = new Chord(Native.MOD_CONTROL | Native.MOD_ALT, 'H'),
+    };
+
+    public static string FilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TutorialOverlay", "config.json");
+
+    public static Settings Global { get; private set; } = new();
+
+    /// <summary>What is in effect right now (global, or the running tutorial's overrides).</summary>
+    public static volatile Settings Current = Global;
+
+    public static void LoadGlobal()
+    {
+        try
+        {
+            if (!File.Exists(FilePath)) return;
+            var n = JsonNode.Parse(File.ReadAllText(FilePath));
+            Global = new Settings().Apply(n);
+            Current = Global;
+            Log.Info($"settings loaded from {FilePath}");
+        }
+        catch (Exception e) { Log.Warn($"config.json ignored: {e.Message}"); }
+    }
+
+    public Settings Clone() => new()
+    {
+        Lang = Lang, Accent = Accent, Hotkeys = new Dictionary<string, Chord>(Hotkeys), Animate = Animate, HideWhenInactive = HideWhenInactive,
+        HideFromCapture = HideFromCapture, AutoColor = AutoColor,
+    };
+
+    /// <summary>Overlay the fields present in <paramref name="n"/>.</summary>
+    public Settings Apply(JsonNode? n)
+    {
+        if (n == null) return this;
+        if ((J.Str(n, "lang") ?? J.Str(n, "language")) is string lang) Lang = lang;
+        if (J.Str(n, "accent") is string acc) Accent = J.ParseColor(acc, Accent);
+        if (J.Bool(n, "animate") is bool an) Animate = an;
+        if (J.Bool(n, "hideWhenInactive") is bool hw) HideWhenInactive = hw;
+        if (J.Bool(n, "hideFromCapture") is bool hc) HideFromCapture = hc;
+        if (J.Bool(n, "autoColor") is bool ac) AutoColor = ac;
+        if (J.Get(n, "hotkeys") is JsonObject hk)
+            foreach (var a in Actions)
+            {
+                var v = J.Get(hk, a);
+                if (v == null) continue;
+                var s = J.AsStr(v);
+                if (s == null || s.Length == 0 || s == "none" || s == "off") { Hotkeys.Remove(a); continue; }
+                if (Keys.Parse(s) is Chord c) Hotkeys[a] = c;
+                else Log.Warn($"hotkey for {a} not understood: \"{s}\"");
+            }
+        return this;
+    }
+
+    public Loc Text => Loc.For(Lang);
+
+    /// <summary>Footer line of the card: "Ctrl+Alt+→ done · …".</summary>
+    public string HintLine(bool waiting)
+    {
+        var t = Text;
+        if (waiting) return Hotkeys.TryGetValue("stop", out var st) ? $"{st} — {t.HintStop}" : "";
+        var order = new[] { ("done", t.HintDone), ("back", t.HintBack), ("skip", t.HintSkip), ("undo", t.HintUndo), ("help", t.HintHelp) };
+        var used = order.Where(o => Hotkeys.ContainsKey(o.Item1)).ToList();
+        if (used.Count == 0) return "";
+        // shared modifiers are written once: "Ctrl+Alt: → done · ← back · …"
+        uint mods = Hotkeys[used[0].Item1].Mods;
+        if (used.All(o => Hotkeys[o.Item1].Mods == mods) && mods != 0)
+        {
+            return Keys.FormatMods(mods) + ":  " + string.Join(" · ", used.Select(o => $"{Keys.KeyName(Hotkeys[o.Item1].Vk)} {o.Item2}"));
+        }
+        return string.Join(" · ", used.Select(o => $"{Hotkeys[o.Item1]} {o.Item2}"));
+    }
+
+    public string HotkeySignature => string.Join(",", Hotkeys.OrderBy(k => k.Key).Select(k => $"{k.Key}={k.Value.Mods}:{k.Value.Vk}"));
+}

@@ -122,6 +122,7 @@ internal static class J
                 if (hex.Length == 6) return Color.FromArgb(255, (int)(v >> 16) & 255, (int)(v >> 8) & 255, (int)v & 255);
                 if (hex.Length == 8) return Color.FromArgb((int)(v >> 24) & 255, (int)(v >> 16) & 255, (int)(v >> 8) & 255, (int)v & 255);
             }
+            if (s.Equals("accent", StringComparison.OrdinalIgnoreCase)) return Palette.Accent;
             if (Palette.Named.TryGetValue(s.ToLowerInvariant(), out var named)) return named;
             var c = Color.FromName(s);
             if (c.IsKnownColor) return c;

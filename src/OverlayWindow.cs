@@ -46,9 +46,12 @@ internal sealed class OverlayWindow : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        // keeps our own drawings out of screenshots and pixel probes
-        ExcludedFromCapture = Native.SetWindowDisplayAffinity(Handle, Native.WDA_EXCLUDEFROMCAPTURE);
-        if (!ExcludedFromCapture) Log.Warn("SetWindowDisplayAffinity failed: screenshots will briefly hide the overlay instead");
+        // optional: keep our drawings out of every capture (see Settings.HideFromCapture)
+        if (Settings.Global.HideFromCapture)
+        {
+            ExcludedFromCapture = Native.SetWindowDisplayAffinity(Handle, Native.WDA_EXCLUDEFROMCAPTURE);
+            if (!ExcludedFromCapture) Log.Warn("SetWindowDisplayAffinity failed: the overlay stays visible in captures");
+        }
     }
 
     protected override void WndProc(ref Message m)

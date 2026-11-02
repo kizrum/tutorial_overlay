@@ -2,52 +2,127 @@
   "title": "FL Studio: первый паттерн",
   "app": "FL64",
   "keepOpen": true,
-  "toggle": true,
   "steps": [
     {
       "id": "rack",
       "title": "Откройте Channel rack",
       "text": "Нажмите F6 или кнопку Channel rack на панели инструментов.",
-      "until": [ { "type": "appear", "title": "Channel rack" } ]
+      "until": [
+        {
+          "type": "appear",
+          "title": "Channel rack"
+        },
+        {
+          "type": "key",
+          "keys": "F6"
+        }
+      ]
     },
     {
       "id": "kick",
       "title": "Поставьте бочку на 1 и 9 шаг",
-      "text": "Кликните по отмеченным ячейкам 808 Kick. Повторный клик снова выключает ячейку.",
-      "anchor": { "element": { "name": "Channel rack", "role": "Pane" } },
+      "text": "Кликните по отмеченным ячейкам 808 Kick. Повторный клик выключает ячейку — отметка вернётся.",
+      "anchor": {
+        "element": {
+          "name": "Channel rack",
+          "role": "Pane"
+        }
+      },
       "checklist": true,
       "targets": [
         {
-          "name": "Шаг 1",
-          "shapes": [ { "type": "checkbox", "x": 324, "y": 79, "w": 22, "h": 30 } ],
-          "check": { "at": [ 335, 93 ], "expr": "g>140" }
-        },
-        {
-          "name": "Шаг 9",
-          "shapes": [ { "type": "checkbox", "x": 516, "y": 79, "w": 22, "h": 30 } ],
-          "check": { "at": [ 527, 93 ], "expr": "g>140" }
+          "name": "Шаг {col}",
+          "grid": {
+            "from": [
+              335,
+              93
+            ],
+            "step": [
+              24,
+              45
+            ],
+            "cells": [
+              1,
+              9
+            ],
+            "w": 22,
+            "h": 30
+          },
+          "check": {
+            "expr": "lum>165"
+          }
         }
       ]
     },
     {
       "id": "piano",
       "title": "Откройте Piano roll для FLEX Bass",
-      "text": "Правый клик по имени канала → Piano roll.",
+      "text": "Правый клик по имени канала, затем в меню — пункт Piano roll.",
       "targets": [
         {
-          "name": "FLEX Bass",
+          "name": "Правый клик по FLEX Bass",
           "button": "right",
-          "anchor": { "element": { "name": "Channel rack", "role": "Pane" }, "offset": [ 224, 272 ] },
-          "shapes": [ { "type": "rect", "x": -62, "y": -18, "w": 124, "h": 36 }, { "type": "label", "text": "Правый клик" }, { "type": "arrow" } ]
+          "anchor": {
+            "element": {
+              "name": "Channel rack",
+              "role": "Pane"
+            },
+            "offset": [
+              224,
+              272
+            ]
+          },
+          "shapes": [
+            {
+              "type": "rect",
+              "x": -62,
+              "y": -18,
+              "w": 124,
+              "h": 36
+            },
+            {
+              "type": "label",
+              "text": "Правый клик"
+            },
+            {
+              "type": "arrow"
+            }
+          ]
+        },
+        {
+          "name": "Пункт «Piano roll» в меню",
+          "anchor": {
+            "windowClass": "TQuickPopupMenuWindow"
+          },
+          "opens": {
+            "title": "Piano roll",
+            "timeoutMs": 8000
+          },
+          "shapes": [
+            {
+              "type": "rect",
+              "pad": 4
+            },
+            {
+              "type": "label",
+              "text": "Выберите «Piano roll»"
+            }
+          ]
         }
       ],
-      "until": [ { "type": "appear", "title": "Piano roll" } ]
+      "sequence": true,
+      "checklist": true
     },
     {
       "id": "close-piano",
       "title": "Закройте Piano roll",
       "text": "Крестик в правом верхнем углу окна Piano roll.",
-      "until": [ { "type": "disappear", "title": "Piano roll" } ]
+      "until": [
+        {
+          "type": "disappear",
+          "title": "Piano roll"
+        }
+      ]
     }
   ]
 }

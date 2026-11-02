@@ -117,7 +117,7 @@ internal static class Layout
         bool hasCheckbox = m.Shapes.Any(x => x.Type == "checkbox");
 
         PointF Rel(float? x, float? y) => new(ag.P.X + (x ?? 0), ag.P.Y + (y ?? 0));
-        Color ColorOf(ShapeSpec sp, Color fallback) => sp.Color ?? fallback;
+        Color ColorOf(ShapeSpec sp, Color fallback) => sp.Color ?? m.AutoColor ?? fallback;
         float Stroke(ShapeSpec sp) => (sp.Width ?? 3.5f) * s;
 
         void AddTargetBounds(RectangleF r) => targetBounds = targetBounds is RectangleF t ? RectangleF.Union(t, r) : r;
@@ -267,7 +267,7 @@ internal static class Layout
 
         // satisfied marks can leave a green tick behind instead of vanishing
         if (m.DoneStyle == "check" && !hasCheckbox)
-            geo.DonePrims.Add(new Prim { Kind = PrimKind.Check, A = tc, R = Math.Clamp(Math.Min(tb.Width, tb.Height) / 2, 11 * s, 18 * s), Color = Palette.Success, Width = 3.5f * s, Scale = s });
+            geo.DonePrims.Add(new Prim { Kind = PrimKind.Check, A = tc, R = Math.Clamp(Math.Min(tb.Width, tb.Height) / 2, 11 * s, 18 * s), Color = m.AutoColor ?? Palette.Success, Width = 3.5f * s, Scale = s });
 
         geo.TargetBounds = tb;
         geo.Center = geo.Hits.Count > 0 ? (geo.Hits[0].Circle ? geo.Hits[0].C : new PointF(geo.Hits[0].Rect.X + geo.Hits[0].Rect.Width / 2, geo.Hits[0].Rect.Y + geo.Hits[0].Rect.Height / 2)) : tc;

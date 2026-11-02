@@ -12,7 +12,7 @@ internal static class Program
     public const string Version = "0.1.0";
     private static System.Windows.Forms.Control? _ui;
 
-    /// <summary>Lets screenshot(includeOverlay) see our own windows for a moment.</summary>
+    /// <summary>Switches capture exclusion of all our windows (screenshot() with/without the overlay).</summary>
     public static void SetCapturable(bool capturable)
     {
         var ui = _ui;
@@ -34,6 +34,10 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Events.Init();
+        Settings.LoadGlobal();
+        Engine.ApplySettings(Settings.Global);
+        if (Settings.Global.Animate is bool anim) Engine.Animate = anim;
+        if (Settings.Global.HideWhenInactive is bool hide) Engine.HideWhenInactiveDefault = hide;
 
         int port = 7788;
         string? key = Environment.GetEnvironmentVariable("TUTORIAL_OVERLAY_KEY");
@@ -45,6 +49,7 @@ internal static class Program
                 case "--key" when i + 1 < args.Length: key = args[++i]; break;
                 case "--no-anim": Engine.Animate = false; break;
                 case "--show-inactive": Engine.HideWhenInactiveDefault = false; break;
+                case "--hide-from-capture": Settings.Global.HideFromCapture = true; break;
                 case "--verbose": Log.Verbose = true; break;
                 case "--help" or "-h" or "/?":
                     Console.Error.WriteLine("TutorialOverlay [--port 7788] [--key KEY] [--no-anim] [--show-inactive] [--verbose]\n" +
@@ -66,15 +71,15 @@ internal static class Program
         _ui = overlay;
 
         Resolver.Start();
-        MouseHook.Start();
+        InputHook.Start();
         var consumer = new Thread(() =>
         {
-            foreach (var c in MouseHook.Queue.GetConsumingEnumerable())
+            foreach (var e in InputHook.Queue.GetConsumingEnumerable())
             {
-                try { Engine.HandleClick(c); }
-                catch (Exception e) { Log.Warn("click: " + e.Message); }
+                try { Engine.HandleInput(e); }
+                catch (Exception ex) { Log.Warn("input: " + ex.Message); }
             }
-        }) { IsBackground = true, Name = "click-consumer", Priority = ThreadPriority.AboveNormal };
+        }) { IsBackground = true, Name = "input-consumer", Priority = ThreadPriority.AboveNormal };
         consumer.Start();
 
         var server = new McpServer(port, key);
@@ -107,7 +112,7 @@ internal static class Program
         Application.Run();
 
         timer.Stop();
-        MouseHook.Stop();
+        InputHook.Stop();
         Resolver.Stop();
         try { server.StopAsync().Wait(2000); } catch { }
         Events.Emit("exit");

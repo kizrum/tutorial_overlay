@@ -37,7 +37,7 @@ internal class NoActivateForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        Native.SetWindowDisplayAffinity(Handle, Native.WDA_EXCLUDEFROMCAPTURE);
+        if (Settings.Global.HideFromCapture) Native.SetWindowDisplayAffinity(Handle, Native.WDA_EXCLUDEFROMCAPTURE);
         int round = 2; // DWMWCP_ROUND (Windows 11)
         Native.DwmSetWindowAttribute(Handle, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref round, 4);
     }
@@ -109,12 +109,11 @@ internal sealed class CardWindow : NoActivateForm
     private Point _dragOrigin;
     private bool _pinned;
     private int _pinnedStepVersion = -1;
-    private bool _hotkeys;
+    private bool _helpOpen;                 // "?" pressed: showing the two help choices
+    private int _helpStepVersion = -1;
+    private string _hotkeySig = "";
+    private readonly Dictionary<int, string> _hotkeyIds = new();
     private Rectangle _target;
-    private static readonly (int id, uint vk, string action)[] Hotkeys =
-    {
-        (1, 0x27, "done"), (2, 0x25, "back"), (3, 0x5A, "undo"), (4, 0x28, "skip"), (5, 0x58, "stop"),
-    };
 
     public CardWindow() { Text = "TutorialOverlay step"; Size = new Size(10, 10); }
 
@@ -122,14 +121,17 @@ internal sealed class CardWindow : NoActivateForm
     {
         if (!m.Visible)
         {
+            Engine.CardRect = null;
             if (Visible) Hide();
             SetHotkeys(false);
             return;
         }
         SetHotkeys(true);
+        if (_helpOpen && _helpStepVersion != m.StepVersion && m.Index != _model.Index) _helpOpen = false;
         float s = Native.ScaleAt(m.Focus == default ? new PointF(Location.X, Location.Y) : m.Focus);
         var sig = Signature(m, s);
         _model = m;
+        sig += _helpOpen ? "|help" : "";
         if (sig != _sig || Math.Abs(s - _s) > 0.01f)
         {
             _sig = sig;
@@ -141,25 +143,30 @@ internal sealed class CardWindow : NoActivateForm
         if (_pinned && _pinnedStepVersion != m.StepVersion && Intersects(Bounds, m.Avoid)) _pinned = false;
         if (!_pinned) Place(m);
         ShowQuiet();
+        Engine.CardRect = Bounds;
     }
 
     private static string Signature(CardModel m, float s) =>
-        string.Join("\u0001", m.State, m.Index, m.Total, m.Title, m.Text, m.Done, m.Required, m.Completed, m.CanBack, m.CanUndo,
+        string.Join("\u0001", Settings.Current.Lang, Settings.Current.Accent.ToArgb(), Settings.Current.HotkeySignature, m.State, m.Index, m.Total, m.Title, m.Text, m.Done, m.Required, m.Completed, m.CanBack, m.CanUndo,
             string.Join(",", m.Checklist.Select(c => c.label + c.done)), string.Join(",", m.Extra.Select(b => b.Id + b.Text)),
-            string.Join(",", m.Controls), s);
+            string.Join(",", m.Controls), m.Hint, m.HintTitle, m.Issue, m.HelpPending, m.Highlighting, m.Review, s);
 
+    /// <summary>Global hotkeys exist only while the card is shown; re-registered when the settings change.</summary>
     private void SetHotkeys(bool on)
     {
-        if (on == _hotkeys || !IsHandleCreated) return;
-        _hotkeys = on;
-        foreach (var (id, vk, action) in Hotkeys)
+        var settings = Settings.Current;
+        var sig = on ? settings.HotkeySignature : "";
+        if (sig == _hotkeySig || !IsHandleCreated) return;
+        foreach (var id in _hotkeyIds.Keys) Native.UnregisterHotKey(Handle, id);
+        _hotkeyIds.Clear();
+        _hotkeySig = sig;
+        if (!on) return;
+        int next = 1;
+        foreach (var (action, chord) in settings.Hotkeys)
         {
-            if (on)
-            {
-                if (!Native.RegisterHotKey(Handle, id, Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT, vk))
-                    Log.Warn($"hotkey Ctrl+Alt+{vk:X2} ({action}) is taken by another app");
-            }
-            else Native.UnregisterHotKey(Handle, id);
+            int id = next++;
+            if (Native.RegisterHotKey(Handle, id, chord.Mods | Native.MOD_NOREPEAT, chord.Vk)) _hotkeyIds[id] = action;
+            else Log.Warn($"hotkey {chord} ({action}) is taken by another app");
         }
     }
 
@@ -167,9 +174,7 @@ internal sealed class CardWindow : NoActivateForm
     {
         if (m.Msg == Native.WM_HOTKEY)
         {
-            int hotkeyId = (int)m.WParam;
-            var hk = Hotkeys.FirstOrDefault(h => h.id == hotkeyId);
-            if (hk.action != null) Engine.UserAction(hk.action, "hotkey");
+            if (_hotkeyIds.TryGetValue((int)m.WParam, out var action)) Engine.UserAction(action, "hotkey");
             return;
         }
         base.WndProc(ref m);
@@ -190,8 +195,10 @@ internal sealed class CardWindow : NoActivateForm
         if (m.Text.Length > 0) y += Theme.Measure(m.Text, Theme.Font(14.5f * s), ContentWidth).Height + 6 * s;
         if (m.Checklist.Count > 0) y += 6 * s + m.Checklist.Count * 26 * s;
         else if (m.Required > 1) y += 22 * s;
+        var note = Note(m);
+        if (note != null) y += NoteHeight(note.Value) + 10 * s;
         BuildButtons(ref y);
-        y += 26 * s;                       // hint line
+        y += 8 * s + HintHeight();         // hint line (may wrap)
         return new Size((int)Math.Ceiling(ContentWidth + Pad * 2), (int)Math.Ceiling(y + Pad * 0.6f));
     }
 
@@ -216,32 +223,70 @@ internal sealed class CardWindow : NoActivateForm
         }
 
         if (m.State == "waiting") { y += 0; return; }
-        float lx = x0;
+        var loc = Settings.Current.Text;
+        if (_helpOpen)
+        {
+            // the two kinds of trouble, as big honest buttons
+            float bw = (ContentWidth - gap) / 2;
+            bool sideBySide = Math.Max(TextW(loc.CantFind), TextW(loc.DontGet)) + 28 * s <= bw;
+            if (sideBySide)
+            {
+                _buttons.Add(new Btn { Id = "cant_find", Action = "cant_find", Text = loc.CantFind, Style = "primary", Rect = new RectangleF(x0, y, bw, h) });
+                _buttons.Add(new Btn { Id = "dont_understand", Action = "dont_understand", Text = loc.DontGet, Style = "secondary", Rect = new RectangleF(x0 + bw + gap, y, bw, h) });
+                y += h + gap;
+            }
+            else
+            {
+                _buttons.Add(new Btn { Id = "cant_find", Action = "cant_find", Text = loc.CantFind, Style = "primary", Rect = new RectangleF(x0, y, ContentWidth, h) });
+                y += h + gap;
+                _buttons.Add(new Btn { Id = "dont_understand", Action = "dont_understand", Text = loc.DontGet, Style = "secondary", Rect = new RectangleF(x0, y, ContentWidth, h) });
+                y += h + gap;
+            }
+            _buttons.Add(new Btn { Id = "help_cancel", Action = "help_cancel", Text = loc.Cancel, Style = "ghost", Rect = new RectangleF(x0, y, 110 * s, h) });
+            y += h;
+            return;
+        }
+        var left = new List<Btn>();
+        var rightGroup = new List<Btn>();
         if (m.Controls.Contains("back"))
-        {
-            _buttons.Add(new Btn { Id = "back", Action = "back", Icon = "back", Text = "Назад", Enabled = m.CanBack, Rect = new RectangleF(lx, y, 96 * s, h) });
-            lx += 96 * s + gap;
-        }
+            left.Add(new Btn { Id = "back", Action = "back", Icon = "back", Text = loc.Back, Enabled = m.CanBack });
         if (m.Controls.Contains("undo"))
-        {
-            _buttons.Add(new Btn { Id = "undo", Action = "undo", Icon = "undo", Style = "ghost", Enabled = m.CanUndo, Rect = new RectangleF(lx, y, h, h) });
-        }
-        float rx = right;
-        if (m.Controls.Contains("done"))
-        {
-            float w = 116 * s;
-            rx -= w;
-            _buttons.Add(new Btn { Id = "done", Action = "done", Icon = "check", Text = m.Completed ? "Есть!" : "Готово", Style = m.Completed ? "success" : "primary", Enabled = !m.Completed, Rect = new RectangleF(rx, y, w, h) });
-            rx -= gap;
-        }
+            left.Add(new Btn { Id = "undo", Action = "undo", Icon = "undo", Style = "ghost", Enabled = m.CanUndo });
+        if (m.Controls.Contains("help"))
+            left.Add(new Btn { Id = "help", Action = "help_open", Icon = "help", Style = m.HelpPending ? "secondary" : "ghost" });
+        Btn? skip = null;
         if (m.Controls.Contains("skip"))
+            rightGroup.Add(skip = new Btn { Id = "skip", Action = "skip", Icon = "skip", Text = loc.Skip, Style = "ghost", Enabled = !m.Completed });
+        if (m.Controls.Contains("done"))
+            rightGroup.Add(new Btn { Id = "done", Action = "done", Icon = "check", Text = m.Completed ? loc.Got : loc.Done, Style = m.Completed ? "success" : "primary", Enabled = !m.Completed });
+
+        float Width(Btn b) => b.Text.Length == 0 ? h : Math.Max(h, TextW(b.Text) + (b.Icon.Length > 0 ? 24 * s : 0) + 30 * s);
+        float RowWidth(List<Btn> l) => l.Count == 0 ? 0 : l.Sum(Width) + gap * (l.Count - 1);
+        bool Fits() => RowWidth(left) + (left.Count > 0 && rightGroup.Count > 0 ? gap * 2 : 0) + RowWidth(rightGroup) <= ContentWidth;
+
+        if (!Fits() && skip != null) skip.Text = "";               // 1) "Skip" becomes an icon
+        if (!Fits() && left.FirstOrDefault(b => b.Id == "back") is Btn back) back.Text = "";   // 2) so does "Back"
+        bool wrap = !Fits();                                        // 3) still too wide: right group on its own row
+
+        float lx = x0;
+        foreach (var b in left) { float w = Width(b); b.Rect = new RectangleF(lx, y, w, h); lx += w + gap; _buttons.Add(b); }
+        if (wrap && left.Count > 0) y += h + gap;
+        float rx = right;
+        for (int i = rightGroup.Count - 1; i >= 0; i--)
         {
-            float w = 112 * s;
+            var b = rightGroup[i];
+            float w = Width(b);
             rx -= w;
-            _buttons.Add(new Btn { Id = "skip", Action = "skip", Icon = "skip", Text = "Пропустить", Style = "ghost", Enabled = !m.Completed, Rect = new RectangleF(rx, y, w, h) });
+            b.Rect = new RectangleF(rx, y, w, h);
+            rx -= gap;
+            _buttons.Add(b);
         }
         y += h;
     }
+
+    private float TextW(string t) => Theme.Measure(t, Theme.Font(13.5f * _s, true), 600 * _s).Width;
+
+    private float HintHeight() => Theme.Measure(Settings.Current.HintLine(_model.State == "waiting"), Theme.Font(11.5f * _s), ContentWidth).Height;
 
     private void Place(CardModel m)
     {
@@ -273,6 +318,52 @@ internal sealed class CardWindow : NoActivateForm
     private static bool Intersects(RectangleF r, IEnumerable<RectangleF> rs) => rs.Any(a => a.IntersectsWith(r));
     private static float Overlap(RectangleF a, RectangleF b) { var i = RectangleF.Intersect(a, b); return i.Width * i.Height; }
 
+    private void Relayout()
+    {
+        _sig = "";            // next UpdateModel re-measures
+        UpdateModel(_model);
+    }
+
+    /// <summary>One message block above the buttons: the agent's hint, else "highlighting / sent", else why targets are hidden.</summary>
+    private (string? title, string text, Color color)? Note(CardModel m)
+    {
+        var loc = Settings.Current.Text;
+        if (m.Hint != null) return (m.HintTitle, m.Hint, Palette.Named["blue"]);
+        if (m.HelpPending) return (null, m.Highlighting ? loc.Highlighting + " " + loc.HelpSent : loc.HelpSent, Palette.Warn);
+        if (m.Issue != null) return (null, m.Issue, Palette.Warn);
+        if (m.Review) return (null, loc.Review, Palette.Named["blue"]);
+        return null;
+    }
+
+    private float NoteHeight((string? title, string text, Color color) n)
+    {
+        float s = _s, w = ContentWidth - 34 * s;
+        float h = Theme.Measure(n.text, Theme.Font(13.5f * s), w).Height;
+        if (n.title != null) h += Theme.Measure(n.title, Theme.Font(14 * s, true), w).Height + 2 * s;
+        return h + 16 * s;
+    }
+
+    private void DrawNote(Graphics g, (string? title, string text, Color color) n, float y)
+    {
+        float s = _s, h = NoteHeight(n), x = Pad, w = ContentWidth;
+        var r = new RectangleF(x, y, w, h);
+        using (var path = Theme.Rounded(r, 8 * s))
+        using (var b = new SolidBrush(Palette.InkRaised)) g.FillPath(b, path);
+        using (var bar = Theme.Rounded(new RectangleF(x + 6 * s, y + 7 * s, 4 * s, h - 14 * s), 2 * s))
+        using (var b = new SolidBrush(n.color)) g.FillPath(b, bar);
+        float tx = x + 22 * s, ty = y + 8 * s, tw = w - 34 * s;
+        if (n.title != null)
+        {
+            var tf = Theme.Font(14 * s, true);
+            var th = Theme.Measure(n.title, tf, tw).Height;
+            using var tb = new SolidBrush(Palette.Text);
+            g.DrawString(n.title, tf, tb, new RectangleF(tx, ty, tw, th + 2), Theme.Wrap);
+            ty += th + 2 * s;
+        }
+        using var db = new SolidBrush(Palette.Text);
+        g.DrawString(n.text, Theme.Font(13.5f * s), db, new RectangleF(tx, ty, tw, r.Bottom - ty), Theme.Wrap);
+    }
+
     // ------------------------------------------------------------------ paint
 
     protected override void OnPaint(PaintEventArgs e)
@@ -290,7 +381,8 @@ internal sealed class CardWindow : NoActivateForm
         using (var pen = new Pen(Palette.Line, 1)) g.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
 
         // header: STEP n / N and close
-        var head = m.State == "waiting" ? "ОЖИДАНИЕ" : $"ШАГ {m.Index + 1} / {m.Total}";
+        var loc = Settings.Current.Text;
+        var head = m.State == "waiting" ? loc.Waiting : $"{loc.Step} {m.Index + 1} / {m.Total}";
         using (var b = new SolidBrush(Palette.Accent)) g.DrawString(head, Theme.Font(12 * s, true), b, Pad, y + 2 * s);
         if (m.Completed)
         {
@@ -359,29 +451,31 @@ internal sealed class CardWindow : NoActivateForm
                     Theme.IconCheck(g, c, 12 * s, Palette.Ink, 2.2f * s);
                 }
                 else using (var pen = new Pen(Palette.Line, 2 * s)) g.DrawEllipse(pen, c.X - 8 * s, c.Y - 8 * s, 16 * s, 16 * s);
-                using var tb = new SolidBrush(done ? Palette.TextDim : Palette.Text);
+                // done = green tick + green text; no strike-through (it reads as "disabled")
+                using var tb = new SolidBrush(done ? Palette.Success : Palette.Text);
                 g.DrawString(label, Theme.Font(14 * s), tb, new RectangleF(Pad + 26 * s, y + 2 * s, ContentWidth - 26 * s, 22 * s), Theme.Wrap);
-                if (done) using (var pen = new Pen(Palette.WithAlpha(Palette.TextDim, 0.7f), 1.2f * s))
-                {
-                    var tw = Math.Min(Theme.Measure(label, Theme.Font(14 * s), ContentWidth).Width, ContentWidth - 26 * s);
-                    g.DrawLine(pen, Pad + 26 * s, y + 12.5f * s, Pad + 26 * s + tw, y + 12.5f * s);
-                }
                 y += 26 * s;
             }
         }
         else if (m.Required > 1)
         {
             using var b = new SolidBrush(Palette.TextDim);
-            g.DrawString($"Отмечено {m.Done} из {m.Required}", Theme.Font(13 * s), b, Pad, y + 2 * s);
+            g.DrawString(string.Format(loc.Marked, m.Done, m.Required), Theme.Font(13 * s), b, Pad, y + 2 * s);
             y += 22 * s;
         }
 
+        if (Note(m) is { } note)
+        {
+            y += 10 * s;
+            DrawNote(g, note, y);
+        }
         foreach (var bt in _buttons) DrawButton(g, bt);
 
-        float hy = ClientSize.Height - Pad * 0.6f - 20 * s;
+        float hh = HintHeight();
+        float hy = ClientSize.Height - Pad * 0.6f - hh;
         using (var hb = new SolidBrush(Palette.WithAlpha(Palette.TextDim, 0.75f)))
-            g.DrawString(m.State == "waiting" ? "Ctrl+Alt+X — завершить" : "Ctrl+Alt+→ готово · ← назад · ↓ пропустить · Z отменить",
-                Theme.Font(11.5f * s), hb, new RectangleF(Pad, hy, ContentWidth, 18 * s), Theme.Wrap);
+            g.DrawString(Settings.Current.HintLine(m.State == "waiting"),
+                Theme.Font(11.5f * s), hb, new RectangleF(Pad, hy, ContentWidth, hh + 2), Theme.Wrap);
     }
 
     private void DrawButton(Graphics g, Btn b)
@@ -405,6 +499,7 @@ internal sealed class CardWindow : NoActivateForm
             case "undo": Theme.IconUndo(g, ic, 18 * s, fg, 2f * s); break;
             case "check": Theme.IconCheck(g, ic, 13 * s, fg, 2.4f * s); break;
             case "skip": Theme.IconSkip(g, ic, 11 * s, fg, 2f * s); break;
+            case "help": Theme.IconQuestion(g, ic, 16 * s, fg, 2f * s); break;
         }
         if (textW > 0)
             using (var tb = new SolidBrush(fg))
@@ -462,7 +557,13 @@ internal sealed class CardWindow : NoActivateForm
         if (b == null || b != _pressed) return;
         _pressed = null;
         if (b.Custom) Engine.ButtonPressed("card", b.Id, b.Action, "card");
-        else Engine.UserAction(b.Action!, "card");
+        else if (b.Action == "help_open") { _helpOpen = true; _helpStepVersion = _model.StepVersion; Relayout(); }
+        else if (b.Action == "help_cancel") { _helpOpen = false; Relayout(); }
+        else
+        {
+            if (b.Action is "cant_find" or "dont_understand") _helpOpen = false;
+            Engine.UserAction(b.Action!, "card");
+        }
     }
 }
 

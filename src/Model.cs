@@ -61,12 +61,13 @@ internal sealed class AnchorSpec
     public string Origin = "topleft";
     public float Dx, Dy;
     public bool Client;              // window-only anchors: client area instead of visible frame
+    public string? Read;             // UIA property the resolver should read (uia conditions)
 
     public bool IsScreen => Process == null && Window == null && WindowClass == null && Title == null && Hwnd == null;
     public bool HasBounds => !IsScreen;
 
     /// <summary>Resolution identity (ignores origin/offset, which only matter for layout).</summary>
-    public string Key => string.Join("|", Process?.ToLowerInvariant(), Window, WindowClass, Title, Hwnd, Client,
+    public string Key => string.Join("|", Process?.ToLowerInvariant(), Window, WindowClass, Title, Hwnd, Client, Read,
         string.Join(">", Path.Select(p => $"{p.Role}/{p.Name}/{p.NameExact}/{p.AutomationId}/{p.ClassName}/{p.Pick}/{p.Index}")));
 
     public static AnchorSpec Parse(JsonNode? n, AnchorSpec? defaults)
@@ -101,6 +102,14 @@ internal sealed class AnchorSpec
             if (a.Window == null && a.Title == null && a.Path.Count == 0 && defaults.Window != null) a.Window = defaults.Window;
         }
         return a;
+    }
+
+    public AnchorSpec With(float dx = 0, float dy = 0, string? read = null)
+    {
+        var c = (AnchorSpec)MemberwiseClone();
+        c.Dx += dx; c.Dy += dy;
+        if (read != null) c.Read = read;
+        return c;
     }
 
     private static long? ParseHex(string? s)
@@ -314,6 +323,8 @@ internal sealed class Mark
     public string? Label;                 // human name for events / checklist
     public string DoneStyle = "hide";     // hide | check (leave a green tick when satisfied)
     public bool? HideInactive;            // hide while the anchor's app is not in the foreground
+    public AnchorSpec? Opens;             // the click must open this window / pane (inside the app or another process)
+    public int OpensTimeoutMs = 6000;
 
     // runtime
     public bool Dismissed;
@@ -323,6 +334,10 @@ internal sealed class Mark
     public MarkGeo? Geo;
     public string Visibility = "resolving";
     public DateTime? ShownAt;
+    public Color? AutoColor;              // contrast colour picked against the app's pixels around the target
+    public DateTime? OpensArmedAt;        // clicked, waiting for Opens to show up
+    public HashSet<IntPtr>? OpensBefore;  // matching top-level windows at click time
+    public bool OpensPresentBefore;
 
     public bool HasHitArea => Shapes.Any(s => s.IsTarget);
     public bool HasButtons => Shapes.Any(s => s.Type == "button");
@@ -333,7 +348,8 @@ internal sealed class Mark
         var m = new Mark
         {
             Id = J.Str(n, "id") ?? id,
-            Anchor = AnchorSpec.Parse(J.Get(n, "anchor"), defaults),
+            // no own anchor: the whole step/draw anchor applies (element path included), not just its process
+            Anchor = J.Has(n, "anchor") ? AnchorSpec.Parse(J.Get(n, "anchor"), defaults) : defaults?.With() ?? new AnchorSpec(),
             DismissOnClick = J.Bool(n, "dismissOnClick") ?? true,
             Toggle = J.Bool(n, "toggle"),
             Button = (J.Str(n, "button") ?? "left").ToLowerInvariant(),
@@ -342,6 +358,13 @@ internal sealed class Mark
             DoneStyle = (J.Str(n, "doneStyle") ?? "hide").ToLowerInvariant(),
             HideInactive = J.Bool(n, "hideWhenInactive"),
         };
+        if (J.Pt(n, "__cell") is PointF cell) m.Anchor = m.Anchor.With(cell.X, cell.Y);
+        if (J.Unwrap(J.Get(n, "opens")) is JsonNode on)
+        {
+            m.Opens = AnchorSpec.Parse(J.Get(on, "anchor") ?? on, defaults);
+            if (J.Bool(on, "anyProcess") == true) m.Opens.Process = null;
+            m.OpensTimeoutMs = Math.Clamp(J.Int(on, "timeoutMs") ?? 6000, 500, 120000);
+        }
         m.Check = PixelCheck.Parse(J.Get(n, "check"), defaults);
         foreach (var s in J.Items(J.Get(n, "shapes"))) m.Shapes.Add(ShapeSpec.Parse(s));
         if (m.Shapes.Count == 0)
@@ -363,19 +386,46 @@ internal sealed class Mark
     public void ResetRuntime()
     {
         Dismissed = false; Hits = 0; CheckOk = null; CheckAt = default; Geo = null; Visibility = "resolving"; ShownAt = null;
+        OpensArmedAt = null; OpensBefore = null; OpensPresentBefore = false; AutoColor = null;
+    }
+}
+
+/// <summary>A screen area tied to an anchor: its bounds, a rect relative to the anchor point, or a circle.</summary>
+internal sealed class ScreenRegion
+{
+    public AnchorSpec Anchor = new();
+    public RectangleF? Rect;
+    public float? Radius;
+
+    public static ScreenRegion Parse(JsonNode? n, AnchorSpec? defaults)
+    {
+        n = J.Unwrap(n);
+        var r = new ScreenRegion { Anchor = AnchorSpec.Parse(J.Get(n, "anchor") ?? n, defaults) };
+        if (J.Arr(n, "rect") is JsonArray a && a.Count >= 4)
+            r.Rect = new RectangleF((float)(J.AsNum(a[0]) ?? 0), (float)(J.AsNum(a[1]) ?? 0), (float)(J.AsNum(a[2]) ?? 0), (float)(J.AsNum(a[3]) ?? 0));
+        if (J.Num(n, "radius") is double rad) r.Radius = (float)rad;
+        return r;
     }
 }
 
 internal sealed class Condition
 {
-    public string Type = "all_clicked";  // all_clicked | appear | disappear | pixel | count
+    public string Type = "all_clicked";  // all_clicked | appear | disappear | pixel | count | key | drag | uia
     public AnchorSpec? Anchor;
     public PixelCheck? Pixel;
     public int Count;
+    public List<Chord> Keys = new();
+    public ScreenRegion? From, To;
+    public string Button = "left";
+    public bool Show = true;
+    public string Property = "exists";
+    public string? EqualsText, ContainsText, Matches;
+    public bool Not;
 
     // runtime
     public bool SeenPresent;
     public bool Met;
+    public bool SeenUnmet;          // was false at least once during this visit of the step
 
     public static Condition Parse(JsonNode n, AnchorSpec? defaults)
     {
@@ -392,6 +442,30 @@ internal sealed class Condition
             c.Pixel = PixelCheck.Parse(n, defaults);
             c.Pixel!.Anchor = AnchorSpec.Parse(J.Get(n, "anchor"), defaults);
         }
+        else if (c.Type == "key")
+        {
+            foreach (var k in J.Items(J.Get(n, "keys") ?? J.Get(n, "key")))
+                if (TutorialOverlay.Keys.Parse(J.AsStr(k)) is Chord ch) c.Keys.Add(ch);
+                else throw new ArgumentException($"key condition: cannot parse \"{J.AsStr(k)}\"");
+            if (c.Keys.Count == 0) throw new ArgumentException("key condition needs keys, e.g. \"Ctrl+S\"");
+            c.Anchor = AnchorSpec.Parse(J.Get(n, "anchor"), defaults);   // only counts while this app is in front
+        }
+        else if (c.Type == "drag")
+        {
+            c.From = ScreenRegion.Parse(J.Get(n, "from"), defaults);
+            c.To = ScreenRegion.Parse(J.Get(n, "to"), defaults);
+            c.Button = (J.Str(n, "button") ?? "left").ToLowerInvariant();
+            c.Show = J.Bool(n, "show") ?? true;
+        }
+        else if (c.Type == "uia")
+        {
+            c.Property = (J.Str(n, "property") ?? J.Str(n, "prop") ?? "exists").ToLowerInvariant();
+            c.Anchor = AnchorSpec.Parse(J.Get(n, "anchor") ?? n, defaults).With(read: c.Property == "exists" ? null : c.Property);
+            c.EqualsText = J.Str(n, "equals") ?? J.Str(n, "is");
+            c.ContainsText = J.Str(n, "contains");
+            c.Matches = J.Str(n, "matches") ?? J.Str(n, "regex");
+            c.Not = J.Bool(n, "not") ?? false;
+        }
         return c;
     }
 
@@ -403,15 +477,20 @@ internal sealed class Condition
         "pixel" or "color" => "pixel",
         "hits" or "count" or "clicks" => "count",
         "manual" or "button" or "none" => "manual",
+        "key" or "keys" or "hotkey" or "shortcut" or "press" => "key",
+        "drag" or "drop" or "dragdrop" or "drag_drop" => "drag",
+        "uia" or "property" or "element" or "state" => "uia",
         var x => x,
     };
 
-    public void Reset() { SeenPresent = false; Met = false; }
+    public void Reset() { SeenPresent = false; Met = false; SeenUnmet = false; }
 
     public JsonObject ToJson() => new()
     {
         ["type"] = Type, ["met"] = Met, ["seenPresent"] = SeenPresent,
-        ["anchor"] = Anchor?.Describe() ?? Pixel?.Anchor?.Describe(),
+        ["anchor"] = Anchor?.Describe() ?? Pixel?.Anchor?.Describe() ?? From?.Anchor.Describe(),
+        ["keys"] = Keys.Count > 0 ? string.Join(" | ", Keys) : null,
+        ["property"] = Type == "uia" ? Property : null,
     };
 }
 
@@ -427,12 +506,21 @@ internal sealed class Step
     public float? Dim;
     public int? AdvanceDelayMs;
     public bool Numbered;
+    public bool Sequence;                        // targets one at a time, in order (click → menu item → ...)
     public bool? Checklist;
     public List<CardButton> Buttons = new();     // extra card buttons → "button" events
     public HashSet<string>? Controls;            // which standard card controls to show
 
     // runtime
     public readonly Stack<(Mark mark, bool prevDismissed)> History = new();
+    public readonly List<JsonObject> Misses = new();   // recent misses, for help requests
+    public string? Hint, HintTitle;                    // agent's answer shown on the card
+    public bool HelpPending;
+    public DateTime? HighlightUntil;
+    public DateTime NextPing;
+    public DateTime? SeqMissingSince;            // current sequence target's anchor gone (menu closed?)
+    public bool Review;                          // entered with "Back": already-true conditions don't auto-complete it
+    public Color? AutoColor;                     // one contrast colour for all targets of the step
 
     public static Step Parse(JsonNode n, AnchorSpec? defaults, int ordinal)
     {
@@ -452,7 +540,8 @@ internal sealed class Step
         var stepDefaults = J.Has(n, "anchor") ? AnchorSpec.Parse(J.Get(n, "anchor"), defaults) : defaults;
         int i = 0;
         foreach (var t in J.Items(J.Get(n, "targets") ?? J.Get(n, "marks")))
-            s.Targets.Add(Mark.Parse(t, stepDefaults, $"s{ordinal}t{i++}"));
+            foreach (var cell in Grid.Expand(t))
+                s.Targets.Add(Mark.Parse(cell, stepDefaults, $"s{ordinal}t{i++}"));
         if (J.Has(n, "shapes") && s.Targets.Count == 0)
             s.Targets.Add(Mark.Parse(n, stepDefaults, $"s{ordinal}t0"));
         foreach (var b in J.Items(J.Get(n, "buttons")))
@@ -464,6 +553,7 @@ internal sealed class Step
         if (J.Arr(n, "controls") is JsonArray ctl)
             s.Controls = new HashSet<string>(ctl.Select(x => (J.AsStr(x) ?? "").ToLowerInvariant()));
         s.Checklist = J.Bool(n, "checklist");
+        s.Sequence = J.Bool(n, "sequence") ?? false;
         if (s.Numbered)
             for (int k = 0; k < s.Targets.Count; k++)
                 if (!s.Targets[k].Shapes.Any(x => x.Type == "badge"))
@@ -480,6 +570,12 @@ internal sealed class Step
         foreach (var t in Targets) t.ResetRuntime();
         foreach (var c in Until) c.Reset();
         History.Clear();
+        Misses.Clear();
+        Hint = HintTitle = null;
+        HelpPending = false;
+        HighlightUntil = null;
+        SeqMissingSince = null;
+        AutoColor = null;
     }
 
     public IEnumerable<Mark> Required => Targets.Where(t => !t.Optional && (t.HasHitArea || t.Check != null || t.HasButtons));
@@ -503,4 +599,56 @@ internal sealed class Tutorial
 
     public Step? Current => Index >= 0 && Index < Steps.Count ? Steps[Index] : null;
     public bool Active => State is "running" or "waiting";
+}
+
+/// <summary>
+/// "grid": one target description → a target per cell. Coordinates are relative to the anchor point:
+/// from = centre of the first cell, step = distance between cell centres. Rows/cols/cells are 1-based.
+/// </summary>
+internal static class Grid
+{
+    public static IEnumerable<JsonNode> Expand(JsonNode t)
+    {
+        t = J.Unwrap(t)!;
+        var g = J.Get(t, "grid");
+        if (g == null) { yield return t; yield break; }
+        var from = J.Pt(g, "from") ?? new PointF(0, 0);
+        var step = J.Pt(g, "step") ?? new PointF((float)(J.Num(g, "dx") ?? 0), (float)(J.Num(g, "dy") ?? 0));
+        int rows = Math.Max(1, J.Int(g, "rows") ?? 1), cols = Math.Max(1, J.Int(g, "cols") ?? 1);
+        var cells = new List<(int r, int c)>();
+        if (J.Arr(g, "cells") is JsonArray list)
+        {
+            foreach (var x in list)
+            {
+                if (x is JsonArray rc && rc.Count >= 2) cells.Add(((int)(J.AsNum(rc[0]) ?? 1), (int)(J.AsNum(rc[1]) ?? 1)));
+                else if (J.AsNum(x) is double col) cells.Add((1, (int)col));   // bare numbers = columns of row 1
+            }
+        }
+        else
+        {
+            for (int r = 1; r <= rows; r++)
+                for (int c = 1; c <= cols; c++) cells.Add((r, c));
+        }
+        float w = (float)(J.Num(g, "w") ?? Math.Max(8, Math.Abs(step.X) * 0.85));
+        float h = (float)(J.Num(g, "h") ?? Math.Max(8, Math.Min(Math.Abs(step.Y) > 0 ? Math.Abs(step.Y) * 0.7 : 1e9, w * 1.35)));
+        string? baseId = J.Str(t, "id");
+        string? nameTpl = J.Str(t, "name") ?? J.Str(t, "label");
+        int n = 0;
+        foreach (var (r, c) in cells)
+        {
+            n++;
+            var o = (JsonObject)t.DeepClone();
+            o.Remove("grid");
+            o["__cell"] = new JsonArray(from.X + (c - 1) * step.X, from.Y + (r - 1) * step.Y);
+            if (baseId != null) o["id"] = $"{baseId}-{r}-{c}";
+            if (nameTpl != null)
+            {
+                o.Remove("label");
+                o["name"] = nameTpl.Replace("{row}", r.ToString()).Replace("{col}", c.ToString()).Replace("{n}", n.ToString());
+            }
+            if (J.Get(o, "shapes") == null)
+                o["shapes"] = new JsonArray(new JsonObject { ["type"] = "checkbox", ["x"] = -w / 2, ["y"] = -h / 2, ["w"] = w, ["h"] = h });
+            yield return o;
+        }
+    }
 }

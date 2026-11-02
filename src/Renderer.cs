@@ -23,6 +23,8 @@ internal sealed class Scene
     public readonly List<Ripple> Ripples = new();
     public float Dim;
     public float Pulse = 1;      // 0..1 breathing glow
+    /// <summary>Pixel-probe points: left fully transparent so the probe sees the app, not our drawing.</summary>
+    public readonly List<(PointF p, int r)> Probes = new();
     public float HoleScale = 1;
 }
 
@@ -67,6 +69,21 @@ internal static class Renderer
             float rr = r.R0 + 30 * r.Scale * ease;
             using var pen = new Pen(Palette.WithAlpha(r.Color, (1 - t) * 0.9f), Math.Max(1, 4 * r.Scale * (1 - t)));
             g.DrawEllipse(pen, r.C.X - rr, r.C.Y - rr, 2 * rr, 2 * rr);
+        }
+        if (sc.Probes.Count > 0)
+        {
+            var mode = g.CompositingMode;
+            var smooth = g.SmoothingMode;
+            g.CompositingMode = CompositingMode.SourceCopy;
+            g.SmoothingMode = SmoothingMode.None;
+            using var clear = new SolidBrush(Color.Transparent);
+            foreach (var (p, r) in sc.Probes)
+            {
+                int half = r + 2;
+                g.FillRectangle(clear, (float)Math.Round(p.X) - half, (float)Math.Round(p.Y) - half, 2 * half + 1, 2 * half + 1);
+            }
+            g.CompositingMode = mode;
+            g.SmoothingMode = smooth;
         }
     }
 

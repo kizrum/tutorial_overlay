@@ -16,7 +16,8 @@ internal static class Tools
         "and window open/close arrive as events (stdout JSON lines of the overlay process, MCP notifications, or the " +
         "events tool with long-poll) — react to them instead of asking the user whether they are done. " +
         "Use keepOpen + append_steps to feed steps incrementally. Marks auto-hide when the app is minimised, covered or " +
-        "not in the foreground and come back on the same step.";
+        "not in the foreground and come back on the same step. For apps that draw their own UI, call pick(anchor) and ask " +
+        "the user to click the spot: you get the exact offset (and with count=2 on neighbouring cells, a grid step).";
 
     private static JsonObject Obj(params (string k, JsonNode? v)[] props)
     {
@@ -55,9 +56,14 @@ internal static class Tools
             Obj(("id", T("string", "mark id; omit for all")))),
         Tool("start_tutorial", "Start a step-by-step tutorial. Only the current step's targets are shown; steps advance by themselves. " +
             "spec = {title, app:'process name' (default for every anchor), window, dim:0..1, toggle, keepOpen (wait for append_steps after the last step), advanceDelayMs, hideWhenInactive, startAt, " +
-            "steps:[{id, title, text, anchor (default for targets), targets:[{id, name (checklist label), anchor, shapes, toggle, check, button, optional, doneStyle:'hide'|'check', hint, number, arrow}], " +
-            "until:[ 'all_clicked' | {type:'appear'|'disappear', title|window|element|anchor} | {type:'pixel', anchor, at, expr} | {type:'count', count} ], untilMode:'any'|'all', " +
-            "dim, numbered, checklist, buttons:[{id,text,action,style}] (extra card buttons), controls:['back','undo','skip','done','stop']}]}. " +
+            "lang:'ru'|'en', accent:'#RRGGBB', hotkeys:{done,back,skip,undo,stop:'Ctrl+Alt+Right'|'none'}, " +
+            "steps:[{id, title, text, anchor (default for targets), targets:[{id, name (checklist label; with grid may use {row} {col} {n}), anchor, shapes, toggle, check, button, optional, doneStyle:'hide'|'check', hint, number, arrow, " +
+            "opens:{title|window|process|element, anyProcess, timeoutMs} (the click counts only when this NEW window/pane appears — inside the app or in another program; otherwise event no_effect), grid:{from:[x,y] centre of first cell rel. to anchor point, step:[dx,dy], rows, cols, cells:[[row,col],...] or [col,...] (1-based), w, h} → one target per cell (default shape: checkbox)}], " +
+            "until:[ 'all_clicked' | {type:'appear'|'disappear', title|window|element|anchor} | {type:'pixel', anchor, at, expr} | {type:'count', count} " +
+            "| {type:'key', keys:'Ctrl+S' or ['F6','Ctrl+F6']} (only while the app is in front; other keys are never recorded) " +
+            "| {type:'drag', from:{anchor|element|title, rect:[x,y,w,h] rel. to anchor point, radius}, to:{...}, button, show} (drawn as source → drop zone arrow) " +
+            "| {type:'uia', anchor|element|title, property:'exists'|'name'|'value'|'toggle'|'selected'|'expanded'|'enabled'|'focused'|'text', equals|contains|matches, not} ], untilMode:'any'|'all', " +
+            "dim, numbered, checklist, sequence (targets one at a time in order, e.g. right-click → item of the popup menu anchored by {windowClass:'TQuickPopupMenuWindow'}; if that menu closes the chain restarts: event sequence_reset), buttons:[{id,text,action,style}] (extra card buttons), controls:['back','undo','skip','done','stop']}]}. " +
             "Without 'until', a step with targets completes when all targets are clicked; without targets it waits for Done / complete_step. " +
             "'disappear' only fires after the thing was first seen present. Clicks are matched by the PROCESS of the window under the cursor.",
             Obj(("spec", T("object", "tutorial spec (fields may also be passed at top level)")))),
@@ -77,7 +83,16 @@ internal static class Tools
             Obj(("anchor", T("object", AnchorDesc)), ("rect", T("array", "[x,y,w,h] absolute screen rect instead of an anchor")),
                 ("pad", T("integer", "extra pixels around the anchor rect")), ("maxEdge", T("integer", "downscale so the long edge is ≤ this (default 1568, 0 = full size)")),
                 ("includeOverlay", T("boolean", "also capture the overlay's drawings and the card (to verify placement)")))),
-        Tool("events", "Events since a sequence number (hit, miss, unhit, undo, step_started, step_completed, step_back, step_skipped, tutorial_*, window_opened/closed, anchor_found/lost, check_changed, button). With timeoutMs it long-polls until something happens.",
+        Tool("hint", "Show your answer inside the step card (after a 'help' event, or proactively). Cleared when the step changes. highlight:true also dims the screen and pings the targets.",
+            Obj(("text", T("string", "hint text")), ("title", T("string", "optional heading")), ("highlight", T("boolean", "spotlight the targets")),
+                ("seconds", T("integer", "highlight duration (default 6)")), ("expectIndex", T("integer", "only if this is still the current step")))),
+        Tool("pick", "Calibration: asks the user to click 1..count points and returns, for each, absolute coords, rel (offset from the anchor point), relToBounds, " +
+            "the window, pixel colour, the UIA element under the point with ancestors, and a suggestedAnchor. The click is swallowed (does not reach the app) unless passThrough. " +
+            "With count ≥ 2 on consecutive cells it also returns gridHint {from, step}. Esc cancels.",
+            Obj(("anchor", T("object", "anchor to measure rel offsets against")), ("count", T("integer", "number of points (default 1)")),
+                ("prompt", T("string", "text shown next to the cursor")), ("passThrough", T("boolean", "let the click reach the app (default false)")),
+                ("timeoutMs", T("integer", "default 60000")))),
+        Tool("events", "Events since a sequence number (hit, miss, unhit, undo, step_started, step_completed, step_back, step_skipped, tutorial_*, window_opened/closed, anchor_found/lost, check_changed, uia_changed, key_matched, drag, opened, no_effect, blocked (target clicked while a modal dialog of the app was open), button, pick, help (user pressed '?': reason cant_find|dont_understand, with target visibility and recent misses — answer with hint()), hook_reinstalled). With timeoutMs it long-polls until something happens.",
             Obj(("since", T("integer", "last seq you have seen (default 0)")), ("timeoutMs", T("integer", "wait up to this long for new events (max 60000)")))),
     };
 
@@ -105,6 +120,8 @@ internal static class Tools
                 "describe" => TextRaw(await Task.Run(() => Describe.Run(args, ct), ct)),
                 "screenshot" => await Task.Run(() => Screenshot(args), ct),
                 "events" => await EventsTool(args, ct),
+                "pick" => Text(await Engine.Pick(args, ct)),
+                "hint" => Text(Engine.SetHint(args)),
                 _ => Fail("unknown tool: " + name),
             };
         }
@@ -181,10 +198,12 @@ internal static class Tools
         if (rect.Width <= 0 || rect.Height <= 0) return Fail("rectangle is off screen");
 
         bool withOverlay = J.Bool(args, "includeOverlay") ?? false;
-        if (withOverlay) { Program.SetCapturable(true); Thread.Sleep(80); }
+        // flip exclusion only when the wanted result differs from the normal state, then restore it
+        bool flip = withOverlay == Settings.Global.HideFromCapture;
+        if (flip) { Program.SetCapturable(withOverlay); Thread.Sleep(80); }
         Bitmap bmp;
         try { bmp = ScreenCapture.Capture(rect); }
-        finally { if (withOverlay) Program.SetCapturable(false); }
+        finally { if (flip) Program.SetCapturable(!withOverlay); }
         using var _bmp = bmp;
         int maxEdge = J.Int(args, "maxEdge") ?? 1568;
         var png = ScreenCapture.Png(bmp, maxEdge, out float scale);
