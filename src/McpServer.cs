@@ -27,6 +27,8 @@ internal sealed class McpServer
     private readonly string _key;
     private WebApplication? _app;
     public event Action? Stopping;
+    /// <summary>UTC ticks of the agent's last JSON-RPC request (0 = none yet) — shown in the tray.</summary>
+    public static long LastRequestTicks;
 
     public McpServer(int port, string key) { _port = port; _key = key; }
 
@@ -112,6 +114,7 @@ internal sealed class McpServer
         var method = J.Str(msg, "method");
         var id = J.Get(msg, "id")?.DeepClone();
         if (method == null) return null;            // a response from the client
+        Interlocked.Exchange(ref LastRequestTicks, DateTime.UtcNow.Ticks);
         if (id == null) return null;                // a notification (initialized, cancelled, ...)
         var p = J.Get(msg, "params");
         try

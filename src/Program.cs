@@ -1,5 +1,7 @@
 using System;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using System.Threading;
@@ -11,6 +13,37 @@ internal static class Program
 {
     public const string Version = "0.1.0";
     private static System.Windows.Forms.Control? _ui;
+
+    // what this instance runs with — shown in the tray and the settings window
+    public static int Port { get; private set; }
+    public static bool PortFromArgs { get; private set; }
+    public static string Key { get; private set; } = "";
+    public static string KeyFrom { get; private set; } = "";
+    public static DateTime StartedAt { get; } = DateTime.Now;
+    private static string[] _args = Array.Empty<string>();
+
+    /// <summary>Global defaults → engine (after start-up and after the settings window saves).</summary>
+    public static void ApplyGlobal(bool tutorialRunning)
+    {
+        var g = Settings.Global;
+        Engine.Animate = g.Animate ?? true;
+        Engine.HideWhenInactiveDefault = g.HideWhenInactive ?? true;
+        // a running tutorial keeps its own lang/accent/hotkey overrides until it ends
+        if (!tutorialRunning) Engine.ApplySettings(g);
+    }
+
+    /// <summary>Start a fresh instance (it reads the port from config.json) and quit this one.</summary>
+    public static void Restart()
+    {
+        var psi = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
+        for (int i = 0; i < _args.Length; i++)
+        {
+            if (_args[i] == "--port") { i++; continue; }
+            psi.ArgumentList.Add(_args[i]);
+        }
+        Process.Start(psi);
+        Application.Exit();
+    }
 
     /// <summary>Switches capture exclusion of all our windows (screenshot() with/without the overlay).</summary>
     public static void SetCapturable(bool capturable)
@@ -35,17 +68,16 @@ internal static class Program
         Application.SetCompatibleTextRenderingDefault(false);
         Events.Init();
         Settings.LoadGlobal();
-        Engine.ApplySettings(Settings.Global);
-        if (Settings.Global.Animate is bool anim) Engine.Animate = anim;
-        if (Settings.Global.HideWhenInactive is bool hide) Engine.HideWhenInactiveDefault = hide;
+        ApplyGlobal(false);
+        _args = args;
 
-        int port = 7788;
+        int port = Settings.Global.Port ?? 7788;
         string? key = Environment.GetEnvironmentVariable("TUTORIAL_OVERLAY_KEY");
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i])
             {
-                case "--port" when i + 1 < args.Length: port = int.Parse(args[++i]); break;
+                case "--port" when i + 1 < args.Length: port = int.Parse(args[++i]); PortFromArgs = true; break;
                 case "--key" when i + 1 < args.Length: key = args[++i]; break;
                 case "--no-anim": Engine.Animate = false; break;
                 case "--show-inactive": Engine.HideWhenInactiveDefault = false; break;
@@ -59,6 +91,9 @@ internal static class Program
             }
         }
         key ??= LoadOrCreateKey();
+        Port = port;
+        Key = key;
+        KeyFrom = KeySource(args);
 
         using var single = new Mutex(true, $"TutorialOverlay.{port}", out bool first);
         if (!first) { Log.Warn($"another TutorialOverlay is already serving port {port}"); return 2; }
@@ -93,7 +128,8 @@ internal static class Program
         server.Stopping += () => { try { overlay.BeginInvoke(Application.Exit); } catch { } };
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; try { overlay.BeginInvoke(Application.Exit); } catch { } };
 
-        Log.Info($"TutorialOverlay {Version} listening on http://127.0.0.1:{port}/mcp (key from {KeySource(args)})");
+        Log.Info($"TutorialOverlay {Version} listening on http://127.0.0.1:{port}/mcp (key from {KeyFrom})");
+        using var tray = new TrayIcon();
         Events.Emit("ready", new JsonObject { ["port"] = port, ["version"] = Version, ["pid"] = Environment.ProcessId });
 
         var timer = new System.Windows.Forms.Timer { Interval = 30 };

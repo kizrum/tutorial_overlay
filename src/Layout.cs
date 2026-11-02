@@ -17,14 +17,15 @@ internal sealed class AnchorGeo
     public bool FromLastKnown;        // the visual anchor is out of view; P is where it was last seen
 }
 
-internal enum PrimKind { Circle, Rect, Arrow, Badge, Label, Info, Check, Checkbox }
+internal enum PrimKind { Circle, Rect, Arrow, Badge, Label, Info, Check, Checkbox, Stroke }
 
 internal sealed class Prim
 {
     public PrimKind Kind;
     public PointF A, B;          // circle/badge/check centre = A; arrow tail = A, tip = B
     public float R;
-    public RectangleF Rect;      // rect/label/info/checkbox box
+    public RectangleF Rect;      // rect/label/info/checkbox box; stroke bounds
+    public PointF[]? Points;     // stroke polyline
     public string? Text, Title;
     public Color Color;
     public float Width;          // stroke

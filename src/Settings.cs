@@ -111,6 +111,29 @@ internal sealed class Loc
     public string CantFind = "Не вижу, куда жать", DontGet = "Не понимаю, что делать", Cancel = "Отмена", HintHelp = "помощь";
     public string Other = "Другое — опишу сам", OtherTitle = "Опишите, что не получается", Send = "Отправить",
         OtherHint = "Enter — отправить · Shift+Enter — новая строка · Esc — отмена";
+    public string Sketch = "Обвести", Sketched = "Обведено: {0}", SketchTitle = "Обведите на экране, о чём речь",
+        SketchText = "Рисуйте мышью · Enter или правый клик — готово · Ctrl+Z — убрать штрих · Esc — отмена", SketchClear = "Стереть";
+
+    // tray icon
+    public string TrayRunning = "Работает · 127.0.0.1:{0}", TrayAgentNever = "Агент ещё не обращался", TrayAgentAgo = "Агент обращался {0} назад",
+        TrayTutorial = "Туториал «{0}» · шаг {1} из {2}", TrayNoTutorial = "Туториал не запущен",
+        TraySettings = "Настройки…", TrayCopyKey = "Скопировать ключ", TrayCopyUrl = "Скопировать адрес MCP",
+        TrayOpenFolder = "Открыть папку настроек", TrayStopTutorial = "Остановить туториал", TrayExit = "Закрыть TutorialOverlay",
+        TrayExitConfirm = "Сейчас идёт туториал. Всё равно закрыть TutorialOverlay?", Sec = "с", Min = "мин", Hour = "ч";
+
+    // settings window
+    public string SetTitle = "Настройки TutorialOverlay", SetTabServer = "Сервер", SetTabLook = "Вид", SetTabKeys = "Горячие клавиши",
+        SetPort = "Порт", SetPortArg = "сейчас задан параметром --port {0}",
+        SetPortNote = "Новый порт начнёт работать после перезапуска. Адрес в .mcp.json (или в claude mcp add) тоже нужно поменять.",
+        SetUrl = "Адрес MCP", SetKey = "Ключ", SetKeySource = "Откуда взят: {0}", Show = "Показать", Hide = "Скрыть", Copy = "Копировать",
+        SetLang = "Язык", SetAccent = "Цвет отметок", SetPickColor = "Выбрать…", SetReset = "Сбросить",
+        SetAutoColor = "Подбирать цвет отметок под приложение", SetAnimate = "Анимация",
+        SetHideInactive = "Прятать отметки, когда приложение не на переднем плане",
+        SetHideCapture = "Скрывать оверлей от скриншотов и записи экрана",
+        SetKeysNote = "Щёлкните в поле и нажмите сочетание (с Ctrl, Alt или Win). Backspace или Delete — отключить.",
+        KeyStop = "Завершить туториал", KeyNone = "нет", SetSave = "Сохранить", SetDefaults = "По умолчанию",
+        SetRestartAsk = "Порт изменён на {0}. Перезапустить сервер сейчас?\n\nАгенту придётся подключиться заново по новому адресу.",
+        SetAfterTutorial = "Сохранено. Цвет и язык применятся после текущего туториала.", SetSaveFailed = "Не удалось сохранить настройки: {0}";
     public string HelpSent = "Передал ассистенту — сейчас подскажу.", Highlighting = "Подсвечиваю, куда нажать…";
     public string IssueMinimized = "Окно свёрнуто — разверните его.", IssueOccluded = "Нужное место закрыто другим окном.",
         IssueInactive = "Переключитесь в нужное приложение.", IssueMissing = "Не нахожу нужный элемент на экране.",
@@ -134,6 +157,25 @@ internal sealed class Loc
         CantFind = "I can't find where to click", DontGet = "I don't get what to do", Cancel = "Cancel", HintHelp = "help",
         Other = "Something else — I'll describe it", OtherTitle = "Describe what isn't working", Send = "Send",
         OtherHint = "Enter — send · Shift+Enter — new line · Esc — cancel",
+        Sketch = "Circle it", Sketched = "Circled: {0}", SketchTitle = "Circle the part of the screen you mean",
+        SketchText = "Draw with the mouse · Enter or right click — done · Ctrl+Z — undo stroke · Esc — cancel", SketchClear = "Clear",
+        TrayRunning = "Running · 127.0.0.1:{0}", TrayAgentNever = "No requests from the agent yet", TrayAgentAgo = "Agent's last request {0} ago",
+        TrayTutorial = "Tutorial \"{0}\" · step {1} of {2}", TrayNoTutorial = "No tutorial running",
+        TraySettings = "Settings…", TrayCopyKey = "Copy key", TrayCopyUrl = "Copy MCP address",
+        TrayOpenFolder = "Open settings folder", TrayStopTutorial = "Stop tutorial", TrayExit = "Quit TutorialOverlay",
+        TrayExitConfirm = "A tutorial is running. Quit TutorialOverlay anyway?", Sec = "s", Min = "min", Hour = "h",
+        SetTitle = "TutorialOverlay settings", SetTabServer = "Server", SetTabLook = "Look", SetTabKeys = "Hotkeys",
+        SetPort = "Port", SetPortArg = "currently set by --port {0}",
+        SetPortNote = "A new port takes effect after a restart. Update the address in .mcp.json (or claude mcp add) as well.",
+        SetUrl = "MCP address", SetKey = "Key", SetKeySource = "Taken from: {0}", Show = "Show", Hide = "Hide", Copy = "Copy",
+        SetLang = "Language", SetAccent = "Mark colour", SetPickColor = "Choose…", SetReset = "Reset",
+        SetAutoColor = "Match mark colour to the app", SetAnimate = "Animation",
+        SetHideInactive = "Hide marks while the app is not in front",
+        SetHideCapture = "Hide the overlay from screenshots and screen recording",
+        SetKeysNote = "Click a field and press a chord (with Ctrl, Alt or Win). Backspace or Delete turns it off.",
+        KeyStop = "Stop tutorial", KeyNone = "none", SetSave = "Save", SetDefaults = "Defaults",
+        SetRestartAsk = "The port is now {0}. Restart the server now?\n\nThe agent will have to reconnect to the new address.",
+        SetAfterTutorial = "Saved. Colour and language apply after the current tutorial.", SetSaveFailed = "Could not save settings: {0}",
         HelpSent = "Told the assistant — a hint is coming.", Highlighting = "Highlighting where to click…",
         IssueMinimized = "The window is minimized — restore it.", IssueOccluded = "Another window covers the spot.",
         IssueInactive = "Switch to the app.", IssueMissing = "Can't find the element on screen.",
@@ -160,6 +202,8 @@ internal sealed class Settings
     public bool HideFromCapture;
     /// <summary>Pick mark colours that contrast with the app around each target (explicit "color" still wins).</summary>
     public bool AutoColor = true;
+    /// <summary>Server port when --port is not given (read at start-up).</summary>
+    public int? Port;
 
     public static readonly string[] Actions = { "done", "back", "skip", "undo", "stop", "help" };
 
@@ -196,7 +240,7 @@ internal sealed class Settings
     public Settings Clone() => new()
     {
         Lang = Lang, Accent = Accent, Hotkeys = new Dictionary<string, Chord>(Hotkeys), Animate = Animate, HideWhenInactive = HideWhenInactive,
-        HideFromCapture = HideFromCapture, AutoColor = AutoColor,
+        HideFromCapture = HideFromCapture, AutoColor = AutoColor, Port = Port,
     };
 
     /// <summary>Overlay the fields present in <paramref name="n"/>.</summary>
@@ -209,6 +253,7 @@ internal sealed class Settings
         if (J.Bool(n, "hideWhenInactive") is bool hw) HideWhenInactive = hw;
         if (J.Bool(n, "hideFromCapture") is bool hc) HideFromCapture = hc;
         if (J.Bool(n, "autoColor") is bool ac) AutoColor = ac;
+        if (J.Int(n, "port") is int port && port is > 0 and < 65536) Port = port;
         if (J.Get(n, "hotkeys") is JsonObject hk)
             foreach (var a in Actions)
             {

@@ -558,6 +558,7 @@ internal sealed class Step
     public readonly List<JsonObject> Misses = new();   // recent misses, for help requests
     public string? Hint, HintTitle;                    // agent's answer shown on the card
     public bool HelpPending;
+    public List<PointF[]>? Sketch;                     // what the user circled with the help request (until the answer)
     public DateTime? HighlightUntil;
     public DateTime NextPing;
     public DateTime? SeqMissingSince;            // current sequence target's anchor gone (menu closed?)

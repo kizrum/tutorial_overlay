@@ -201,6 +201,17 @@ internal static class Theme
         g.DrawLine(pen, c.X - r * 0.40f, c.Y + s * 0.28f, c.X + r * 0.40f, c.Y + s * 0.28f);
     }
 
+    public static void IconPencil(Graphics g, PointF c, float s, Color color, float w)
+    {
+        using var pen = new Pen(color, w) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+        // a slanted pencil: body from the top-right down to a pointed tip at the bottom-left
+        float h = s * 0.13f;                              // half the body's thickness
+        PointF a = new(c.X + s * 0.38f, c.Y - s * 0.38f), b = new(c.X - s * 0.18f, c.Y + s * 0.18f);
+        var tip = new PointF(c.X - s * 0.42f, c.Y + s * 0.42f);
+        g.DrawPolygon(pen, new[] { new PointF(a.X - h, a.Y - h), new PointF(a.X + h, a.Y + h), new PointF(b.X + h, b.Y + h), tip, new PointF(b.X - h, b.Y - h) });
+        g.DrawLine(pen, a.X - h - s * 0.12f, a.Y - h + s * 0.12f, a.X + h - s * 0.12f, a.Y + h + s * 0.12f);
+    }
+
     public static void IconSkip(Graphics g, PointF c, float s, Color color, float w)
     {
         IconChevron(g, new PointF(c.X - s * 0.16f, c.Y), s, false, color, w);

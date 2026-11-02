@@ -524,6 +524,7 @@ internal static partial class Engine
             if (step != null && t!.AdvanceAt == null) AddDialogVisuals(step, sc, f.Card.Avoid);
             CheckOpens(marks, step, now);
             AddPickVisuals(sc, f.Card.Avoid);
+            if (step?.Sketch is { } sketch) AddSketchVisuals(sketch, sc, f.Card.Avoid);
             AddScrollVisuals(marks, sc, f.Card.Avoid, fgPid);
             if (step?.HighlightUntil is DateTime hu)
             {
@@ -1239,19 +1240,28 @@ internal static partial class Engine
     }
 
     /// <summary>The user says they can't find the target / don't understand the step.</summary>
-    public static void RequestHelp(string reason, string source, string? text = null)
+    /// <param name="sketch">areas the user circled with the pencil; disposed here</param>
+    public static void RequestHelp(string reason, string source, string? text = null, Sketch? sketch = null)
     {
+        JsonObject? drawn = null;
+        if (sketch != null)
+        {
+            try { drawn = SketchJson(sketch); }
+            finally { sketch.Dispose(); }
+        }
         lock (Sync)
         {
             var t = _tut;
             var s = t is { State: "running" } ? t.Current : null;
             if (s == null) return;
             s.HelpPending = true;
+            s.Sketch = sketch is { Empty: false } ? sketch.Strokes.ToList() : null;
             if (reason == "cant_find") { s.HighlightUntil = DateTime.UtcNow.AddSeconds(6); s.NextPing = default; }
             Native.GetCursorPos(out var cur);
             Events.Emit("help", new()
             {
                 ["reason"] = reason, ["source"] = source, ["text"] = text, ["step"] = t!.Index, ["id"] = s.Id, ["title"] = s.Title,
+                ["sketch"] = drawn,
                 ["targets"] = new JsonArray(s.Targets.Select(m => (JsonNode)MarkJson(m)).ToArray()),
                 ["issue"] = TargetIssue(s),
                 ["blockingDialog"] = BlockingDialog(s),
@@ -1261,11 +1271,62 @@ internal static partial class Engine
                 ["advice"] = reason switch
                 {
                     "cant_find" => "targets are being highlighted for 6 s; consider screenshot(includeOverlay) to verify placement, then hint() or re-draw",
+                    "other" when drawn != null => "the user described the problem in their own words (text) and circled the area they mean (sketch: " +
+                        "bounds/strokes in screen pixels, the UIA element at its centre, and sketch.image — a PNG of that area with the circling, open it with Read); " +
+                        "answer with hint(), fix the step, or ask via hint",
                     "other" => "the user described the problem in their own words (text); answer with hint(), fix the step, or ask via hint",
                     _ => "explain the step in simpler words with hint(text), or split it with append_steps/insertAt",
                 },
             });
             _stepVersion++;
+        }
+    }
+
+    /// <summary>The pencil sketch for the agent: where it is, what is under it, and a picture of it.</summary>
+    private static JsonObject SketchJson(Sketch sk)
+    {
+        var b = sk.Bounds();
+        var c = new PointF(b.X + b.Width / 2, b.Y + b.Height / 2);
+        // offsets against the step's first target, so a misplaced mark can be moved to where the user points
+        var anchor = _tut?.Current?.Targets.FirstOrDefault()?.Anchor;
+        JsonObject at;
+        try { at = PointInfo(c, anchor, out _); }
+        catch (Exception ex) { at = new JsonObject { ["x"] = (int)c.X, ["y"] = (int)c.Y, ["error"] = ex.Message }; }
+        return new JsonObject
+        {
+            ["bounds"] = J.RectJson(b),
+            ["center"] = J.PtJson(c),
+            ["strokes"] = new JsonArray(sk.Strokes.Select(s => (JsonNode)StrokeJson(s)).ToArray()),
+            ["atCenter"] = at,
+            ["image"] = sk.SaveImage(),
+        };
+    }
+
+    private static JsonObject StrokeJson(PointF[] pts)
+    {
+        float l = pts.Min(p => p.X), t = pts.Min(p => p.Y), r = pts.Max(p => p.X), btm = pts.Max(p => p.Y);
+        float size = Math.Max(r - l, btm - t);
+        float gap = MathF.Sqrt((pts[0].X - pts[^1].X) * (pts[0].X - pts[^1].X) + (pts[0].Y - pts[^1].Y) * (pts[0].Y - pts[^1].Y));
+        int step = Math.Max(1, (int)Math.Ceiling(pts.Length / 48.0));
+        var kept = pts.Where((_, i) => i % step == 0 || i == pts.Length - 1);
+        return new JsonObject
+        {
+            ["bounds"] = J.RectJson(RectangleF.FromLTRB(l, t, r, btm)),
+            // a loop around something vs. a line / underline / pointer
+            ["shape"] = size < 12 ? "dot" : gap < size * 0.35f ? "loop" : "line",
+            ["from"] = J.PtJson(pts[0]), ["to"] = J.PtJson(pts[^1]),
+            ["points"] = new JsonArray(kept.Select(p => (JsonNode)new JsonArray((int)p.X, (int)p.Y)).ToArray()),
+        };
+    }
+
+    private static void AddSketchVisuals(List<PointF[]> strokes, Scene sc, List<RectangleF> avoid)
+    {
+        foreach (var pts in strokes.Where(p => p.Length > 0))
+        {
+            float k = Native.ScaleAt(pts[0]);
+            var b = RectangleF.FromLTRB(pts.Min(p => p.X), pts.Min(p => p.Y), pts.Max(p => p.X), pts.Max(p => p.Y));
+            sc.Prims.Add((new Prim { Kind = PrimKind.Stroke, Points = pts, Rect = b, Color = Palette.Accent, Width = 4 * k, Scale = k }, 1f));
+            avoid.Add(b);
         }
     }
 
@@ -1280,6 +1341,7 @@ internal static partial class Engine
             s.Hint = J.Str(args, "text");
             s.HintTitle = J.Str(args, "title");
             s.HelpPending = false;
+            s.Sketch = null;
             if (J.Bool(args, "highlight") == true) { s.HighlightUntil = DateTime.UtcNow.AddSeconds(J.Int(args, "seconds") ?? 6); s.NextPing = default; }
             _stepVersion++;
             return TutorialJson();

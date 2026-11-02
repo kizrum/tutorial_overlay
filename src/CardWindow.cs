@@ -646,7 +646,12 @@ internal sealed class CardWindow : NoActivateForm
         {
             _helpOpen = false;
             Relayout();
-            HelpInput.Ask(this, _s, text => Engine.RequestHelp("other", "card", text));
+            // the circled area is described via UI Automation — keep that off the UI thread
+            HelpInput.Ask(this, _s, (text, sketch) =>
+            {
+                if (sketch == null) Engine.RequestHelp("other", "card", text);
+                else System.Threading.Tasks.Task.Run(() => Engine.RequestHelp("other", "card", text, sketch));
+            });
         }
         else
         {
@@ -750,15 +755,18 @@ internal sealed class HelpInput : Form
     private static HelpInput? _open;
     private readonly TextBox _box;
     private readonly IntPtr _returnTo;
-    private readonly Action<string> _send;
+    private readonly Action<string, Sketch?> _send;
     private readonly float _s;
-    private RectangleF _sendRect, _cancelRect;
+    private readonly Sketch _sketch = new();
+    private bool _sketching;                   // hidden while the user draws — not a "click elsewhere"
+    private bool _disposeSketch = true;        // false once the sketch was handed to the engine
+    private RectangleF _sendRect, _cancelRect, _pencilRect;
     private string _hover = "";
 
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr h);
 
-    public static void Ask(Form near, float scale, Action<string> send)
+    public static void Ask(Form near, float scale, Action<string, Sketch?> send)
     {
         if (_open != null) { _open.Activate(); return; }
         _open = new HelpInput(near, scale, send);
@@ -768,7 +776,7 @@ internal sealed class HelpInput : Form
         _open._box.Focus();
     }
 
-    private HelpInput(Form near, float s, Action<string> send)
+    private HelpInput(Form near, float s, Action<string, Sketch?> send)
     {
         _s = s;
         _send = send;
@@ -782,7 +790,7 @@ internal sealed class HelpInput : Form
         BackColor = Palette.Ink;
         KeyPreview = true;
         Text = "TutorialOverlay help";
-        int w = (int)(near.Width), h = (int)(196 * s);
+        int w = (int)(near.Width), h = (int)(222 * s);
         var work = Native.WorkAreaAt(new PointF(near.Left + near.Width / 2f, near.Top));
         int y = near.Top - h - (int)(10 * s);
         if (y < work.Top) y = Math.Min(near.Bottom + (int)(10 * s), work.Bottom - h);
@@ -813,19 +821,51 @@ internal sealed class HelpInput : Form
     {
         base.OnDeactivate(e);
         // clicking elsewhere = cancel; never leave a stray input window behind
-        if (Visible) BeginInvoke(new Action(() => { if (!IsDisposed) Close(); }));
+        if (Visible && !_sketching) BeginInvoke(new Action(() => { if (!IsDisposed) Close(); }));
     }
 
     private void Submit()
     {
         var text = _box.Text.Trim();
         if (text.Length == 0) { _box.Focus(); return; }
-        _send(text);
-        CloseAndReturn();
+        if (_sketch.Empty) { _sketch.Dispose(); _send(text, null); }
+        else _send(text, _sketch);           // the receiver owns the sketch now
+        CloseAndReturn(false);
     }
 
-    private void CloseAndReturn()
+    /// <summary>Pencil: hide, let the user circle the area on a frozen screen, come back with the text intact.</summary>
+    private void StartSketch()
     {
+        _sketching = true;
+        Hide();
+        // give DWM a moment to drop this window before the screen is frozen
+        var t = new System.Windows.Forms.Timer { Interval = 120 };
+        t.Tick += (_, _) =>
+        {
+            t.Dispose();
+            if (IsDisposed) return;
+            SketchPad.Open(_sketch, _ =>
+            {
+                if (IsDisposed) return;
+                Show();
+                Activate();
+                _box.Focus();
+                _sketching = false;
+                Invalidate();
+            });
+        };
+        t.Start();
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        base.OnFormClosed(e);
+        if (_disposeSketch) _sketch.Dispose();
+    }
+
+    private void CloseAndReturn(bool dropSketch = true)
+    {
+        _disposeSketch = dropSketch;
         var back = _returnTo;
         Close();
         if (back != IntPtr.Zero) SetForegroundWindow(back);
@@ -850,13 +890,30 @@ internal sealed class HelpInput : Form
             using var pen = new Pen(_box.Focused ? Palette.Accent : Palette.Line, 1.2f * s);
             g.DrawPath(pen, path);
         }
+        using (var hb = new SolidBrush(Palette.WithAlpha(Palette.TextDim, 0.8f)))
+            g.DrawString(loc.OtherHint, Theme.Font(11 * s), hb, new RectangleF(18 * s, field.Bottom + 6 * s, w - 36 * s, 18 * s), new StringFormat(Theme.Center) { Alignment = StringAlignment.Near, FormatFlags = 0 });
         float bh = 34 * s, by = h - bh - 14 * s;
-        _sendRect = new RectangleF(w - 18 * s - 130 * s, by, 130 * s, bh);
-        _cancelRect = new RectangleF(_sendRect.X - 10 * s - 100 * s, by, 100 * s, bh);
+        _sendRect = new RectangleF(w - 18 * s - 120 * s, by, 120 * s, bh);
+        _cancelRect = new RectangleF(_sendRect.X - 10 * s - 96 * s, by, 96 * s, bh);
+        _pencilRect = new RectangleF(18 * s, by, _cancelRect.X - 10 * s - 18 * s, bh);
         DrawPill(g, _cancelRect, loc.Cancel, false, _hover == "cancel");
         DrawPill(g, _sendRect, loc.Send, true, _hover == "send");
-        using (var hb = new SolidBrush(Palette.WithAlpha(Palette.TextDim, 0.8f)))
-            g.DrawString(loc.OtherHint, Theme.Font(11 * s), hb, new RectangleF(18 * s, by, _cancelRect.X - 26 * s, bh), new StringFormat(Theme.Center) { Alignment = StringAlignment.Near, FormatFlags = 0 });
+        DrawPencil(g, _pencilRect, _sketch.Empty ? loc.Sketch : string.Format(loc.Sketched, _sketch.Strokes.Count), !_sketch.Empty, _hover == "pencil");
+    }
+
+    private void DrawPencil(Graphics g, RectangleF r, string text, bool on, bool hover)
+    {
+        using var path = Theme.Rounded(r, r.Height / 2);
+        using (var b = new SolidBrush(hover ? Palette.InkHover : Palette.InkRaised)) g.FillPath(b, path);
+        using (var pen = new Pen(on ? Palette.Accent : Palette.Line, (on ? 1.5f : 1f) * _s)) g.DrawPath(pen, path);
+        var fg = on ? Palette.Accent : Palette.Text;
+        float ic = 16 * _s, pad = 12 * _s;
+        var font = Theme.Font(13.5f * _s, true);
+        float tw = Math.Min(Theme.Measure(text, font, r.Width).Width, r.Width - pad * 2 - ic - 6 * _s);
+        float x = r.X + (r.Width - ic - 6 * _s - tw) / 2;
+        Theme.IconPencil(g, new PointF(x + ic / 2, r.Y + r.Height / 2), ic, fg, 1.8f * _s);
+        using var tb = new SolidBrush(fg);
+        g.DrawString(text, font, tb, new RectangleF(x + ic + 6 * _s, r.Y, tw + 2 * _s, r.Height), new StringFormat(Theme.Center) { Alignment = StringAlignment.Near, Trimming = StringTrimming.EllipsisCharacter });
     }
 
     private void DrawPill(Graphics g, RectangleF r, string text, bool primary, bool hover)
@@ -872,7 +929,7 @@ internal sealed class HelpInput : Form
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        var hv = _sendRect.Contains(e.Location) ? "send" : _cancelRect.Contains(e.Location) ? "cancel" : "";
+        var hv = _sendRect.Contains(e.Location) ? "send" : _cancelRect.Contains(e.Location) ? "cancel" : _pencilRect.Contains(e.Location) ? "pencil" : "";
         if (hv != _hover) { _hover = hv; Cursor = hv.Length > 0 ? Cursors.Hand : Cursors.Default; Invalidate(); }
     }
 
@@ -881,5 +938,6 @@ internal sealed class HelpInput : Form
         base.OnMouseUp(e);
         if (_sendRect.Contains(e.Location)) Submit();
         else if (_cancelRect.Contains(e.Location)) CloseAndReturn();
+        else if (_pencilRect.Contains(e.Location)) StartSketch();
     }
 }

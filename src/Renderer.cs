@@ -59,6 +59,7 @@ internal static class Renderer
                 case PrimKind.Info: Info(g, p, a); break;
                 case PrimKind.Check: Check(g, p, a); break;
                 case PrimKind.Checkbox: Checkbox(g, p, a, sc.Pulse); break;
+                case PrimKind.Stroke: SketchPad.DrawStroke(g, p.Points!, Palette.WithAlpha(p.Color, a), p.Scale); break;
             }
         }
         var now = DateTime.UtcNow;
