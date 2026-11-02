@@ -649,7 +649,11 @@ internal sealed class Tutorial
     public float? Dim;
     public int AdvanceDelayMs = 450;
     public bool HideWhenInactive = true;
+    public bool Outro = true;            // after the last step: offer save / repeat / continue on the card
+    public JsonObject Spec = new();      // what it was started from (+ appended steps) — what "save" writes
+    public string? SavedAs;              // name in the tutorial library, once saved
 
+    public bool OutroOpen;               // finished, the end card is showing
     public DateTime? AdvanceAt;          // step completed, waiting for the short "✓" moment
     public string? CompletedHow;
 

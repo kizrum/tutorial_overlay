@@ -43,10 +43,19 @@ internal static class Program
     /// <summary>Start a fresh instance (it reads the port from config.json) and quit this one.</summary>
     public static void Restart()
     {
+        // the new instance must be able to listen before this one gives its port up — else no server at all
+        int next = Settings.Global.Port ?? 7788;
+        if (next != Port && !Ports.IsFree(next))
+        {
+            var t = Settings.Global.Text;
+            MessageBox.Show(string.Format(t.RestartBusy, next, Ports.Owner(next) ?? "?", Port), "TutorialOverlay", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
         var psi = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
         for (int i = 0; i < _args.Length; i++)
         {
             if (_args[i] == "--port") { i++; continue; }
+            if (_args[i] == "--settings") { if (i + 1 < _args.Length && !_args[i + 1].StartsWith("--")) i++; continue; }
             psi.ArgumentList.Add(_args[i]);
         }
         Process.Start(psi);
@@ -81,6 +90,7 @@ internal static class Program
 
         int port = Settings.Global.Port ?? 7788;
         string? key = Environment.GetEnvironmentVariable("TUTORIAL_OVERLAY_KEY");
+        string? openSettings = null;
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -91,8 +101,11 @@ internal static class Program
                 case "--show-inactive": Engine.HideWhenInactiveDefault = false; break;
                 case "--hide-from-capture": Settings.Global.HideFromCapture = true; break;
                 case "--verbose": Log.Verbose = true; break;
+                // optional tab name: --settings look | keys
+                case "--settings": openSettings = i + 1 < args.Length && !args[i + 1].StartsWith("--") ? args[++i] : "server"; break;
                 case "--help" or "-h" or "/?":
-                    Console.Error.WriteLine("TutorialOverlay [--port 7788] [--key KEY] [--no-anim] [--show-inactive] [--verbose]\n" +
+                    Console.Error.WriteLine("TutorialOverlay [--port 7788] [--key KEY] [--no-anim] [--show-inactive] [--verbose] [--settings [server|look|keys]]\n" +
+                                            "  --settings: open the settings window right away (on that tab)\n" +
                                             "  key: --key, env TUTORIAL_OVERLAY_KEY, or %LOCALAPPDATA%\\TutorialOverlay\\key.txt (created on first run)\n" +
                                             "  stdout: one JSON event per line; stderr: diagnostics");
                     return 0;
@@ -138,6 +151,7 @@ internal static class Program
 
         Log.Info($"TutorialOverlay {Version} listening on http://127.0.0.1:{port}/mcp (key from {KeyFrom})");
         using var tray = new TrayIcon();
+        if (openSettings != null) SettingsWindow.Open(openSettings);
         Events.Emit("ready", new JsonObject { ["port"] = port, ["version"] = Version, ["pid"] = Environment.ProcessId });
 
         var timer = new System.Windows.Forms.Timer { Interval = 30 };

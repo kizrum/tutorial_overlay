@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
+using System.Linq;
+using System.Text.Json.Nodes;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
@@ -17,7 +19,7 @@ internal sealed class TrayIcon : IDisposable
 {
     private readonly NotifyIcon _icon;
     private readonly ContextMenuStrip _menu;
-    private readonly ToolStripMenuItem _running, _agent, _tutorial, _settings, _copyKey, _copyUrl, _folder, _stop, _exit;
+    private readonly ToolStripMenuItem _running, _agent, _tutorial, _library, _settings, _copyKey, _copyUrl, _copyCommand, _folder, _stop, _exit;
     private readonly System.Windows.Forms.Timer _timer;
     private IntPtr _hicon;
     private string _iconSig = "";
@@ -29,23 +31,25 @@ internal sealed class TrayIcon : IDisposable
 
     public TrayIcon()
     {
-        _menu = new ContextMenuStrip { ShowImageMargin = false };
+        _menu = new ContextMenuStrip { ShowImageMargin = false, Renderer = new DarkMenuRenderer(), BackColor = Palette.Ink, ForeColor = Palette.Text };
         _running = Info();
         _agent = Info();
         _tutorial = Info();
+        _library = new ToolStripMenuItem("");
         _settings = new ToolStripMenuItem("", null, (_, _) => SettingsWindow.Open()) { Font = new Font(_menu.Font, FontStyle.Bold) };
         _copyKey = new ToolStripMenuItem("", null, (_, _) => Copy(Program.Key));
         _copyUrl = new ToolStripMenuItem("", null, (_, _) => Copy($"http://127.0.0.1:{Program.Port}/mcp"));
-        _folder = new ToolStripMenuItem("", null, (_, _) => OpenFolder());
+        _copyCommand = new ToolStripMenuItem("", null, (_, _) => Copy(Ports.ConnectCommand(Program.Port, Program.Key)));
+        _folder = new ToolStripMenuItem("", null, (_, _) => OpenFolder(Path.GetDirectoryName(Settings.FilePath)!));
         _stop = new ToolStripMenuItem("", null, (_, _) => Engine.UserAction("stop", "tray"));
         _exit = new ToolStripMenuItem("", null, (_, _) => Quit());
         _menu.Items.AddRange(new ToolStripItem[]
         {
             _running, _agent, _tutorial, new ToolStripSeparator(),
-            _settings, _copyKey, _copyUrl, _folder, new ToolStripSeparator(),
+            _library, _settings, _copyCommand, _copyKey, _copyUrl, _folder, new ToolStripSeparator(),
             _stop, _exit,
         });
-        _menu.Opening += (_, _) => Refresh();
+        _menu.Opening += (_, _) => { Refresh(); FillLibrary(); };
 
         _icon = new NotifyIcon { ContextMenuStrip = _menu, Visible = true };
         _icon.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) SettingsWindow.Open(); };
@@ -57,6 +61,33 @@ internal sealed class TrayIcon : IDisposable
     }
 
     private static ToolStripMenuItem Info() => new() { Enabled = false };
+
+    /// <summary>Saved tutorials: a click replays one — no agent needed.</summary>
+    private void FillLibrary()
+    {
+        var t = Settings.Global.Text;
+        _library.Text = t.TrayTutorials;
+        _library.DropDownItems.Clear();
+        _library.DropDown.Renderer = _menu.Renderer;
+        _library.DropDown.BackColor = Palette.Ink;
+        if (_library.DropDown is ToolStripDropDownMenu dd) dd.ShowImageMargin = false;
+        var list = Tutorials.List();
+        foreach (var o in list.Take(25))
+        {
+            var name = J.Str(o, "name")!;
+            var label = $"{J.Str(o, "title")}  ·  {J.Int(o, "steps")}";
+            _library.DropDownItems.Add(new ToolStripMenuItem(label, null, (_, _) => StartSaved(name)));
+        }
+        if (list.Count == 0) _library.DropDownItems.Add(new ToolStripMenuItem(t.TrayTutorialsEmpty) { Enabled = false });
+        _library.DropDownItems.Add(new ToolStripSeparator());
+        _library.DropDownItems.Add(new ToolStripMenuItem(t.TrayTutorialsFolder, null, (_, _) => OpenFolder(Tutorials.Dir)));
+    }
+
+    private static void StartSaved(string name)
+    {
+        try { Engine.StartTutorial(new JsonObject { ["name"] = name }); }
+        catch (Exception e) { MessageBox.Show(e.Message, "TutorialOverlay", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    }
 
     private static TimeSpan? SinceAgent()
     {
@@ -81,6 +112,7 @@ internal sealed class TrayIcon : IDisposable
         _settings.Text = t.TraySettings;
         _copyKey.Text = t.TrayCopyKey;
         _copyUrl.Text = t.TrayCopyUrl;
+        _copyCommand.Text = t.TrayCopyCommand;
         _folder.Text = t.TrayOpenFolder;
         _stop.Text = t.TrayStopTutorial;
         _stop.Enabled = active;
@@ -146,9 +178,8 @@ internal sealed class TrayIcon : IDisposable
         catch (Exception e) { Log.Warn("clipboard: " + e.Message); }
     }
 
-    private static void OpenFolder()
+    private static void OpenFolder(string dir)
     {
-        var dir = Path.GetDirectoryName(Settings.FilePath)!;
         try
         {
             Directory.CreateDirectory(dir);

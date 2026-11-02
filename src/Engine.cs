@@ -97,6 +97,14 @@ internal static partial class Engine
         lock (Sync)
         {
             spec = J.Unwrap(J.Get(spec, "spec")) ?? spec;
+            string? savedAs = null;
+            if (J.Str(spec, "name") is string libName && !J.Has(spec, "steps"))
+            {
+                var startAt = J.Get(spec, "startAt")?.DeepClone();
+                spec = Tutorials.Load(libName);
+                if (startAt != null) spec["startAt"] = startAt;
+                savedAs = Tutorials.Slug(libName);
+            }
             ApplySettings(Settings.Global.Clone().Apply(spec));
             var t = new Tutorial
             {
@@ -106,7 +114,11 @@ internal static partial class Engine
                 Dim = J.Num(spec, "dim") is double d ? (float)d : null,
                 AdvanceDelayMs = J.Int(spec, "advanceDelayMs") ?? 450,
                 HideWhenInactive = J.Bool(spec, "hideWhenInactive") ?? Settings.Current.HideWhenInactive ?? HideWhenInactiveDefault,
+                Outro = J.Bool(spec, "outro") ?? true,
+                Spec = spec is JsonObject so ? (JsonObject)so.DeepClone() : new JsonObject(),
+                SavedAs = savedAs,
             };
+            t.Spec.Remove("startAt");
             t.Defaults = AnchorSpec.Parse(J.Get(spec, "anchor") ?? new JsonObject { ["process"] = J.Str(spec, "app") ?? J.Str(spec, "process") }, null);
             if (J.Str(spec, "window") is string w && t.Defaults.Window == null) t.Defaults.Window = w;
             int i = 0;
@@ -127,9 +139,19 @@ internal static partial class Engine
             if (_tut == null || !_tut.Active) throw new InvalidOperationException("no active tutorial (start_tutorial first)");
             int i = _tut.Steps.Count, added = 0;
             int? insertAt = J.Int(args, "insertAt");
-            var parsed = J.Items(J.Get(args, "steps") ?? args).Select(s => Step.Parse(s, _tut.Defaults, i++)).ToList();
-            if (insertAt is int at && at > _tut.Index && at <= _tut.Steps.Count) _tut.Steps.InsertRange(at, parsed);
-            else _tut.Steps.AddRange(parsed);
+            var raw = J.Items(J.Get(args, "steps") ?? args).ToList();
+            var parsed = raw.Select(s => Step.Parse(s, _tut.Defaults, i++)).ToList();
+            if (_tut.Spec["steps"] is not JsonArray specSteps) _tut.Spec["steps"] = specSteps = new JsonArray();
+            if (insertAt is int at && at > _tut.Index && at <= _tut.Steps.Count)
+            {
+                _tut.Steps.InsertRange(at, parsed);
+                for (int k = 0; k < raw.Count; k++) specSteps.Insert(Math.Min(at + k, specSteps.Count), raw[k].DeepClone());
+            }
+            else
+            {
+                _tut.Steps.AddRange(parsed);
+                foreach (var r in raw) specSteps.Add(r.DeepClone());
+            }
             added = parsed.Count;
             Events.Emit("steps_appended", new() { ["added"] = added, ["total"] = _tut.Steps.Count });
             if (_tut.State == "waiting" && added > 0) { _tut.State = "running"; Enter(_tut.Index + 1); }
@@ -185,6 +207,11 @@ internal static partial class Engine
         lock (Sync)
         {
             var t = _tut;
+            if (t is { OutroOpen: true } && action is "stop" or "close")
+            {
+                Outro("outro_close", source);
+                return;
+            }
             if (t == null || !t.Active) return;
             switch (action)
             {
@@ -242,6 +269,9 @@ internal static partial class Engine
                     break;
                 case "done" or "next" or "back" or "skip" or "undo" or "stop":
                     UserAction(action, source);
+                    break;
+                case "outro_save" or "outro_repeat" or "outro_continue" or "outro_close":
+                    Outro(action, source);
                     break;
             }
         }
@@ -304,8 +334,10 @@ internal static partial class Engine
         else
         {
             t.State = "finished";
-            ApplySettings(Settings.Global);
-            Events.Emit("tutorial_finished", new() { ["title"] = t.Title, ["total"] = t.Steps.Count });
+            t.OutroOpen = t.Outro;
+            // the end card keeps the tutorial's look until it is closed
+            if (!t.OutroOpen) ApplySettings(Settings.Global);
+            Events.Emit("tutorial_finished", new() { ["title"] = t.Title, ["total"] = t.Steps.Count, ["outro"] = t.Outro, ["savedAs"] = t.SavedAs });
         }
         _stepVersion++;
     }
@@ -1132,6 +1164,11 @@ internal static partial class Engine
     private static void BuildCard(CardModel card, Tutorial? t, int fgPid)
     {
         card.StepVersion = _stepVersion;
+        if (t is { OutroOpen: true })
+        {
+            BuildOutroCard(card, t, fgPid);
+            return;
+        }
         if (t == null || !t.Active) return;
         var s = t.Current;
         // the card follows the same rule as the marks: only while the user is in the app

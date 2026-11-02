@@ -226,7 +226,7 @@ internal sealed class CardWindow : NoActivateForm
             y += h + gap;
         }
 
-        if (m.State == "waiting") { y += 0; return; }
+        if (m.State is "waiting" or "outro") return;
         var loc = Settings.Current.Text;
         if (_helpOpen)
         {
@@ -287,7 +287,7 @@ internal sealed class CardWindow : NoActivateForm
 
     private float TextW(string t) => Theme.Measure(t, Theme.Font(13.5f * _s, true), 600 * _s).Width;
 
-    private float HintHeight() => Theme.Measure(Settings.Current.HintLine(_model.State == "waiting"), Theme.Font(11.5f * _s), ContentWidth).Height;
+    private float HintHeight() => Theme.Measure(Settings.Current.HintLine(_model.State is "waiting" or "outro"), Theme.Font(11.5f * _s), ContentWidth).Height;
 
     private void Place(CardModel m)
     {
@@ -431,7 +431,7 @@ internal sealed class CardWindow : NoActivateForm
 
         // header: STEP n / N and close
         var loc = Settings.Current.Text;
-        var head = m.State == "waiting" ? loc.Waiting : $"{loc.Step} {m.Index + 1} / {m.Total}";
+        var head = m.State == "waiting" ? loc.Waiting : m.State == "outro" ? loc.OutroHead : $"{loc.Step} {m.Index + 1} / {m.Total}";
         using (var b = new SolidBrush(Palette.Accent)) g.DrawString(head, Theme.Font(12 * s, true), b, Pad, y + 2 * s);
         if (m.Completed)
         {
@@ -530,7 +530,7 @@ internal sealed class CardWindow : NoActivateForm
         float hh = HintHeight();
         float hy = ClientSize.Height - Pad * 0.6f - hh;
         using (var hb = new SolidBrush(Palette.WithAlpha(Palette.TextDim, 0.75f)))
-            g.DrawString(Settings.Current.HintLine(m.State == "waiting"),
+            g.DrawString(Settings.Current.HintLine(m.State is "waiting" or "outro"),
                 Theme.Font(11.5f * s), hb, new RectangleF(Pad, hy, ContentWidth, hh + 2), Theme.Wrap);
     }
 

@@ -114,19 +114,29 @@ internal sealed class Loc
     public string Sketch = "Обвести", Sketched = "Обведено: {0}", SketchTitle = "Обведите на экране, о чём речь",
         SketchText = "Рисуйте мышью · Enter или правый клик — готово · Ctrl+Z — убрать штрих · Esc — отмена", SketchClear = "Стереть";
 
+    public string OutroHead = "ГОТОВО", OutroTitle = "Туториал пройден!", OutroText = "Вы прошли «{0}» — шагов: {1}. Что дальше?",
+        OutroSave = "Сохранить туториал", OutroRepeat = "Пройти ещё раз", OutroContinue = "Продолжить обучение", OutroClose = "Закрыть",
+        OutroSavedTitle = "Сохранено", OutroSavedText = "Туториал в вашей библиотеке: его можно пройти снова из меню значка в трее (Туториалы).",
+        TrayTutorials = "Туториалы", TrayTutorialsEmpty = "Пока нет сохранённых", TrayTutorialsFolder = "Открыть папку туториалов";
     public string AskTitle = "Вопрос от ассистента", AskHint = "Enter — отправить · Shift+Enter — новая строка · Esc — закрыть";
 
     // tray icon
     public string TrayRunning = "Работает · 127.0.0.1:{0}", TrayAgentNever = "Агент ещё не обращался", TrayAgentAgo = "Агент обращался {0} назад",
         TrayTutorial = "Туториал «{0}» · шаг {1} из {2}", TrayNoTutorial = "Туториал не запущен",
         TraySettings = "Настройки…", TrayCopyKey = "Скопировать ключ", TrayCopyUrl = "Скопировать адрес MCP",
+        TrayCopyCommand = "Скопировать команду для агента",
         TrayOpenFolder = "Открыть папку настроек", TrayStopTutorial = "Остановить туториал", TrayExit = "Закрыть TutorialOverlay",
         TrayExitConfirm = "Сейчас идёт туториал. Всё равно закрыть TutorialOverlay?", Sec = "с", Min = "мин", Hour = "ч";
 
     // settings window
     public string SetTitle = "Настройки TutorialOverlay", SetTabServer = "Сервер", SetTabLook = "Вид", SetTabKeys = "Горячие клавиши",
         SetPort = "Порт", SetPortArg = "сейчас задан параметром --port {0}",
-        SetPortNote = "Новый порт начнёт работать после перезапуска. Адрес в .mcp.json (или в claude mcp add) тоже нужно поменять.",
+        SetPortNote = "Новый порт начнёт работать после сохранения и перезапуска. Потом нажмите «Для агента» и отдайте команду агенту — он переподключится сам.",
+        SetPortFree = "свободен ✓", SetPortBusy = "занят: {0}", SetPortBusyUnknown = "занят другой программой", SetPortHere = "на нём работает этот сервер",
+        SetPortBad = "порт — число от 1024 до 65535", SetPortPick = "Подобрать", SetPortNone = "нет свободных портов {0}–{1}",
+        SetForAgent = "Для агента", SetForAgentBtn = "Скопировать команду подключения", Copied = "Скопировано ✓",
+        SetForAgentNote = "Команда claude mcp add с портом из поля выше и ключом. Вставьте её в чат агенту (или выполните в терминале).",
+        RestartBusy = "Порт {0} уже занят ({1}). Сервер не перезапущен и продолжает работать на {2}.",
         SetUrl = "Адрес MCP", SetKey = "Ключ", SetKeySource = "Откуда взят: {0}", Show = "Показать", Hide = "Скрыть", Copy = "Копировать",
         SetLang = "Язык", SetAccent = "Цвет отметок", SetPickColor = "Выбрать…", SetReset = "Сбросить",
         SetAutoColor = "Подбирать цвет отметок под приложение", SetAnimate = "Анимация",
@@ -161,15 +171,25 @@ internal sealed class Loc
         OtherHint = "Enter — send · Shift+Enter — new line · Esc — cancel",
         Sketch = "Circle it", Sketched = "Circled: {0}", SketchTitle = "Circle the part of the screen you mean",
         SketchText = "Draw with the mouse · Enter or right click — done · Ctrl+Z — undo stroke · Esc — cancel", SketchClear = "Clear",
+        OutroHead = "DONE", OutroTitle = "Tutorial complete!", OutroText = "You finished \"{0}\" — {1} steps. What next?",
+        OutroSave = "Save tutorial", OutroRepeat = "Go through again", OutroContinue = "Keep learning", OutroClose = "Close",
+        OutroSavedTitle = "Saved", OutroSavedText = "It is in your library: replay it any time from the tray icon menu (Tutorials).",
+        TrayTutorials = "Tutorials", TrayTutorialsEmpty = "Nothing saved yet", TrayTutorialsFolder = "Open tutorials folder",
         AskTitle = "The assistant asks", AskHint = "Enter — send · Shift+Enter — new line · Esc — close",
         TrayRunning = "Running · 127.0.0.1:{0}", TrayAgentNever = "No requests from the agent yet", TrayAgentAgo = "Agent's last request {0} ago",
         TrayTutorial = "Tutorial \"{0}\" · step {1} of {2}", TrayNoTutorial = "No tutorial running",
         TraySettings = "Settings…", TrayCopyKey = "Copy key", TrayCopyUrl = "Copy MCP address",
+        TrayCopyCommand = "Copy the command for the agent",
         TrayOpenFolder = "Open settings folder", TrayStopTutorial = "Stop tutorial", TrayExit = "Quit TutorialOverlay",
         TrayExitConfirm = "A tutorial is running. Quit TutorialOverlay anyway?", Sec = "s", Min = "min", Hour = "h",
         SetTitle = "TutorialOverlay settings", SetTabServer = "Server", SetTabLook = "Look", SetTabKeys = "Hotkeys",
         SetPort = "Port", SetPortArg = "currently set by --port {0}",
-        SetPortNote = "A new port takes effect after a restart. Update the address in .mcp.json (or claude mcp add) as well.",
+        SetPortNote = "A new port takes effect after Save and a restart. Then press \"For the agent\" and give the command to the agent — it reconnects by itself.",
+        SetPortFree = "free ✓", SetPortBusy = "in use: {0}", SetPortBusyUnknown = "in use by another program", SetPortHere = "this server runs on it",
+        SetPortBad = "a port is a number 1024–65535", SetPortPick = "Pick a free one", SetPortNone = "no free ports {0}–{1}",
+        SetForAgent = "For the agent", SetForAgentBtn = "Copy the connect command", Copied = "Copied ✓",
+        SetForAgentNote = "A claude mcp add command with the port above and the key. Paste it to the agent in chat (or run it in a terminal).",
+        RestartBusy = "Port {0} is already in use ({1}). The server was not restarted and keeps running on {2}.",
         SetUrl = "MCP address", SetKey = "Key", SetKeySource = "Taken from: {0}", Show = "Show", Hide = "Hide", Copy = "Copy",
         SetLang = "Language", SetAccent = "Mark colour", SetPickColor = "Choose…", SetReset = "Reset",
         SetAutoColor = "Match mark colour to the app", SetAnimate = "Animation",

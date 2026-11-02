@@ -63,6 +63,8 @@ internal static class Tools
             Obj(("id", T("string", "mark id; omit for all")))),
         Tool("start_tutorial", "Start a step-by-step tutorial. Only the current step's targets are shown; steps advance by themselves. " +
             "spec = {title, app:'process name' (default for every anchor), window, dim:0..1, toggle, keepOpen (wait for append_steps after the last step), advanceDelayMs, hideWhenInactive, startAt, " +
+            "outro (default true: after the last step the card offers Save / Go through again / Keep learning), " +
+            "or {name:'saved-name', startAt} to replay a tutorial from the library (save_tutorial / list_tutorials), " +
             "lang:'ru'|'en', accent:'#RRGGBB', hotkeys:{done,back,skip,undo,stop:'Ctrl+Alt+Right'|'none'}, " +
             "steps:[{id, title, text, why (short 'why it works this way' shown on the card — TEACH the idea, not just the click; use it on every step where there is something to understand), anchor (default for targets), targets:[{id, name (checklist label; with grid may use {row} {col} {n}), anchor, shapes, toggle, check, button, optional, doneStyle:'hide'|'check', hint, number, arrow, " +
             "opens:{title|window|process|element, anyProcess, timeoutMs} (the click counts only when this NEW window/pane appears — inside the app or in another program; otherwise event no_effect), grid:{from:[x,y] centre of first cell rel. to anchor point, step:[dx,dy], rows, cols, cells:[[row,col],...] or [col,...] (1-based), w, h} → one target per cell (default shape: checkbox)}], " +
@@ -126,6 +128,12 @@ internal static class Tools
         Tool("ask_area", "Ask the user to circle something on screen (frozen screenshot + pencil) and WAIT. Returns bounds/strokes in screen px, " +
             "the UIA element at the centre with a suggestedAnchor and rel to the current step's first target, plus the image of the area with the circling.",
             Obj(("prompt", T("string", "what to circle, e.g. 'Circle the channel you want to edit'")), ("timeoutMs", T("integer", "default 180000")))),
+        Tool("save_tutorial", "Save a tutorial to the user's library (%LOCALAPPDATA%\\TutorialOverlay\\tutorials): the current/last one (with appended steps) or the given spec. " +
+            "Saved tutorials can be replayed from the tray menu without an agent, or with start_tutorial({name}). " +
+            "At the end of every tutorial the card itself offers Save / Go through again / Keep learning (events: outro, tutorial_saved, continue_requested).",
+            Obj(("name", T("string", "file name (default: from the title)")), ("spec", T("object", "spec to save instead of the current tutorial")))),
+        Tool("list_tutorials", "Saved tutorials: name, title, app, number of steps, when saved.", new JsonObject()),
+        Tool("delete_tutorial", "Remove a saved tutorial from the library.", Obj(("name", T("string", "its name from list_tutorials")))),
         Tool("events", "Events since a sequence number (hit, miss, unhit, undo, step_started, step_completed, step_back, step_skipped, tutorial_*, window_opened/closed, anchor_found/lost, check_changed, uia_changed, key_matched, drag, opened, no_effect, blocked (target clicked while a modal dialog of the app was open), button, pick, help (user pressed '?': reason cant_find|dont_understand|other — other carries the user's own text and, if they circled something with the pencil, sketch {bounds, strokes, atCenter, image: PNG path} — with target visibility and recent misses; answer with hint()), hook_reinstalled). With timeoutMs it long-polls until something happens.",
             Obj(("since", T("integer", "last seq you have seen (default 0)")), ("timeoutMs", T("integer", "wait up to this long for new events (max 60000)")))),
     };
@@ -158,6 +166,9 @@ internal static class Tools
                 "hint" => Text(Engine.SetHint(args)),
                 "template" => await Task.Run(() => TemplateTool(args), ct),
                 "find_text" => await Task.Run(() => FindText(args), ct),
+                "save_tutorial" => Text(Engine.SaveTutorial(args)),
+                "list_tutorials" => Text(new JsonObject { ["tutorials"] = new JsonArray(Tutorials.List().Select(o => (JsonNode)o).ToArray()), ["dir"] = Tutorials.Dir }),
+                "delete_tutorial" => Text(new JsonObject { ["deleted"] = Tutorials.Delete(J.Str(args, "name") ?? throw new ArgumentException("name is required")) }),
                 "validate" => Text(await Task.Run(() => Engine.Validate(args), ct)),
                 "ask" => Text(await Engine.Ask(args, ct)),
                 "ask_area" => AreaResult(await Engine.AskArea(args, ct)),
