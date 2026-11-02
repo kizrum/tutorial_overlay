@@ -46,6 +46,33 @@ internal sealed class ElementSpec
     }
 }
 
+/// <summary>Visual anchor: find a remembered template inside the element; the point is measured from the match.</summary>
+internal sealed class FindSpec
+{
+    public string Template = "";
+    public RectangleF? Within;        // search only this part of the element (relative to its top-left)
+    public string Axis = "xy";        // xy | x | y — which coordinates come from the match (y: keyboard rows, x: bar ruler)
+    public float MaxScore = 0.08f;    // mean abs difference allowed (0 identical … 1 opposite)
+
+    public static FindSpec? Parse(JsonNode? n)
+    {
+        n = J.Unwrap(n);
+        if (n == null) return null;
+        if (n is JsonValue) return new FindSpec { Template = J.AsStr(n) ?? "" };
+        var f = new FindSpec
+        {
+            Template = J.Str(n, "template") ?? J.Str(n, "id") ?? "",
+            Axis = (J.Str(n, "axis") ?? "xy").ToLowerInvariant(),
+            MaxScore = (float)(J.Num(n, "maxScore") ?? 0.08),
+        };
+        if (J.Arr(n, "within") is JsonArray a && a.Count >= 4)
+            f.Within = new RectangleF((float)(J.AsNum(a[0]) ?? 0), (float)(J.AsNum(a[1]) ?? 0), (float)(J.AsNum(a[2]) ?? 0), (float)(J.AsNum(a[3]) ?? 0));
+        return f;
+    }
+
+    public string Key => $"{Template}/{Within}/{Axis}/{MaxScore}";
+}
+
 /// <summary>
 /// Where a mark lives: process → top-level window (title substring) → optional UIA path, plus a point
 /// (origin of the resolved rectangle + offset in physical pixels).
@@ -62,12 +89,16 @@ internal sealed class AnchorSpec
     public float Dx, Dy;
     public bool Client;              // window-only anchors: client area instead of visible frame
     public string? Read;             // UIA property the resolver should read (uia conditions)
+    public FindSpec? Find;           // visual anchor inside the element (follows scrolling content)
+
+    /// <summary>An offset or origin was given: the anchor names a point, not just an element.</summary>
+    public bool HasPoint => Dx != 0 || Dy != 0 || Origin != "topleft";
 
     public bool IsScreen => Process == null && Window == null && WindowClass == null && Title == null && Hwnd == null;
     public bool HasBounds => !IsScreen;
 
     /// <summary>Resolution identity (ignores origin/offset, which only matter for layout).</summary>
-    public string Key => string.Join("|", Process?.ToLowerInvariant(), Window, WindowClass, Title, Hwnd, Client, Read,
+    public string Key => string.Join("|", Process?.ToLowerInvariant(), Window, WindowClass, Title, Hwnd, Client, Read, Find?.Key,
         string.Join(">", Path.Select(p => $"{p.Role}/{p.Name}/{p.NameExact}/{p.AutomationId}/{p.ClassName}/{p.Pick}/{p.Index}")));
 
     public static AnchorSpec Parse(JsonNode? n, AnchorSpec? defaults)
@@ -90,6 +121,7 @@ internal sealed class AnchorSpec
             a.Origin = (J.Str(n, "origin") ?? "topleft").ToLowerInvariant().Replace("-", "").Replace("_", "");
             var el = J.Unwrap(J.Get(n, "element") ?? J.Get(n, "path"));
             foreach (var seg in J.Items(el)) a.Path.Add(ElementSpec.Parse(seg));
+            a.Find = FindSpec.Parse(J.Get(n, "find"));
             var off = J.Pt(n, "offset");
             if (off is PointF o) { a.Dx = o.X; a.Dy = o.Y; }
             if (J.Num(n, "dx") is double dx) a.Dx = (float)dx;
@@ -102,6 +134,14 @@ internal sealed class AnchorSpec
             if (a.Window == null && a.Title == null && a.Path.Count == 0 && defaults.Window != null) a.Window = defaults.Window;
         }
         return a;
+    }
+
+    /// <summary>The same anchor without its visual search — what the resolver resolves.</summary>
+    public AnchorSpec WithoutFind()
+    {
+        var c = (AnchorSpec)MemberwiseClone();
+        c.Find = null;
+        return c;
     }
 
     public AnchorSpec With(float dx = 0, float dy = 0, string? read = null)
@@ -334,6 +374,7 @@ internal sealed class Mark
     public MarkGeo? Geo;
     public string Visibility = "resolving";
     public DateTime? ShownAt;
+    public (string dir, RectangleF view, PointF toward)? ScrollHint;   // target is outside the visible part
     public Color? AutoColor;              // contrast colour picked against the app's pixels around the target
     public DateTime? OpensArmedAt;        // clicked, waiting for Opens to show up
     public HashSet<IntPtr>? OpensBefore;  // matching top-level windows at click time
@@ -499,6 +540,7 @@ internal sealed class Step
     public string? Id;
     public string Title = "";
     public string Text = "";
+    public string? Why;                          // "why it works this way" — the card teaches, not just instructs
     public List<Mark> Targets = new();
     public List<Condition> Until = new();
     public bool UntilAll;                // false: any condition completes the step
@@ -530,6 +572,7 @@ internal sealed class Step
             Id = J.Str(n, "id"),
             Title = J.Str(n, "title") ?? "",
             Text = J.Str(n, "text") ?? J.Str(n, "description") ?? J.Str(n, "body") ?? "",
+            Why = J.Str(n, "why") ?? J.Str(n, "explain") ?? J.Str(n, "because"),
             UntilAll = (J.Str(n, "untilMode") ?? "any").Equals("all", StringComparison.OrdinalIgnoreCase),
             Toggle = J.Bool(n, "toggle"),
             Dim = J.Num(n, "dim") is double d ? (float)d : (J.Bool(n, "dim") == true ? 0.45f : null),

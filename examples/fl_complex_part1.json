@@ -1,0 +1,39 @@
+{
+  "title": "FL Studio: сложный бит",
+  "app": "FL64",
+  "keepOpen": true,
+  "toggle": true,
+  "steps": [
+    {
+      "id": "add-synth",
+      "title": "Добавьте синтезатор 3x Osc",
+      "text": "Нажмите «+» внизу Channel rack и выберите в списке 3x Osc. Шаг засчитается, когда откроется окно плагина.",
+      "targets": [
+        {
+          "name": "Кнопка «+»",
+          "anchor": { "element": { "name": "Channel rack", "role": "Pane" }, "offset": [ 224, 345 ] },
+          "opens": { "title": "3x Osc", "timeoutMs": 45000 },
+          "shapes": [ { "type": "circle", "r": 20 }, { "type": "label", "text": "Добавить инструмент" }, { "type": "arrow" } ]
+        }
+      ]
+    },
+    {
+      "id": "close-plugin",
+      "title": "Закройте окно 3x Osc",
+      "text": "Плагин добавлен новым каналом в стойку. Его окно пока не нужно — закройте крестиком справа сверху (или нажмите «Готово»).",
+      "until": [ { "type": "disappear", "title": "3x Osc" } ]
+    },
+    {
+      "id": "drag-conga",
+      "title": "Перетащите 808 Conga в стойку",
+      "text": "Найдите в Browser слева сэмпл «808 Conga», зажмите его мышью и отпустите над Channel rack — появится новый канал.",
+      "until": [
+        {
+          "type": "drag",
+          "from": { "element": { "name": "Browser", "role": "Pane" } },
+          "to": { "element": { "name": "Channel rack", "role": "Pane" } }
+        }
+      ]
+    }
+  ]
+}

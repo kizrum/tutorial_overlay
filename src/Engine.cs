@@ -15,6 +15,7 @@ internal sealed class CardModel
     public string State = "";
     public int Index, Total;
     public string Title = "", Text = "";
+    public string? Why;
     public int Done, Required;
     public bool Completed;
     public bool CanBack, CanUndo;
@@ -470,7 +471,10 @@ internal static partial class Engine
                 // the tutorial's main window stays resolved so the card can pick the right monitor
                 .Concat(t is { Active: true } && t.Defaults.Process != null ? new[] { t.Defaults } : Array.Empty<AnchorSpec>())
                 .Concat(InputAnchors(step));
-            Resolver.SetWanted(anchors, t is { Active: true } && t.Defaults.Process != null ? new[] { t.Defaults.Process } : Array.Empty<string>());
+            var anchorList = anchors.ToList();
+            Finder.SetWanted(anchorList);
+            Resolver.SetWanted(anchorList.Select(a => a.Find != null ? a.WithoutFind() : a),
+                t is { Active: true } && t.Defaults.Process != null ? new[] { t.Defaults.Process } : Array.Empty<string>());
 
             InputHook.KeysWanted = WantsKeys(step);
             int fgPid = ForegroundPid();
@@ -486,7 +490,10 @@ internal static partial class Engine
             {
                 if (ProbePoint(m) is not { } pp) continue;
                 probes.Add((pp.pt, m.Check!.Radius));
-                if (sampleNow) RunPixelCheck(m, pp.pt, pp.ag);
+                // only after the canvas has shown this mark (with its probe hole) — otherwise the probe can
+                // still see whatever we drew there a moment ago
+                bool rendered = m.ShownAt is DateTime sa && (now - sa).TotalMilliseconds > 120;
+                if (sampleNow && rendered) RunPixelCheck(m, pp.pt, pp.ag);
             }
 
             // compose the canvas
@@ -517,6 +524,7 @@ internal static partial class Engine
             if (step != null && t!.AdvanceAt == null) AddDialogVisuals(step, sc, f.Card.Avoid);
             CheckOpens(marks, step, now);
             AddPickVisuals(sc, f.Card.Avoid);
+            AddScrollVisuals(marks, sc, f.Card.Avoid, fgPid);
             if (step?.HighlightUntil is DateTime hu)
             {
                 if (now < hu)
@@ -726,7 +734,7 @@ internal static partial class Engine
             var p = new PointF(a.Dx, a.Dy);
             return new AnchorGeo { P = p, Scale = Native.ScaleAt(p) };
         }
-        var r = Resolver.Get(a.Key);
+        var r = Resolver.Get(a.Find != null ? a.WithoutFind().Key : a.Key);
         if (r == null) { reason = "resolving"; return null; }
         if (!r.Found) { reason = r.Reason; return null; }
         var root = r.Root;
@@ -738,11 +746,25 @@ internal static partial class Engine
             ? new RectangleF(frame.X + rel.X, frame.Y + rel.Y, rel.Width, rel.Height)
             : a.Client ? Native.ClientScreenRect(root) : frame;
         var o = a.OriginOf(bounds);
-        return new AnchorGeo
+        var geo = new AnchorGeo
         {
             Bounds = bounds, P = new PointF(o.X + a.Dx, o.Y + a.Dy), Root = root, Pids = r.Pids,
             Scale = Native.ScaleAt(new PointF(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2)),
         };
+        if (a.Path.Count > 0 && a.HasPoint) geo.View = bounds;   // a point inside a pane: it can scroll out of view
+        if (a.Find != null)
+        {
+            var fr = Finder.Get(a.Key);
+            if (fr == null) { reason = "searching"; return null; }
+            PointF? seen = fr.Found ? fr.Rel : fr.LastRel;
+            if (seen is not PointF m) { reason = "template not visible"; return null; }
+            var hit = new PointF(frame.X + m.X, frame.Y + m.Y);
+            float px = a.Find.Axis == "y" ? o.X : hit.X, py = a.Find.Axis == "x" ? o.Y : hit.Y;
+            geo.P = new PointF(px + a.Dx, py + a.Dy);
+            geo.View = bounds;
+            geo.FromLastKnown = !fr.Found;
+        }
+        return geo;
     }
 
     private static void ComputeMark(Mark m, Tutorial? t, int fgPid, DateTime now)
@@ -755,6 +777,17 @@ internal static partial class Engine
             if (hideInactive && !AppActive(ag.Pids, m.Anchor.Process, fgPid)) { m.Geo = null; m.Visibility = "inactive"; return; }
         }
         var geo = Layout.Build(m, ag, m.Satisfied);
+        m.ScrollHint = null;
+        if (ag.View is RectangleF view && OutsideView(geo.Center, view, ag.Scale, ag.FromLastKnown) is string dir)
+        {
+            // the target scrolled out of the pane: point at the edge it went past
+            var toward = new PointF(Math.Clamp(geo.Center.X, view.Left + 40 * ag.Scale, view.Right - 40 * ag.Scale),
+                                    Math.Clamp(geo.Center.Y, view.Top + 40 * ag.Scale, view.Bottom - 40 * ag.Scale));
+            m.ScrollHint = (dir, view, toward);
+            m.Geo = null;
+            m.Visibility = "scroll-" + dir;
+            return;
+        }
         if (!m.Anchor.IsScreen)
         {
             if (!OnAnyMonitor(geo.Center)) { m.Geo = null; m.Visibility = "offscreen"; return; }
@@ -787,6 +820,52 @@ internal static partial class Engine
             samples.Add(ScreenCapture.Sample(p, 1));
         }
         return Contrast.Pick(samples);
+    }
+
+    private static string? OutsideView(PointF c, RectangleF view, float s, bool lastKnown)
+    {
+        float m = 6 * s;
+        if (c.Y < view.Top + m) return "up";
+        if (c.Y > view.Bottom - m) return "down";
+        if (c.X < view.Left + m) return "left";
+        if (c.X > view.Right - m) return "right";
+        return lastKnown ? "unknown" : null;     // anchor not seen right now but its last place is inside: just ask to scroll
+    }
+
+    /// <summary>An arrow at the pane's edge plus a caption, for targets that scrolled out of view.</summary>
+    private static void AddScrollVisuals(List<Mark> marks, Scene sc, List<RectangleF> avoid, int fgPid)
+    {
+        var loc = Settings.Current.Text;
+        var shown = new HashSet<string>();
+        foreach (var m in marks)
+        {
+            if (m.ScrollHint is not { } h || m.Satisfied) continue;
+            if (!shown.Add(h.dir + h.view)) continue;        // one hint per pane and direction
+            float s = Native.ScaleAt(h.toward);
+            var c = Palette.Accent;
+            PointF tip, tail;
+            string text;
+            switch (h.dir)
+            {
+                case "up": tip = new PointF(h.toward.X, h.view.Top + 14 * s); tail = new PointF(tip.X, tip.Y + 70 * s); text = loc.ScrollUp; break;
+                case "down": tip = new PointF(h.toward.X, h.view.Bottom - 14 * s); tail = new PointF(tip.X, tip.Y - 70 * s); text = loc.ScrollDown; break;
+                case "left": tip = new PointF(h.view.Left + 14 * s, h.toward.Y); tail = new PointF(tip.X + 70 * s, tip.Y); text = loc.ScrollLeft; break;
+                case "right": tip = new PointF(h.view.Right - 14 * s, h.toward.Y); tail = new PointF(tip.X - 70 * s, tip.Y); text = loc.ScrollRight; break;
+                default: continue;
+            }
+            var arrow = new Prim { Kind = PrimKind.Arrow, A = tail, B = tip, Color = c, Width = 4.5f * s, Scale = s };
+            float px = 15 * s;
+            var sz = Theme.Measure(text, Theme.Font(px), 300 * s);
+            float w = sz.Width + 28 * s, hh = sz.Height + 16 * s;
+            var box = h.dir is "up" or "down"
+                ? new RectangleF(tail.X - w / 2, h.dir == "up" ? tail.Y + 6 * s : tail.Y - 6 * s - hh, w, hh)
+                : new RectangleF(h.dir == "left" ? tail.X + 6 * s : tail.X - 6 * s - w, tail.Y - hh / 2, w, hh);
+            var label = new Prim { Kind = PrimKind.Label, Rect = box, Text = text, Size = px, Color = c, Scale = s, Radius = 8 * s };
+            sc.Prims.Add((arrow, 1f));
+            sc.Prims.Add((label, 1f));
+            avoid.Add(arrow.Extent());
+            avoid.Add(box);
+        }
     }
 
     private static bool OnAnyMonitor(PointF p) => Native.VirtualScreen().Contains((int)p.X, (int)p.Y)
@@ -892,7 +971,7 @@ internal static partial class Engine
             foreach (var p in m.Geo!.Prims)
             {
                 if (p.Kind == PrimKind.Arrow) segments.Add((p.A, p.B, p.Width * 2));
-                else if (!(p.Auto && (p.Kind == PrimKind.Label || p.Kind == PrimKind.Info))) obstacles.Add(p.Extent());
+                else if (!(p.Auto && (p.Kind is PrimKind.Label or PrimKind.Info or PrimKind.Badge))) obstacles.Add(p.Tight());
             }
             foreach (var b in m.Geo.Buttons.Where(b => !b.Auto)) obstacles.Add(b.Rect);
         }
@@ -904,6 +983,14 @@ internal static partial class Engine
             {
                 p.Rect = Place(p.Rect, g.TargetBounds, obstacles, segments, g.A.Scale);
                 obstacles.Add(p.Rect);
+            }
+            // step numbers: a small square that must not cover any target, label or other number
+            foreach (var p in g.Prims.Where(p => p.Auto && p.Kind == PrimKind.Badge))
+            {
+                var box = new RectangleF(p.A.X - p.R, p.A.Y - p.R, 2 * p.R, 2 * p.R);
+                box = PlaceBadge(box, g.TargetBounds, obstacles, segments, g.A.Scale);
+                p.A = new PointF(box.X + box.Width / 2, box.Y + box.Height / 2);
+                obstacles.Add(box);
             }
             foreach (var b in g.Buttons.Where(b => b.Auto))
             {
@@ -945,6 +1032,29 @@ internal static partial class Engine
     }
 
     private static RectangleF Inflate(RectangleF r, float by) { r.Inflate(by, by); return r; }
+
+    /// <summary>Badges hug their target: try the four outside corners, then the sides, then fall back to Place.</summary>
+    private static RectangleF PlaceBadge(RectangleF box, RectangleF t, List<RectangleF> obstacles, List<(PointF a, PointF b, float w)> segments, float s)
+    {
+        float w = box.Width, h = box.Height, g = 5 * s;   // just past the target's tight outline
+        // straight above / below first: in a row of neighbouring cells that gives a tidy zig-zag
+        var cands = new[]
+        {
+            new PointF(t.Left + t.Width / 2 - w / 2, t.Top - h - g), new PointF(t.Left + t.Width / 2 - w / 2, t.Bottom + g),
+            new PointF(t.Left - w - g, t.Top - h * 0.5f), new PointF(t.Right + g, t.Top - h * 0.5f),
+            new PointF(t.Left - w - g, t.Bottom - h * 0.5f), new PointF(t.Right + g, t.Bottom - h * 0.5f),
+            new PointF(t.Left - w - g, t.Top + t.Height / 2 - h / 2), new PointF(t.Right + g, t.Top + t.Height / 2 - h / 2),
+        };
+        bool Free(RectangleF r) => !obstacles.Any(o => o.Width > 0 && o.IntersectsWith(r))
+                                   && !segments.Any(sg => SegmentHits(sg.a, sg.b, Inflate(r, sg.w)));
+        if (Free(box)) return box;
+        foreach (var c in cands)
+        {
+            var r = new RectangleF(c, box.Size);
+            if (Free(r)) return r;
+        }
+        return Place(box, t, obstacles, segments, s);
+    }
 
     /// <summary>Does segment a-b cross rectangle r? (sampled; boxes are much larger than the step)</summary>
     private static bool SegmentHits(PointF a, PointF b, RectangleF r)
@@ -1040,13 +1150,14 @@ internal static partial class Engine
         if (t.State == "waiting" || s == null)
         {
             card.Title = t.Title.Length > 0 ? t.Title : Settings.Current.Text.Tutorial;
-            card.Text = Settings.Current.Text.Preparing;
+            card.Text = "";
             card.Controls = new HashSet<string> { "stop" };
         }
         else
         {
             card.Title = s.Title;
             card.Text = s.Text;
+            card.Why = s.Why;
             var req = s.Required.ToList();
             card.Required = req.Count;
             card.Done = req.Count(m => m.Satisfied);
@@ -1113,6 +1224,11 @@ internal static partial class Engine
         return v switch
         {
             "minimized" => t.IssueMinimized,
+            "scroll-up" => string.Format(t.ScrollIssue, t.ScrollUp.ToLowerInvariant()),
+            "scroll-down" => string.Format(t.ScrollIssue, t.ScrollDown.ToLowerInvariant()),
+            "scroll-left" => string.Format(t.ScrollIssue, t.ScrollLeft.ToLowerInvariant()),
+            "scroll-right" => string.Format(t.ScrollIssue, t.ScrollRight.ToLowerInvariant()),
+            "scroll-unknown" or "template not visible" => t.ScrollFind,
             "occluded" => t.IssueOccluded,
             "inactive" => t.IssueInactive,
             "offscreen" => t.IssueOffscreen,
@@ -1123,7 +1239,7 @@ internal static partial class Engine
     }
 
     /// <summary>The user says they can't find the target / don't understand the step.</summary>
-    public static void RequestHelp(string reason, string source)
+    public static void RequestHelp(string reason, string source, string? text = null)
     {
         lock (Sync)
         {
@@ -1135,16 +1251,19 @@ internal static partial class Engine
             Native.GetCursorPos(out var cur);
             Events.Emit("help", new()
             {
-                ["reason"] = reason, ["source"] = source, ["step"] = t!.Index, ["id"] = s.Id, ["title"] = s.Title,
+                ["reason"] = reason, ["source"] = source, ["text"] = text, ["step"] = t!.Index, ["id"] = s.Id, ["title"] = s.Title,
                 ["targets"] = new JsonArray(s.Targets.Select(m => (JsonNode)MarkJson(m)).ToArray()),
                 ["issue"] = TargetIssue(s),
                 ["blockingDialog"] = BlockingDialog(s),
                 ["recentMisses"] = new JsonArray(s.Misses.Select(x => (JsonNode)x.DeepClone()).ToArray()),
                 ["cursor"] = new JsonArray(cur.X, cur.Y),
                 ["foreground"] = ForegroundInfo(),
-                ["advice"] = reason == "cant_find"
-                    ? "targets are being highlighted for 6 s; consider screenshot(includeOverlay) to verify placement, then hint() or re-draw"
-                    : "explain the step in simpler words with hint(text), or split it with append_steps/insertAt",
+                ["advice"] = reason switch
+                {
+                    "cant_find" => "targets are being highlighted for 6 s; consider screenshot(includeOverlay) to verify placement, then hint() or re-draw",
+                    "other" => "the user described the problem in their own words (text); answer with hint(), fix the step, or ask via hint",
+                    _ => "explain the step in simpler words with hint(text), or split it with append_steps/insertAt",
+                },
             });
             _stepVersion++;
         }

@@ -15,6 +15,8 @@ internal static class Tools
         "use screenshot(anchor) to measure offsets) → start_tutorial(spec). The user's clicks, misses, completed steps " +
         "and window open/close arrive as events (stdout JSON lines of the overlay process, MCP notifications, or the " +
         "events tool with long-poll) — react to them instead of asking the user whether they are done. " +
+        "Write steps that teach: put the reason in each step's 'why' (what the tool does, why this way, the common mistake). " +
+        "When a problem is found, explain its cause in hint() so the user learns, not only what to click. " +
         "Use keepOpen + append_steps to feed steps incrementally. Marks auto-hide when the app is minimised, covered or " +
         "not in the foreground and come back on the same step. For apps that draw their own UI, call pick(anchor) and ask " +
         "the user to click the spot: you get the exact offset (and with count=2 on neighbouring cells, a grid step).";
@@ -31,7 +33,9 @@ internal static class Tools
     private const string AnchorDesc =
         "Anchor: {process:'FL64'|'notepad', window:'title substring', title:'top-level title OR UIA Window/Pane name (substring)', " +
         "element:{name,role,automationId,className,match:'contains'|'exact',pick:'largest'|'first'|'smallest',index} or an array of those (nested path), " +
-        "origin:'topleft'|'center'|'topright'|'bottomleft'|'bottomright'|'top'|'bottom'|'left'|'right', offset:[dx,dy], relativeTo:'frame'|'client', hwnd, screen:true}. " +
+        "origin:'topleft'|'center'|'topright'|'bottomleft'|'bottomright'|'top'|'bottom'|'left'|'right', offset:[dx,dy], relativeTo:'frame'|'client', hwnd, screen:true, " +
+        "find:{template, within, axis} (visual anchor from the template tool: offset is measured from the match, so marks follow scrolling; " +
+        "targets that scroll out of the pane get an edge arrow 'scroll up/down/left/right')}. " +
         "Omit for screen-absolute coordinates (offset = absolute point). Shapes are positioned relative to origin+offset.";
 
     private const string ShapesDesc =
@@ -57,7 +61,7 @@ internal static class Tools
         Tool("start_tutorial", "Start a step-by-step tutorial. Only the current step's targets are shown; steps advance by themselves. " +
             "spec = {title, app:'process name' (default for every anchor), window, dim:0..1, toggle, keepOpen (wait for append_steps after the last step), advanceDelayMs, hideWhenInactive, startAt, " +
             "lang:'ru'|'en', accent:'#RRGGBB', hotkeys:{done,back,skip,undo,stop:'Ctrl+Alt+Right'|'none'}, " +
-            "steps:[{id, title, text, anchor (default for targets), targets:[{id, name (checklist label; with grid may use {row} {col} {n}), anchor, shapes, toggle, check, button, optional, doneStyle:'hide'|'check', hint, number, arrow, " +
+            "steps:[{id, title, text, why (short 'why it works this way' shown on the card — TEACH the idea, not just the click; use it on every step where there is something to understand), anchor (default for targets), targets:[{id, name (checklist label; with grid may use {row} {col} {n}), anchor, shapes, toggle, check, button, optional, doneStyle:'hide'|'check', hint, number, arrow, " +
             "opens:{title|window|process|element, anyProcess, timeoutMs} (the click counts only when this NEW window/pane appears — inside the app or in another program; otherwise event no_effect), grid:{from:[x,y] centre of first cell rel. to anchor point, step:[dx,dy], rows, cols, cells:[[row,col],...] or [col,...] (1-based), w, h} → one target per cell (default shape: checkbox)}], " +
             "until:[ 'all_clicked' | {type:'appear'|'disappear', title|window|element|anchor} | {type:'pixel', anchor, at, expr} | {type:'count', count} " +
             "| {type:'key', keys:'Ctrl+S' or ['F6','Ctrl+F6']} (only while the app is in front; other keys are never recorded) " +
@@ -82,7 +86,13 @@ internal static class Tools
         Tool("screenshot", "Screenshot of an anchor's rectangle (window / element) or a screen area, WITHOUT the overlay's own drawings. Returns the mapping from image pixels to screen and to the anchor.",
             Obj(("anchor", T("object", AnchorDesc)), ("rect", T("array", "[x,y,w,h] absolute screen rect instead of an anchor")),
                 ("pad", T("integer", "extra pixels around the anchor rect")), ("maxEdge", T("integer", "downscale so the long edge is ≤ this (default 1568, 0 = full size)")),
-                ("includeOverlay", T("boolean", "also capture the overlay's drawings and the card (to verify placement)")))),
+                ("includeOverlay", T("boolean", "also capture the overlay's drawings and the card (to verify placement; implies source=screen)")),
+                ("source", T("string", "'window' (default with an anchor: the app's own pixels even when other windows cover it) or 'screen'")))),
+        Tool("template", "Remember a small piece of an app's UI as a visual anchor (e.g. the 'C5' label on a piano roll keyboard, a bar number on a ruler). " +
+            "Then any anchor can use find:{template:id, within:[x,y,w,h], axis:'y'|'x'|'xy'} to measure its offset from wherever that piece currently is — " +
+            "marks follow scrolling content. Captured from the window's own pixels (works while covered). Returns the captured image.",
+            Obj(("id", T("string", "name of the template")), ("anchor", T("object", AnchorDesc)),
+                ("rect", T("array", "[x,y,w,h] relative to the anchor element's top-left (keep it small and distinctive, ~20-60 px)")))),
         Tool("hint", "Show your answer inside the step card (after a 'help' event, or proactively). Cleared when the step changes. highlight:true also dims the screen and pings the targets.",
             Obj(("text", T("string", "hint text")), ("title", T("string", "optional heading")), ("highlight", T("boolean", "spotlight the targets")),
                 ("seconds", T("integer", "highlight duration (default 6)")), ("expectIndex", T("integer", "only if this is still the current step")))),
@@ -92,7 +102,7 @@ internal static class Tools
             Obj(("anchor", T("object", "anchor to measure rel offsets against")), ("count", T("integer", "number of points (default 1)")),
                 ("prompt", T("string", "text shown next to the cursor")), ("passThrough", T("boolean", "let the click reach the app (default false)")),
                 ("timeoutMs", T("integer", "default 60000")))),
-        Tool("events", "Events since a sequence number (hit, miss, unhit, undo, step_started, step_completed, step_back, step_skipped, tutorial_*, window_opened/closed, anchor_found/lost, check_changed, uia_changed, key_matched, drag, opened, no_effect, blocked (target clicked while a modal dialog of the app was open), button, pick, help (user pressed '?': reason cant_find|dont_understand, with target visibility and recent misses — answer with hint()), hook_reinstalled). With timeoutMs it long-polls until something happens.",
+        Tool("events", "Events since a sequence number (hit, miss, unhit, undo, step_started, step_completed, step_back, step_skipped, tutorial_*, window_opened/closed, anchor_found/lost, check_changed, uia_changed, key_matched, drag, opened, no_effect, blocked (target clicked while a modal dialog of the app was open), button, pick, help (user pressed '?': reason cant_find|dont_understand|other — other carries the user's own text — with target visibility and recent misses; answer with hint()), hook_reinstalled). With timeoutMs it long-polls until something happens.",
             Obj(("since", T("integer", "last seq you have seen (default 0)")), ("timeoutMs", T("integer", "wait up to this long for new events (max 60000)")))),
     };
 
@@ -122,6 +132,7 @@ internal static class Tools
                 "events" => await EventsTool(args, ct),
                 "pick" => Text(await Engine.Pick(args, ct)),
                 "hint" => Text(Engine.SetHint(args)),
+                "template" => await Task.Run(() => TemplateTool(args), ct),
                 _ => Fail("unknown tool: " + name),
             };
         }
@@ -144,6 +155,30 @@ internal static class Tools
         ["isError"] = true,
     };
 
+    private static JsonObject TemplateTool(JsonNode args)
+    {
+        var id = J.Str(args, "id") ?? throw new ArgumentException("id is required");
+        var a = AnchorSpec.Parse(J.Get(args, "anchor"), Engine.Tutorial?.Defaults);
+        if (J.Arr(args, "rect") is not JsonArray ra || ra.Count < 4) throw new ArgumentException("rect [x,y,w,h] is required");
+        var r = Resolver.ResolveNow(a.WithoutFind());
+        if (!r.Found) return Fail($"anchor not found: {r.Reason}");
+        var frame = Native.FrameRect(r.Root);
+        RectangleF b = r.Rel is RectangleF rel ? new RectangleF(frame.X + rel.X, frame.Y + rel.Y, rel.Width, rel.Height) : frame;
+        var rect = Rectangle.Round(new RectangleF(b.X + (float)(J.AsNum(ra[0]) ?? 0), b.Y + (float)(J.AsNum(ra[1]) ?? 0),
+                                                  (float)(J.AsNum(ra[2]) ?? 0), (float)(J.AsNum(ra[3]) ?? 0)));
+        if (rect.Width < 6 || rect.Height < 6) return Fail("template too small (at least 6x6 px)");
+        using var shot = ScreenCapture.CaptureWindow(r.Root, rect);
+        if (shot == null) return Fail("could not capture the window (minimized?)");
+        Finder.Templates[id] = Template.From(shot);
+        var png = ScreenCapture.Png(shot, 0, out _);
+        return new JsonObject
+        {
+            ["content"] = new JsonArray(
+                new JsonObject { ["type"] = "text", ["text"] = $"template '{id}' saved ({rect.Width}x{rect.Height}) at {J.RectJson(rect).ToJsonString()}; use anchor.find:{{template:'{id}'}}" },
+                new JsonObject { ["type"] = "image", ["data"] = Convert.ToBase64String(png), ["mimeType"] = "image/png" }),
+        };
+    }
+
     private static async Task<JsonObject> EventsTool(JsonNode args, CancellationToken ct)
     {
         long since = (long)(J.Num(args, "since") ?? 0);
@@ -162,6 +197,11 @@ internal static class Tools
         string what;
         PointF? anchorPoint = null;
         RectangleF? anchorBounds = null;
+        IntPtr window = IntPtr.Zero;
+        // no target given during a tutorial: shoot the tutorial's app, not whatever monitor the cursor is on
+        if (!J.Has(args, "rect") && !J.Has(args, "anchor") && Engine.Tutorial is { Active: true, Defaults.Process: not null } tut)
+            args = new JsonObject { ["anchor"] = new JsonObject { ["process"] = tut.Defaults.Process }, ["includeOverlay"] = J.Bool(args, "includeOverlay"),
+                                    ["maxEdge"] = J.Int(args, "maxEdge"), ["source"] = J.Str(args, "source") };
         if (J.Get(args, "rect") is JsonArray ra && ra.Count >= 4)
         {
             rect = new Rectangle((int)(J.AsNum(ra[0]) ?? 0), (int)(J.AsNum(ra[1]) ?? 0), (int)(J.AsNum(ra[2]) ?? 100), (int)(J.AsNum(ra[3]) ?? 100));
@@ -180,6 +220,7 @@ internal static class Tools
                 RectangleF b = r.Rel is RectangleF rel ? new RectangleF(frame.X + rel.X, frame.Y + rel.Y, rel.Width, rel.Height)
                     : a.Client ? Native.ClientScreenRect(r.Root) : frame;
                 anchorBounds = b;
+                window = r.Root;
                 var o = a.OriginOf(b);
                 anchorPoint = new PointF(o.X + a.Dx, o.Y + a.Dy);
                 int pad = J.Int(args, "pad") ?? 0;
@@ -198,11 +239,15 @@ internal static class Tools
         if (rect.Width <= 0 || rect.Height <= 0) return Fail("rectangle is off screen");
 
         bool withOverlay = J.Bool(args, "includeOverlay") ?? false;
+        // the app's own window (works while it is covered) unless the screen is asked for / the overlay must be in it
+        string source = (J.Str(args, "source") ?? (window != IntPtr.Zero && !withOverlay ? "window" : "screen")).ToLowerInvariant();
+        Bitmap? winShot = source == "window" && window != IntPtr.Zero ? ScreenCapture.CaptureWindow(window, rect) : null;
         // flip exclusion only when the wanted result differs from the normal state, then restore it
         bool flip = withOverlay == Settings.Global.HideFromCapture;
+        if (winShot != null) flip = false;
         if (flip) { Program.SetCapturable(withOverlay); Thread.Sleep(80); }
         Bitmap bmp;
-        try { bmp = ScreenCapture.Capture(rect); }
+        try { bmp = winShot ?? ScreenCapture.Capture(rect); }
         finally { if (flip) Program.SetCapturable(!withOverlay); }
         using var _bmp = bmp;
         int maxEdge = J.Int(args, "maxEdge") ?? 1568;
@@ -210,6 +255,7 @@ internal static class Tools
         var info = new JsonObject
         {
             ["captured"] = what,
+            ["source"] = winShot != null ? "window (its own pixels, even if covered)" : "screen",
             ["screenRect"] = J.RectJson(rect),
             ["imageScale"] = Math.Round(scale, 4),
             ["mapping"] = $"screenX = {rect.X} + imgX / {scale:0.####}; screenY = {rect.Y} + imgY / {scale:0.####}",

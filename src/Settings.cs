@@ -103,9 +103,14 @@ internal sealed class Loc
     public string HintDone = "готово", HintBack = "назад", HintSkip = "пропустить", HintUndo = "отменить", HintStop = "завершить";
     public string PickTitle = "Укажите точку", PickText = "Кликните в нужное место. Esc — отмена.", PickCount = "Точка {0} из {1}";
     public string Review = "Повтор шага — нажмите «Готово», чтобы продолжить.";
+    public string Why = "Почему так";
+    public string ScrollUp = "Прокрутите вверх", ScrollDown = "Прокрутите вниз", ScrollLeft = "Прокрутите влево", ScrollRight = "Прокрутите вправо";
+    public string ScrollIssue = "Нужное место за краем окна — {0}.", ScrollFind = "Прокрутите окно, чтобы показать нужное место.";
     public string IssueDialog = "Сначала закройте окно «{0}» — пока оно открыто, программа не принимает клики.";
     public string DialogMark = "Сначала подтвердите это окно (Enter) или закройте его";
     public string CantFind = "Не вижу, куда жать", DontGet = "Не понимаю, что делать", Cancel = "Отмена", HintHelp = "помощь";
+    public string Other = "Другое — опишу сам", OtherTitle = "Опишите, что не получается", Send = "Отправить",
+        OtherHint = "Enter — отправить · Shift+Enter — новая строка · Esc — отмена";
     public string HelpSent = "Передал ассистенту — сейчас подскажу.", Highlighting = "Подсвечиваю, куда нажать…";
     public string IssueMinimized = "Окно свёрнуто — разверните его.", IssueOccluded = "Нужное место закрыто другим окном.",
         IssueInactive = "Переключитесь в нужное приложение.", IssueMissing = "Не нахожу нужный элемент на экране.",
@@ -121,9 +126,14 @@ internal sealed class Loc
         HintDone = "done", HintBack = "back", HintSkip = "skip", HintUndo = "undo", HintStop = "finish",
         PickTitle = "Pick a point", PickText = "Click the spot. Esc cancels.", PickCount = "Point {0} of {1}",
         Review = "Repeating this step — press Done to continue.",
+        Why = "Why",
+        ScrollUp = "Scroll up", ScrollDown = "Scroll down", ScrollLeft = "Scroll left", ScrollRight = "Scroll right",
+        ScrollIssue = "The spot is outside the window — {0}.", ScrollFind = "Scroll the window to bring the spot into view.",
         IssueDialog = "Close the \"{0}\" window first — the app ignores clicks while it is open.",
         DialogMark = "Confirm this window first (Enter) or close it",
         CantFind = "I can't find where to click", DontGet = "I don't get what to do", Cancel = "Cancel", HintHelp = "help",
+        Other = "Something else — I'll describe it", OtherTitle = "Describe what isn't working", Send = "Send",
+        OtherHint = "Enter — send · Shift+Enter — new line · Esc — cancel",
         HelpSent = "Told the assistant — a hint is coming.", Highlighting = "Highlighting where to click…",
         IssueMinimized = "The window is minimized — restore it.", IssueOccluded = "Another window covers the spot.",
         IssueInactive = "Switch to the app.", IssueMissing = "Can't find the element on screen.",

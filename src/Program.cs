@@ -71,6 +71,7 @@ internal static class Program
         _ui = overlay;
 
         Resolver.Start();
+        Finder.Start();
         InputHook.Start();
         var consumer = new Thread(() =>
         {
@@ -114,6 +115,7 @@ internal static class Program
         timer.Stop();
         InputHook.Stop();
         Resolver.Stop();
+        Finder.Stop();
         try { server.StopAsync().Wait(2000); } catch { }
         Events.Emit("exit");
         return 0;

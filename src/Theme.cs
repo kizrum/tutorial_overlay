@@ -192,6 +192,15 @@ internal static class Theme
         g.FillEllipse(b, c.X - d / 2, c.Y + s * 0.32f - d / 2, d, d);
     }
 
+    public static void IconBulb(Graphics g, PointF c, float s, Color color, float w)
+    {
+        using var pen = new Pen(color, w) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+        float r = s * 0.30f;
+        g.DrawArc(pen, c.X - r, c.Y - s * 0.46f, 2 * r, 2 * r, 140, 260);
+        g.DrawLine(pen, c.X - r * 0.55f, c.Y + s * 0.10f, c.X + r * 0.55f, c.Y + s * 0.10f);
+        g.DrawLine(pen, c.X - r * 0.40f, c.Y + s * 0.28f, c.X + r * 0.40f, c.Y + s * 0.28f);
+    }
+
     public static void IconSkip(Graphics g, PointF c, float s, Color color, float w)
     {
         IconChevron(g, new PointF(c.X - s * 0.16f, c.Y), s, false, color, w);

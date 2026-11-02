@@ -115,9 +115,18 @@ internal static class Renderer
         stroke(main);
     }
 
+    /// <summary>Thin style: a crisp line with a hairline shadow — no glow, no fill — for dense grids (piano roll).</summary>
+    private static void Thin(Graphics g, Action<Pen> stroke, Color c, float width, float scale, float a)
+    {
+        using (var shadow = new Pen(Color.FromArgb((int)(170 * a), 0, 0, 0), width + 2f * scale)) stroke(shadow);
+        using var main = new Pen(Palette.WithAlpha(c, a), width);
+        stroke(main);
+    }
+
     private static void Ring(Graphics g, Prim p, float a, float pulse)
     {
         var r = new RectangleF(p.A.X - p.R, p.A.Y - p.R, 2 * p.R, 2 * p.R);
+        if (!p.Glow) { Thin(g, pen => g.DrawEllipse(pen, r), p.Color, p.Width, p.Scale, a); return; }
         using (var fill = new SolidBrush(Palette.WithAlpha(p.Color, a * 0.10f))) g.FillEllipse(fill, r);
         Glow(g, pen => g.DrawEllipse(pen, r), p.Color, p.Width, p.Scale, a, pulse);
     }
@@ -125,6 +134,7 @@ internal static class Renderer
     private static void Frame(Graphics g, Prim p, float a, float pulse)
     {
         using var path = Theme.Rounded(p.Rect, p.Radius);
+        if (!p.Glow) { Thin(g, pen => g.DrawPath(pen, path), p.Color, p.Width, p.Scale, a); return; }
         using (var fill = new SolidBrush(Palette.WithAlpha(p.Color, a * 0.07f))) g.FillPath(fill, path);
         Glow(g, pen => g.DrawPath(pen, path), p.Color, p.Width, p.Scale, a, pulse);
     }

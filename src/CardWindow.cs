@@ -142,6 +142,7 @@ internal sealed class CardWindow : NoActivateForm
             if (Size != size) Size = size;   // placement below decides the location
             Invalidate();
         }
+        if (Busy(m)) Invalidate();          // the spinner keeps turning while we wait for the assistant
         if (_pinned && _pinnedStepVersion != m.StepVersion && Intersects(Bounds, m.Avoid)) _pinned = false;
         if (!_pinned) Place(m);
         ShowQuiet();
@@ -151,7 +152,7 @@ internal sealed class CardWindow : NoActivateForm
     private static string Signature(CardModel m, float s) =>
         string.Join("\u0001", Settings.Current.Lang, Settings.Current.Accent.ToArgb(), Settings.Current.HotkeySignature, m.State, m.Index, m.Total, m.Title, m.Text, m.Done, m.Required, m.Completed, m.CanBack, m.CanUndo,
             string.Join(",", m.Checklist.Select(c => c.label + c.done)), string.Join(",", m.Extra.Select(b => b.Id + b.Text)),
-            string.Join(",", m.Controls), m.Hint, m.HintTitle, m.Issue, m.HelpPending, m.Highlighting, m.Review, s);
+            string.Join(",", m.Controls), m.Why, m.Hint, m.HintTitle, m.Issue, m.HelpPending, m.Highlighting, m.Review, s);
 
     /// <summary>Global hotkeys exist only while the card is shown; re-registered when the settings change.</summary>
     private void SetHotkeys(bool on)
@@ -195,6 +196,7 @@ internal sealed class CardWindow : NoActivateForm
         y += 10 * s;                       // progress bar
         if (m.Title.Length > 0) y += Theme.Measure(m.Title, Theme.Font(18 * s, true), ContentWidth).Height + 6 * s;
         if (m.Text.Length > 0) y += Theme.Measure(m.Text, Theme.Font(14.5f * s), ContentWidth).Height + 6 * s;
+        if (m.Why != null) y += WhyHeight(m.Why) + 8 * s;
         if (m.Checklist.Count > 0) y += 6 * s + m.Checklist.Count * 26 * s;
         else if (m.Required > 1) y += 22 * s;
         var note = Note(m);
@@ -244,7 +246,9 @@ internal sealed class CardWindow : NoActivateForm
                 _buttons.Add(new Btn { Id = "dont_understand", Action = "dont_understand", Text = loc.DontGet, Style = "secondary", Rect = new RectangleF(x0, y, ContentWidth, h) });
                 y += h + gap;
             }
-            _buttons.Add(new Btn { Id = "help_cancel", Action = "help_cancel", Text = loc.Cancel, Style = "ghost", Rect = new RectangleF(x0, y, 110 * s, h) });
+            float cw = 110 * s;
+            _buttons.Add(new Btn { Id = "help_other", Action = "help_other", Text = loc.Other, Style = "secondary", Rect = new RectangleF(x0, y, ContentWidth - cw - gap, h) });
+            _buttons.Add(new Btn { Id = "help_cancel", Action = "help_cancel", Text = loc.Cancel, Style = "ghost", Rect = new RectangleF(x0 + ContentWidth - cw, y, cw, h) });
             y += h;
             return;
         }
@@ -322,9 +326,13 @@ internal sealed class CardWindow : NoActivateForm
     }
 
     /// <summary>One message block above the buttons: the agent's hint, else "highlighting / sent", else why targets are hidden.</summary>
+    /// <summary>Waiting for the next steps or for an answer to "help": show motion, not a frozen card.</summary>
+    private static bool Busy(CardModel m) => m.State == "waiting" || (m.HelpPending && m.Hint == null);
+
     private (string? title, string text, Color color)? Note(CardModel m)
     {
         var loc = Settings.Current.Text;
+        if (m.State == "waiting") return (null, loc.Preparing, Palette.Named["blue"]);
         if (m.Hint != null) return (m.HintTitle, m.Hint, Palette.Named["blue"]);
         if (m.HelpPending) return (null, m.Highlighting ? loc.Highlighting + " " + loc.HelpSent : loc.HelpSent, Palette.Warn);
         if (m.Issue != null) return (null, m.Issue, Palette.Warn);
@@ -332,9 +340,32 @@ internal sealed class CardWindow : NoActivateForm
         return null;
     }
 
+    // "Why it works this way": a quiet block with a bulb, so the user learns the idea and not just the click
+    private float WhyHeight(string why) =>
+        Theme.Measure(why, Theme.Font(13.5f * _s), ContentWidth - 40 * _s).Height + Theme.Font(12 * _s, true).Height + 18 * _s;
+
+    private void DrawWhy(Graphics g, string why, float y)
+    {
+        float s = _s, h = WhyHeight(why);
+        var r = new RectangleF(Pad, y, ContentWidth, h);
+        var gold = Palette.Named["yellow"];
+        using (var path = Theme.Rounded(r, 8 * s))
+        {
+            using (var b = new SolidBrush(Palette.WithAlpha(gold, 0.07f))) g.FillPath(b, path);
+            using var pen = new Pen(Palette.WithAlpha(gold, 0.35f), 1 * s);
+            g.DrawPath(pen, path);
+        }
+        Theme.IconBulb(g, new PointF(r.X + 17 * s, r.Y + 17 * s), 18 * s, gold, 1.8f * s);
+        var head = Settings.Current.Text.Why;
+        using (var hb = new SolidBrush(gold)) g.DrawString(head.ToUpperInvariant(), Theme.Font(12 * s, true), hb, r.X + 32 * s, r.Y + 8 * s);
+        using var tb = new SolidBrush(Palette.Text);
+        float ty = r.Y + 10 * s + Theme.Font(12 * s, true).Height;
+        g.DrawString(why, Theme.Font(13.5f * s), tb, new RectangleF(r.X + 32 * s, ty, ContentWidth - 40 * s, r.Bottom - ty), Theme.Wrap);
+    }
+
     private float NoteHeight((string? title, string text, Color color) n)
     {
-        float s = _s, w = ContentWidth - 34 * s;
+        float s = _s, w = ContentWidth - (Busy(_model) ? 44 : 34) * s;
         float h = Theme.Measure(n.text, Theme.Font(13.5f * s), w).Height;
         if (n.title != null) h += Theme.Measure(n.title, Theme.Font(14 * s, true), w).Height + 2 * s;
         return h + 16 * s;
@@ -346,9 +377,30 @@ internal sealed class CardWindow : NoActivateForm
         var r = new RectangleF(x, y, w, h);
         using (var path = Theme.Rounded(r, 8 * s))
         using (var b = new SolidBrush(Palette.InkRaised)) g.FillPath(b, path);
-        using (var bar = Theme.Rounded(new RectangleF(x + 6 * s, y + 7 * s, 4 * s, h - 14 * s), 2 * s))
-        using (var b = new SolidBrush(n.color)) g.FillPath(b, bar);
         float tx = x + 22 * s, ty = y + 8 * s, tw = w - 34 * s;
+        if (Busy(_model))
+        {
+            // spinner: a rotating arc plus a soft sweep along the bottom edge
+            var c = new PointF(x + 16 * s, y + h / 2);
+            float rr = 7.5f * s, ang = (Environment.TickCount % 1100) / 1100f * 360f;
+            using (var track = new Pen(Palette.WithAlpha(n.color, 0.25f), 2.4f * s)) g.DrawEllipse(track, c.X - rr, c.Y - rr, 2 * rr, 2 * rr);
+            using (var arc = new Pen(n.color, 2.4f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                g.DrawArc(arc, c.X - rr, c.Y - rr, 2 * rr, 2 * rr, ang, 100);
+            float t = (Environment.TickCount % 1600) / 1600f;
+            float sw = w * 0.28f, sx = x + (w + sw) * t - sw;
+            var sweep = RectangleF.Intersect(new RectangleF(sx, r.Bottom - 3 * s, sw, 3 * s), r);
+            if (sweep.Width > 0)
+                using (var sb = new LinearGradientBrush(new RectangleF(sx - 1, sweep.Y, sw + 2, sweep.Height), Color.Transparent, n.color, 0f)
+                       { WrapMode = WrapMode.TileFlipX })
+                    g.FillRectangle(sb, sweep);
+            tx = x + 32 * s; tw = w - 44 * s;
+        }
+        else
+        {
+            using var bar = Theme.Rounded(new RectangleF(x + 6 * s, y + 7 * s, 4 * s, h - 14 * s), 2 * s);
+            using var b = new SolidBrush(n.color);
+            g.FillPath(b, bar);
+        }
         if (n.title != null)
         {
             var tf = Theme.Font(14 * s, true);
@@ -434,6 +486,13 @@ internal sealed class CardWindow : NoActivateForm
             using var b = new SolidBrush(Palette.TextDim);
             g.DrawString(m.Text, f, b, new RectangleF(Pad, y, ContentWidth, sz.Height + 2), Theme.Wrap);
             y += sz.Height + 6 * s;
+        }
+
+        if (m.Why != null)
+        {
+            y += 2 * s;
+            DrawWhy(g, m.Why, y);
+            y += WhyHeight(m.Why) + 6 * s;
         }
 
         if (m.Checklist.Count > 0)
@@ -583,6 +642,12 @@ internal sealed class CardWindow : NoActivateForm
         if (b.Custom) Engine.ButtonPressed("card", b.Id, b.Action, "card");
         else if (b.Action == "help_open") { _helpOpen = true; _helpStepVersion = _model.StepVersion; Relayout(); }
         else if (b.Action == "help_cancel") { _helpOpen = false; Relayout(); }
+        else if (b.Action == "help_other")
+        {
+            _helpOpen = false;
+            Relayout();
+            HelpInput.Ask(this, _s, text => Engine.RequestHelp("other", "card", text));
+        }
         else
         {
             if (b.Action is "cant_find" or "dont_understand") _helpOpen = false;
@@ -672,5 +737,149 @@ internal sealed class ButtonHost
             _windows[k].Dispose();
             _windows.Remove(k);
         }
+    }
+}
+
+/// <summary>
+/// "Something else": a small focused window where the user types the problem in their own words.
+/// The card can't take keyboard input (it never activates, so the app keeps focus) — this window does,
+/// briefly, and hands focus back to whatever was in front before.
+/// </summary>
+internal sealed class HelpInput : Form
+{
+    private static HelpInput? _open;
+    private readonly TextBox _box;
+    private readonly IntPtr _returnTo;
+    private readonly Action<string> _send;
+    private readonly float _s;
+    private RectangleF _sendRect, _cancelRect;
+    private string _hover = "";
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr h);
+
+    public static void Ask(Form near, float scale, Action<string> send)
+    {
+        if (_open != null) { _open.Activate(); return; }
+        _open = new HelpInput(near, scale, send);
+        _open.FormClosed += (_, _) => _open = null;
+        _open.Show();
+        _open.Activate();
+        _open._box.Focus();
+    }
+
+    private HelpInput(Form near, float s, Action<string> send)
+    {
+        _s = s;
+        _send = send;
+        _returnTo = GetForegroundWindow();
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        TopMost = true;
+        StartPosition = FormStartPosition.Manual;
+        AutoScaleMode = AutoScaleMode.None;
+        DoubleBuffered = true;
+        BackColor = Palette.Ink;
+        KeyPreview = true;
+        Text = "TutorialOverlay help";
+        int w = (int)(near.Width), h = (int)(196 * s);
+        var work = Native.WorkAreaAt(new PointF(near.Left + near.Width / 2f, near.Top));
+        int y = near.Top - h - (int)(10 * s);
+        if (y < work.Top) y = Math.Min(near.Bottom + (int)(10 * s), work.Bottom - h);
+        Bounds = new Rectangle(near.Left, y, w, h);
+        _box = new TextBox
+        {
+            Multiline = true, BorderStyle = BorderStyle.None, BackColor = Palette.InkRaised, ForeColor = Palette.Text,
+            Font = Theme.Font(14.5f * s), AcceptsReturn = false, ScrollBars = ScrollBars.None,
+            Bounds = Rectangle.Round(new RectangleF(30 * s, 52 * s, w - 60 * s, 70 * s)),
+        };
+        Controls.Add(_box);
+        _box.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == System.Windows.Forms.Keys.Enter && !e.Shift) { e.SuppressKeyPress = true; Submit(); }
+            else if (e.KeyCode == System.Windows.Forms.Keys.Enter && e.Shift) { e.SuppressKeyPress = true; _box.SelectedText = Environment.NewLine; }
+            else if (e.KeyCode == System.Windows.Forms.Keys.Escape) { e.SuppressKeyPress = true; CloseAndReturn(); }
+        };
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        int round = 2;
+        Native.DwmSetWindowAttribute(Handle, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref round, 4);
+    }
+
+    protected override void OnDeactivate(EventArgs e)
+    {
+        base.OnDeactivate(e);
+        // clicking elsewhere = cancel; never leave a stray input window behind
+        if (Visible) BeginInvoke(new Action(() => { if (!IsDisposed) Close(); }));
+    }
+
+    private void Submit()
+    {
+        var text = _box.Text.Trim();
+        if (text.Length == 0) { _box.Focus(); return; }
+        _send(text);
+        CloseAndReturn();
+    }
+
+    private void CloseAndReturn()
+    {
+        var back = _returnTo;
+        Close();
+        if (back != IntPtr.Zero) SetForegroundWindow(back);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        Theme.Quality(g);
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+        float s = _s, w = ClientSize.Width, h = ClientSize.Height;
+        var loc = Settings.Current.Text;
+        g.Clear(Palette.Ink);
+        using (var b = new LinearGradientBrush(new RectangleF(0, 0, w, 3 * s), Palette.Accent, Palette.Named["purple"], 0f))
+            g.FillRectangle(b, 0, 0, w, 3 * s);
+        using (var pen = new Pen(Palette.Line, 1)) g.DrawRectangle(pen, 0, 0, w - 1, h - 1);
+        using (var tb = new SolidBrush(Palette.Text)) g.DrawString(loc.OtherTitle, Theme.Font(16 * s, true), tb, 18 * s, 16 * s);
+        var field = new RectangleF(18 * s, 44 * s, w - 36 * s, 86 * s);
+        using (var path = Theme.Rounded(field, 8 * s))
+        {
+            using (var b = new SolidBrush(Palette.InkRaised)) g.FillPath(b, path);
+            using var pen = new Pen(_box.Focused ? Palette.Accent : Palette.Line, 1.2f * s);
+            g.DrawPath(pen, path);
+        }
+        float bh = 34 * s, by = h - bh - 14 * s;
+        _sendRect = new RectangleF(w - 18 * s - 130 * s, by, 130 * s, bh);
+        _cancelRect = new RectangleF(_sendRect.X - 10 * s - 100 * s, by, 100 * s, bh);
+        DrawPill(g, _cancelRect, loc.Cancel, false, _hover == "cancel");
+        DrawPill(g, _sendRect, loc.Send, true, _hover == "send");
+        using (var hb = new SolidBrush(Palette.WithAlpha(Palette.TextDim, 0.8f)))
+            g.DrawString(loc.OtherHint, Theme.Font(11 * s), hb, new RectangleF(18 * s, by, _cancelRect.X - 26 * s, bh), new StringFormat(Theme.Center) { Alignment = StringAlignment.Near, FormatFlags = 0 });
+    }
+
+    private void DrawPill(Graphics g, RectangleF r, string text, bool primary, bool hover)
+    {
+        using var path = Theme.Rounded(r, r.Height / 2);
+        var fill = primary ? (hover ? Color.FromArgb(255, 255, 110, 135) : Palette.Accent) : (hover ? Palette.InkHover : Palette.InkRaised);
+        using (var b = new SolidBrush(fill)) g.FillPath(b, path);
+        if (!primary) using (var pen = new Pen(Palette.Line, 1 * _s)) g.DrawPath(pen, path);
+        using var tb = new SolidBrush(primary ? Palette.Ink : Palette.Text);
+        g.DrawString(text, Theme.Font(13.5f * _s, true), tb, r, Theme.Center);
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        var hv = _sendRect.Contains(e.Location) ? "send" : _cancelRect.Contains(e.Location) ? "cancel" : "";
+        if (hv != _hover) { _hover = hv; Cursor = hv.Length > 0 ? Cursors.Hand : Cursors.Default; Invalidate(); }
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        if (_sendRect.Contains(e.Location)) Submit();
+        else if (_cancelRect.Contains(e.Location)) CloseAndReturn();
     }
 }

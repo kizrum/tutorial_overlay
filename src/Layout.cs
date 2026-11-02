@@ -13,6 +13,8 @@ internal sealed class AnchorGeo
     public float Scale = 1;
     public IntPtr Root;
     public int[] Pids = Array.Empty<int>();
+    public RectangleF? View;          // visible area the point must be inside (scrollable panes)
+    public bool FromLastKnown;        // the visual anchor is out of view; P is where it was last seen
 }
 
 internal enum PrimKind { Circle, Rect, Arrow, Badge, Label, Info, Check, Checkbox }
@@ -33,6 +35,20 @@ internal sealed class Prim
     public bool Auto;            // position chosen by us (may be moved to avoid overlaps)
     public bool AutoSize;        // radius chosen by us (may shrink next to neighbours)
     public bool Glow = true;
+
+    /// <summary>What the shape actually covers (no glow allowance) — used for "does it overlap?".</summary>
+    public RectangleF Tight()
+    {
+        float g = Width / 2 + 1.5f * Scale;
+        RectangleF r = Kind switch
+        {
+            PrimKind.Circle or PrimKind.Badge or PrimKind.Check => new RectangleF(A.X - R, A.Y - R, 2 * R, 2 * R),
+            PrimKind.Arrow => RectangleF.FromLTRB(Math.Min(A.X, B.X), Math.Min(A.Y, B.Y), Math.Max(A.X, B.X), Math.Max(A.Y, B.Y)),
+            _ => Rect,
+        };
+        r.Inflate(g, g);
+        return r;
+    }
 
     public RectangleF Extent()
     {
@@ -117,8 +133,11 @@ internal static class Layout
         bool hasCheckbox = m.Shapes.Any(x => x.Type == "checkbox");
 
         PointF Rel(float? x, float? y) => new(ag.P.X + (x ?? 0), ag.P.Y + (y ?? 0));
+        // shapes without coordinates wrap the element — unless the anchor points at a spot inside it
+        RectangleF? Wrap() => m.Anchor.HasPoint ? null : ag.Bounds;
         Color ColorOf(ShapeSpec sp, Color fallback) => sp.Color ?? m.AutoColor ?? fallback;
-        float Stroke(ShapeSpec sp) => (sp.Width ?? 3.5f) * s;
+        bool Thin(ShapeSpec sp) => sp.Style == "thin";
+        float Stroke(ShapeSpec sp) => (sp.Width ?? (Thin(sp) ? 2f : 3.5f)) * s;
 
         void AddTargetBounds(RectangleF r) => targetBounds = targetBounds is RectangleF t ? RectangleF.Union(t, r) : r;
 
@@ -130,13 +149,13 @@ internal static class Layout
                 case "circle":
                 {
                     PointF c; float r;
-                    if (sp.X == null && sp.Y == null && ag.Bounds is RectangleF bb)
+                    if (sp.X == null && sp.Y == null && Wrap() is RectangleF bb)
                     {
                         c = new PointF(bb.X + bb.Width / 2, bb.Y + bb.Height / 2);
                         r = sp.R ?? Math.Max(14 * s, Math.Max(bb.Width, bb.Height) / 2 + sp.Pad * s);
                     }
                     else { c = Rel(sp.X, sp.Y); r = sp.R ?? 22 * s; }
-                    var p = new Prim { Kind = PrimKind.Circle, A = c, R = r, Color = ColorOf(sp, Palette.Accent), Width = Stroke(sp), Scale = s, AutoSize = sp.R == null };
+                    var p = new Prim { Kind = PrimKind.Circle, A = c, R = r, Color = ColorOf(sp, Palette.Accent), Width = Stroke(sp), Scale = s, AutoSize = sp.R == null, Glow = !Thin(sp) };
                     geo.Prims.Add(p);
                     if (sp.IsTarget) { geo.Hits.Add(new HitArea { Circle = true, C = c, R = r }); firstTarget ??= p; AddTargetBounds(new RectangleF(c.X - r, c.Y - r, 2 * r, 2 * r)); }
                     break;
@@ -146,21 +165,22 @@ internal static class Layout
                 {
                     RectangleF r;
                     if (sp.W != null && sp.H != null) { var tl = Rel(sp.X, sp.Y); r = new RectangleF(tl.X, tl.Y, sp.W.Value, sp.H.Value); }
-                    else if (ag.Bounds is RectangleF bb && sp.Type == "rect")
+                    else if (Wrap() is RectangleF bb && sp.Type == "rect")
                     {
                         r = bb; r.Offset(sp.X ?? 0, sp.Y ?? 0); r.Inflate(sp.Pad * s, sp.Pad * s);
                     }
                     else
                     {
                         float half = (sp.Type == "checkbox" ? (sp.R ?? 14) : 20) * s;
-                        var c = sp.X == null && sp.Y == null && ag.Bounds is RectangleF cb ? new PointF(cb.X + cb.Width / 2, cb.Y + cb.Height / 2) : Rel(sp.X, sp.Y);
+                        var c = sp.X == null && sp.Y == null && Wrap() is RectangleF cb ? new PointF(cb.X + cb.Width / 2, cb.Y + cb.Height / 2) : Rel(sp.X, sp.Y);
                         r = new RectangleF(c.X - half, c.Y - half, 2 * half, 2 * half);
                     }
                     var p = new Prim
                     {
                         Kind = sp.Type == "checkbox" ? PrimKind.Checkbox : PrimKind.Rect, Rect = r,
                         Color = ColorOf(sp, sp.Type == "checkbox" ? Palette.Success : Palette.Accent),
-                        Width = Stroke(sp), Radius = sp.Radius * s, Scale = s, On = satisfied,
+                        Width = Stroke(sp), Radius = (Thin(sp) ? Math.Min(sp.Radius, 3) : sp.Radius) * s, Scale = s, On = satisfied,
+                        Glow = !Thin(sp),
                     };
                     geo.Prims.Add(p);
                     if (sp.Type == "checkbox") geo.DonePrims.Add(p);
@@ -188,12 +208,22 @@ internal static class Layout
             {
                 case "badge":
                 {
-                    float r = sp.R ?? 13 * s;
+                    // never bigger than the thing it numbers (dense grids: piano roll, step cells)
+                    float r = sp.R ?? (firstTarget != null ? Math.Clamp(Math.Min(tb.Width, tb.Height) / 2, 8 * s, 13 * s) : 13 * s);
                     PointF c;
+                    // outside the target (top-left), never on top of it; Declutter moves it if a neighbour is there
                     if (sp.X != null || sp.Y != null) c = Rel(sp.X, sp.Y);
-                    else if (firstTarget?.Kind == PrimKind.Circle) c = new PointF(firstTarget.A.X - firstTarget.R * 0.72f, firstTarget.A.Y - firstTarget.R * 0.72f);
-                    else c = new PointF(tb.X, tb.Y);
-                    var p = new Prim { Kind = PrimKind.Badge, A = c, R = r, Text = sp.Text ?? "1", Color = ColorOf(sp, Palette.Accent), Scale = s, Size = (sp.Size ?? r / s * 1.05f) * s };
+                    else if (firstTarget?.Kind == PrimKind.Circle)
+                    {
+                        float d = firstTarget.R + r * 0.85f + 3 * s;
+                        c = new PointF(firstTarget.A.X - d * 0.707f, firstTarget.A.Y - d * 0.707f);
+                    }
+                    else c = new PointF(tb.X - r * 0.75f - 2 * s, tb.Y - r * 0.75f - 2 * s);
+                    var p = new Prim
+                    {
+                        Kind = PrimKind.Badge, A = c, R = r, Text = sp.Text ?? "1", Color = ColorOf(sp, Palette.Accent), Scale = s,
+                        Size = (sp.Size ?? r / s * 1.05f) * s, Auto = sp.X == null && sp.Y == null,
+                    };
                     geo.Prims.Add(p);
                     if (sp.IsTarget && firstTarget == null) { geo.Hits.Add(new HitArea { Circle = true, C = c, R = r }); AddTargetBounds(p.Extent()); }
                     break;

@@ -1,0 +1,161 @@
+{
+  "title": "Урок: как починить молчащую ноту",
+  "app": "FL64",
+  "keepOpen": false,
+  "steps": [
+    {
+      "id": "props",
+      "title": "Откройте свойства ноты",
+      "text": "В Piano roll сделайте двойной клик по вашей звучащей ноте — откроется окно её свойств (Note properties).",
+      "why": "У каждой ноты в FL есть свои настройки: громкость (velocity), панорама, тонкая высота и флажки Slide и Porta. Именно флажок Slide превращает обычную ноту в «скользящую», которая сама не звучит. Поэтому чинить такую ноту нужно в её свойствах, а не в синтезаторе.",
+      "buttons": [
+        {
+          "id": "props_open",
+          "text": "Окно открылось",
+          "style": "success",
+          "action": "done"
+        },
+        {
+          "id": "props_missing",
+          "text": "Не открывается",
+          "style": "danger",
+          "action": "done"
+        }
+      ],
+      "controls": [
+        "back",
+        "help",
+        "stop"
+      ],
+      "until": [
+        "manual"
+      ]
+    },
+    {
+      "id": "slide-on",
+      "title": "Включите Slide и послушайте",
+      "text": "Двойной клик по ноте откроет её свойства. В блоке Levels, слева внизу — круглый переключатель со значком ◢. Это Slide. Включите его и нажмите Accept. На ноте появится ◢◢. Нажмите пробел — нота замолчит.",
+      "why": "Значки в окне те же, что на нотах: ◢ — Slide (скольжение), ⟋ рядом — Porta (портаменто). Slide-нота не включает звук, а только «тянет» высоту уже звучащей ноты — одна такая нота даёт тишину. Так вы своими руками воспроизводите прежнюю проблему.",
+      "buttons": [
+        {
+          "id": "silent_now",
+          "text": "Значок появился, тишина",
+          "style": "secondary",
+          "action": "done"
+        },
+        {
+          "id": "no_slide",
+          "text": "Не нашёл Slide",
+          "style": "danger",
+          "action": "done"
+        }
+      ],
+      "controls": [
+        "back",
+        "help",
+        "stop"
+      ],
+      "until": [
+        "manual"
+      ],
+      "targets": [
+        {
+          "name": "Переключатель Slide ◢",
+          "optional": true,
+          "dismissOnClick": false,
+          "anchor": {
+            "window": "Note properties",
+            "offset": [
+              48,
+              186
+            ]
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "r": 20
+            },
+            {
+              "type": "label",
+              "text": "Slide ◢"
+            }
+          ]
+        },
+        {
+          "name": "Accept",
+          "optional": true,
+          "dismissOnClick": false,
+          "anchor": {
+            "window": "Note properties",
+            "offset": [
+              393,
+              409
+            ]
+          },
+          "shapes": [
+            {
+              "type": "rect",
+              "x": -50,
+              "y": -18,
+              "w": 100,
+              "h": 36,
+              "style": "thin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "slide-off",
+      "title": "Выключите Slide — звук вернётся",
+      "text": "Двойной клик по ноте → снова тот же переключатель ◢ → выключите → Accept. Значок ◢◢ на ноте исчезнет. Нажмите пробел — звук вернётся.",
+      "why": "Это и есть решение прежней проблемы: если нота молчит, а у неё значок ◢◢ — откройте её свойства и снимите Slide. Если таких нот много: выделите их все (Ctrl+A в Piano roll) и снимите Slide у одной — изменение применится к выделенным.",
+      "buttons": [
+        {
+          "id": "fixed",
+          "text": "Звучит снова",
+          "style": "success",
+          "action": "done"
+        },
+        {
+          "id": "still_bad",
+          "text": "Не получилось",
+          "style": "danger",
+          "action": "done"
+        }
+      ],
+      "controls": [
+        "back",
+        "help",
+        "stop"
+      ],
+      "until": [
+        "manual"
+      ],
+      "targets": [
+        {
+          "name": "Переключатель Slide ◢",
+          "optional": true,
+          "dismissOnClick": false,
+          "anchor": {
+            "window": "Note properties",
+            "offset": [
+              48,
+              186
+            ]
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "r": 20
+            },
+            {
+              "type": "label",
+              "text": "Выключить Slide"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

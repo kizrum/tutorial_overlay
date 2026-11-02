@@ -37,6 +37,49 @@ internal static class ScreenCapture
         }
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+    private const uint PW_RENDERFULLCONTENT = 2;
+
+    /// <summary>
+    /// The window's own pixels (PrintWindow), even while other windows cover it, cropped to <paramref name="screenRect"/>.
+    /// Null if the window can't render itself this way (minimised, blank result).
+    /// </summary>
+    public static Bitmap? CaptureWindow(IntPtr hwnd, Rectangle screenRect)
+    {
+        if (!Native.GetWindowRect(hwnd, out var wr)) return null;
+        var win = wr.ToRectangle();
+        if (win.Width <= 0 || win.Height <= 0) return null;
+        using var full = new Bitmap(win.Width, win.Height, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(full))
+        {
+            var hdc = g.GetHdc();
+            bool ok;
+            try { ok = PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT); }
+            finally { g.ReleaseHdc(hdc); }
+            if (!ok) return null;
+        }
+        var crop = Rectangle.Intersect(new Rectangle(screenRect.X - win.X, screenRect.Y - win.Y, screenRect.Width, screenRect.Height),
+                                       new Rectangle(0, 0, win.Width, win.Height));
+        if (crop.Width <= 0 || crop.Height <= 0) return null;
+        var bmp = full.Clone(crop, PixelFormat.Format32bppArgb);
+        if (LooksBlank(bmp)) { bmp.Dispose(); return null; }
+        return bmp;
+    }
+
+    /// <summary>Some GPU-composited windows print as solid black: treat that as "couldn't capture".</summary>
+    private static bool LooksBlank(Bitmap b)
+    {
+        int distinct = 0;
+        Color first = b.GetPixel(0, 0);
+        for (int i = 1; i <= 24 && distinct < 3; i++)
+        {
+            var c = b.GetPixel(b.Width * (i % 5 + 1) / 7, b.Height * (i / 5 + 1) / 7);
+            if (Math.Abs(c.R - first.R) + Math.Abs(c.G - first.G) + Math.Abs(c.B - first.B) > 12) distinct++;
+        }
+        return distinct < 3 && first.R + first.G + first.B < 30;
+    }
+
     public static Bitmap Capture(Rectangle r)
     {
         var bmp = new Bitmap(Math.Max(1, r.Width), Math.Max(1, r.Height), PixelFormat.Format32bppArgb);
