@@ -46,10 +46,17 @@ internal sealed class ElementSpec
     }
 }
 
-/// <summary>Visual anchor: find a remembered template inside the element; the point is measured from the match.</summary>
+/// <summary>
+/// Visual anchor: find a remembered template (or a piece of text, via OCR) inside the element; the point is measured
+/// from the match — the template's top-left, or the centre of the text.
+/// </summary>
 internal sealed class FindSpec
 {
     public string Template = "";
+    public string? Text;              // OCR: text to look for instead of a template
+    public string TextMatch = "contains";   // contains | exact | regex
+    public string? Lang;              // OCR language tag (default: the user's languages)
+    public int Nth;                   // which occurrence, top-to-bottom then left-to-right (0 = first)
     public RectangleF? Within;        // search only this part of the element (relative to its top-left)
     public string Axis = "xy";        // xy | x | y — which coordinates come from the match (y: keyboard rows, x: bar ruler)
     public float MaxScore = 0.08f;    // mean abs difference allowed (0 identical … 1 opposite)
@@ -64,13 +71,17 @@ internal sealed class FindSpec
             Template = J.Str(n, "template") ?? J.Str(n, "id") ?? "",
             Axis = (J.Str(n, "axis") ?? "xy").ToLowerInvariant(),
             MaxScore = (float)(J.Num(n, "maxScore") ?? 0.08),
+            Text = J.Str(n, "text"),
+            TextMatch = (J.Str(n, "match") ?? "contains").ToLowerInvariant(),
+            Lang = J.Str(n, "lang"),
+            Nth = J.Int(n, "index") ?? J.Int(n, "nth") ?? 0,
         };
         if (J.Arr(n, "within") is JsonArray a && a.Count >= 4)
             f.Within = new RectangleF((float)(J.AsNum(a[0]) ?? 0), (float)(J.AsNum(a[1]) ?? 0), (float)(J.AsNum(a[2]) ?? 0), (float)(J.AsNum(a[3]) ?? 0));
         return f;
     }
 
-    public string Key => $"{Template}/{Within}/{Axis}/{MaxScore}";
+    public string Key => Text != null ? $"text:{Text}/{TextMatch}/{Lang}/{Nth}/{Within}/{Axis}" : $"{Template}/{Within}/{Axis}/{MaxScore}";
 }
 
 /// <summary>
@@ -191,6 +202,7 @@ internal sealed class AnchorSpec
         if (Title != null) parts.Add($"title~\"{Title}\"");
         if (WindowClass != null) parts.Add($"class {WindowClass}");
         foreach (var p in Path) parts.Add("> " + p.Describe());
+        if (Find != null) parts.Add(Find.Text != null ? $"find text \"{Find.Text}\"" + (Find.Nth > 0 ? $" #{Find.Nth}" : "") : $"find template '{Find.Template}'");
         return string.Join(" ", parts);
     }
 }

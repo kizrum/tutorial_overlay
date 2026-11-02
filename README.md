@@ -60,6 +60,10 @@ claude mcp add --transport http tutorial-overlay http://127.0.0.1:7788/mcp --hea
 | `events(since, timeoutMs)` | события с long-poll (дублирует stdout и MCP-уведомления) |
 | `hint(text, title?, highlight?)` | ответ агента в карточке шага (например, после события `help`) |
 | `pick(anchor, count, prompt)` | калибровка: пользователь кликает точку, агент получает смещение от якоря, цвет, элемент UIA и готовый `suggestedAnchor`; клик по умолчанию до приложения не доходит, Esc — отмена |
+| `find_text(text?, anchor, within, match, lang)` | найти надпись на экране встроенным в Windows OCR: прямоугольник, центр, `rel` и `suggestedAnchor` с `find: {text}`; без `text` — весь распознанный текст области |
+| `validate(spec?)` | проверить туториал до запуска (или текущий): по каждому шагу видна ли цель сейчас, а если нет — почему |
+| `ask(question, options, input)` | спросить пользователя в панели над карточкой и дождаться ответа: кнопкой (`{choice, label}`) или текстом (`{text}`) |
+| `ask_area(prompt)` | попросить обвести место на экране карандашом и дождаться: границы, штрихи, элемент UIA в центре и картинка области |
 
 ## Сущности
 
@@ -98,6 +102,23 @@ claude mcp add --transport http tutorial-overlay http://127.0.0.1:7788/mcp --hea
   (`hideWhenInactive`, по умолчанию включено). Пока пользователь в другом окне, условия шага заморожены. При
   возврате всё появляется на том же шаге; если окно пересоздано, якорь находится заново.
 - Клики сопоставляются по **процессу** окна под курсором, а не по заголовку.
+
+**Якорь по тексту** — для программ, которые рисуют интерфейс сами и ничего не отдают в UIA (FL Studio):
+
+```json
+{ "process": "FL64", "element": { "name": "Channel rack" }, "find": { "text": "Kick", "match": "contains", "index": 0 }, "offset": [-40, 0] }
+```
+
+Надпись ищется встроенным в Windows распознаванием текста (`Windows.Media.Ocr`, вызывается напрямую через WinRT,
+без дополнительных библиотек) по собственным пикселям окна, поэтому работает и под другими окнами. Точка якоря —
+центр найденного текста, `offset` отсчитывается от него. Отметка следует за надписью при прокрутке (поиск раз в
+0,7 с). `match`: `contains` (по умолчанию), `exact` (вся строка), `regex`; мелкие ошибки распознавания (l/I, 0/O)
+прощаются. `index` — номер вхождения сверху вниз и слева направо, `within: [x,y,w,h]` — часть элемента, `lang` —
+язык распознавания (по умолчанию языки пользователя). Как OCR прочитал область, показывает `find_text` без `text`.
+
+**Проверка перед запуском** — `validate(spec)` разрешает все якоря туториала прямо сейчас. Ошибки (процесс не
+запущен, шаблон не снят, шаг не разобран) нужно исправить. Предупреждения на поздних шагах часто означают то, что
+откроет предыдущий шаг; `occluded` и `inactive` значат лишь, что сейчас впереди другое окно.
 
 ## Шаги и условия
 
@@ -211,7 +232,8 @@ claude mcp add --transport http tutorial-overlay http://127.0.0.1:7788/mcp --hea
 
 `ready`, `tutorial_started/finished/stopped/waiting`, `steps_appended`, `step_started/completed/back/skipped`,
 `hit`, `unhit`, `miss`, `undo`, `check_changed`, `uia_changed`, `key_matched`, `drag`, `opened`, `no_effect`,
-`button`, `help`, `sequence_reset`, `pick_started`, `pick`, `pick_finished`, `window_opened/closed`, `anchor_found/lost`,
+`button`, `help`, `sequence_reset`, `pick_started`, `pick`, `pick_finished`, `ask`, `answer`, `ask_area`, `area`,
+`window_opened/closed`, `anchor_found/lost`,
 `hook_reinstalled`, `exit`. У `miss` есть пометки `wrongButton` / `expectedButton`, если клик попал в цель не той
 кнопкой мыши.
 

@@ -79,22 +79,32 @@ internal sealed class SketchPad : Form
     private RectangleF _bar, _clearRect, _doneRect;
     private string _hover = "";
     private bool _finished;
+    private readonly string _title;
+    private float _titleH;
 
-    /// <summary>Draw on top of <paramref name="sketch"/>; <paramref name="done"/>(true) when the user keeps the result.</summary>
-    public static void Open(Sketch sketch, Action<bool> done)
+    /// <summary>
+    /// Draw on top of <paramref name="sketch"/>; <paramref name="done"/>(true) when the user keeps the result.
+    /// <paramref name="title"/> replaces the default instruction (the agent's own request in ask_area).
+    /// </summary>
+    public static SketchPad Open(Sketch sketch, Action<bool> done, string? title = null)
     {
         var vs = Native.VirtualScreen();
         sketch.Shot?.Dispose();
         sketch.Shot = ScreenCapture.Capture(vs);
         sketch.ShotRect = vs;
-        var pad = new SketchPad(sketch, vs, done);
+        var pad = new SketchPad(sketch, vs, done, title);
         pad.Show();
         pad.Activate();
+        return pad;
     }
 
-    private SketchPad(Sketch sketch, Rectangle vs, Action<bool> done)
+    /// <summary>Close without keeping anything (timeout, superseded request).</summary>
+    public void Cancel() => Finish(false);
+
+    private SketchPad(Sketch sketch, Rectangle vs, Action<bool> done, string? title)
     {
         _sketch = sketch;
+        _title = title ?? Settings.Current.Text.SketchTitle;
         _strokes = sketch.Strokes.ToList();
         _done = done;
         _vs = vs;
@@ -123,7 +133,10 @@ internal sealed class SketchPad : Form
         var at = new PointF(cp.X, cp.Y);
         _k = Native.ScaleAt(at);
         var mon = Native.MonitorRectAt(at);
-        float w = Math.Min(620 * _k, mon.Width - 32 * _k), h = 58 * _k;
+        float w = Math.Min(620 * _k, mon.Width - 32 * _k);
+        // a long request from the agent wraps: the bar grows to fit it
+        _titleH = Math.Max(22 * _k, Theme.Measure(_title, Theme.Font(14.5f * _k, true), w - 290 * _k).Height + 2 * _k);
+        float h = 9 * _k + _titleH + 27 * _k;
         _bar = new RectangleF(mon.X - vs.X + (mon.Width - w) / 2, mon.Y - vs.Y + 18 * _k, w, h);
         float bh = 34 * _k, by = _bar.Y + (h - bh) / 2;
         _doneRect = new RectangleF(_bar.Right - 12 * _k - 110 * _k, by, 110 * _k, bh);
@@ -170,9 +183,9 @@ internal sealed class SketchPad : Form
         Theme.IconPencil(g, new PointF(_bar.X + 28 * k, _bar.Y + _bar.Height / 2), 22 * k, Palette.Accent, 2.2f * k);
         float tx = _bar.X + 50 * k, tw = _clearRect.X - 10 * k - tx;
         using (var tb = new SolidBrush(Palette.Text))
-            g.DrawString(loc.SketchTitle, Theme.Font(14.5f * k, true), tb, new RectangleF(tx, _bar.Y + 9 * k, tw, 22 * k), Theme.Wrap);
+            g.DrawString(_title, Theme.Font(14.5f * k, true), tb, new RectangleF(tx, _bar.Y + 9 * k, tw, _titleH), Theme.Wrap);
         using (var hb = new SolidBrush(Palette.TextDim))
-            g.DrawString(loc.SketchText, Theme.Font(11.5f * k), hb, new RectangleF(tx, _bar.Y + 31 * k, tw, 20 * k), Theme.Wrap);
+            g.DrawString(loc.SketchText, Theme.Font(11.5f * k), hb, new RectangleF(tx, _bar.Y + 9 * k + _titleH, tw, 20 * k), Theme.Wrap);
         Pill(g, _clearRect, loc.SketchClear, false, _hover == "clear", _strokes.Count > 0);
         Pill(g, _doneRect, loc.Done, true, _hover == "done", true);
     }

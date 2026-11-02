@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Text.Json.Nodes;
@@ -34,7 +35,9 @@ internal static class Tools
         "Anchor: {process:'FL64'|'notepad', window:'title substring', title:'top-level title OR UIA Window/Pane name (substring)', " +
         "element:{name,role,automationId,className,match:'contains'|'exact',pick:'largest'|'first'|'smallest',index} or an array of those (nested path), " +
         "origin:'topleft'|'center'|'topright'|'bottomleft'|'bottomright'|'top'|'bottom'|'left'|'right', offset:[dx,dy], relativeTo:'frame'|'client', hwnd, screen:true, " +
-        "find:{template, within, axis} (visual anchor from the template tool: offset is measured from the match, so marks follow scrolling; " +
+        "find:{template, within, axis} (visual anchor from the template tool: offset is measured from the match's top-left, so marks follow scrolling; " +
+        "or find:{text:'Piano roll', match:'contains'|'exact'|'regex', index, lang, within} — found by OCR, offset measured from the text's centre, " +
+        "for apps that draw their own UI and expose nothing to UIA; check the wording first with find_text; " +
         "targets that scroll out of the pane get an edge arrow 'scroll up/down/left/right')}. " +
         "Omit for screen-absolute coordinates (offset = absolute point). Shapes are positioned relative to origin+offset.";
 
@@ -102,6 +105,27 @@ internal static class Tools
             Obj(("anchor", T("object", "anchor to measure rel offsets against")), ("count", T("integer", "number of points (default 1)")),
                 ("prompt", T("string", "text shown next to the cursor")), ("passThrough", T("boolean", "let the click reach the app (default false)")),
                 ("timeoutMs", T("integer", "default 60000")))),
+        Tool("find_text", "Read text on screen with the OCR built into Windows (works on apps that draw their own UI, e.g. FL Studio). " +
+            "With text: where it is — screen rect, centre, rel (centre − anchor point) and a suggestedAnchor with find:{text} that keeps following it. " +
+            "Without text: every recognised line with its rect (to see what is there and how the OCR spells it). Overlay drawings are excluded.",
+            Obj(("text", T("string", "text to look for (case-insensitive; small OCR slips tolerated)")), ("anchor", T("object", AnchorDesc)),
+                ("rect", T("array", "[x,y,w,h] absolute screen rect instead of an anchor")),
+                ("within", T("array", "[x,y,w,h] part of the anchor element (relative to its top-left)")),
+                ("match", T("string", "contains (default) | exact (whole line) | regex")),
+                ("lang", T("string", "OCR language tag, e.g. 'en-US', 'ru' (default: the user's languages)")))),
+        Tool("validate", "Check a tutorial before starting it (or the running one): resolves every target and condition anchor NOW and reports per step " +
+            "ok / reason (process not running, not found, minimized, occluded, off screen, template not captured, text not visible). " +
+            "Later steps often target things earlier steps open — those warnings are expected.",
+            Obj(("spec", T("object", "same as start_tutorial's spec; omit to check the running tutorial")))),
+        Tool("ask", "Ask the user a question in a panel above the step card (or in the screen corner, with no tutorial) and WAIT for the answer. " +
+            "options → answer buttons ({choice, label}); input:true → a text field ({text}). Returns {cancelled} if closed, {timedOut} after timeoutMs.",
+            Obj(("question", T("string", "the question")), ("title", T("string", "small heading (default: 'The assistant asks')")),
+                ("options", T("array", "buttons: ['Yes','No'] or [{id, text, style:'primary'|'secondary'}]")),
+                ("input", T("boolean", "add a text field (default: true when there are no options)")), ("placeholder", T("string", "text field hint")),
+                ("timeoutMs", T("integer", "default 300000")))),
+        Tool("ask_area", "Ask the user to circle something on screen (frozen screenshot + pencil) and WAIT. Returns bounds/strokes in screen px, " +
+            "the UIA element at the centre with a suggestedAnchor and rel to the current step's first target, plus the image of the area with the circling.",
+            Obj(("prompt", T("string", "what to circle, e.g. 'Circle the channel you want to edit'")), ("timeoutMs", T("integer", "default 180000")))),
         Tool("events", "Events since a sequence number (hit, miss, unhit, undo, step_started, step_completed, step_back, step_skipped, tutorial_*, window_opened/closed, anchor_found/lost, check_changed, uia_changed, key_matched, drag, opened, no_effect, blocked (target clicked while a modal dialog of the app was open), button, pick, help (user pressed '?': reason cant_find|dont_understand|other — other carries the user's own text and, if they circled something with the pencil, sketch {bounds, strokes, atCenter, image: PNG path} — with target visibility and recent misses; answer with hint()), hook_reinstalled). With timeoutMs it long-polls until something happens.",
             Obj(("since", T("integer", "last seq you have seen (default 0)")), ("timeoutMs", T("integer", "wait up to this long for new events (max 60000)")))),
     };
@@ -133,6 +157,10 @@ internal static class Tools
                 "pick" => Text(await Engine.Pick(args, ct)),
                 "hint" => Text(Engine.SetHint(args)),
                 "template" => await Task.Run(() => TemplateTool(args), ct),
+                "find_text" => await Task.Run(() => FindText(args), ct),
+                "validate" => Text(await Task.Run(() => Engine.Validate(args), ct)),
+                "ask" => Text(await Engine.Ask(args, ct)),
+                "ask_area" => AreaResult(await Engine.AskArea(args, ct)),
                 _ => Fail("unknown tool: " + name),
             };
         }
@@ -154,6 +182,110 @@ internal static class Tools
         ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = "error: " + msg }),
         ["isError"] = true,
     };
+
+    private static JsonObject AreaResult((JsonObject info, byte[]? png) r)
+    {
+        var content = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = r.info.ToJsonString(J.Pretty) });
+        if (r.png != null) content.Add(new JsonObject { ["type"] = "image", ["data"] = Convert.ToBase64String(r.png), ["mimeType"] = "image/png" });
+        return new JsonObject { ["content"] = content };
+    }
+
+    private static JsonObject FindText(JsonNode args)
+    {
+        var query = J.Str(args, "text");
+        string match = (J.Str(args, "match") ?? "contains").ToLowerInvariant();
+        string? lang = J.Str(args, "lang");
+        Rectangle rect;
+        IntPtr window = IntPtr.Zero;
+        PointF? anchorPoint = null;
+        RectangleF? element = null;
+        JsonNode? anchorJson = J.Get(args, "anchor");
+        // like screenshot: during a tutorial the default target is its app
+        if (anchorJson == null && !J.Has(args, "rect") && Engine.Tutorial is { Active: true, Defaults.Process: string proc })
+            anchorJson = new JsonObject { ["process"] = proc };
+        if (J.Get(args, "rect") is JsonArray ra && ra.Count >= 4)
+            rect = new Rectangle((int)(J.AsNum(ra[0]) ?? 0), (int)(J.AsNum(ra[1]) ?? 0), (int)(J.AsNum(ra[2]) ?? 100), (int)(J.AsNum(ra[3]) ?? 100));
+        else if (anchorJson != null)
+        {
+            var a = AnchorSpec.Parse(anchorJson, Engine.Tutorial?.Defaults).WithoutFind();
+            if (a.IsScreen) rect = Native.MonitorRectAt(new PointF(a.Dx, a.Dy));
+            else
+            {
+                var r = Resolver.ResolveNow(a);
+                if (!r.Found) return Fail($"anchor not found: {r.Reason} ({a.Describe()})");
+                if (Native.IsIconic(r.Root)) return Fail("the anchor's window is minimized");
+                var frame = Native.FrameRect(r.Root);
+                RectangleF b = r.Rel is RectangleF rel ? new RectangleF(frame.X + rel.X, frame.Y + rel.Y, rel.Width, rel.Height)
+                    : a.Client ? Native.ClientScreenRect(r.Root) : frame;
+                element = b;
+                window = r.Root;
+                var o = a.OriginOf(b);
+                anchorPoint = new PointF(o.X + a.Dx, o.Y + a.Dy);
+                rect = Rectangle.Round(b);
+                if (J.Arr(args, "within") is JsonArray wa && wa.Count >= 4)
+                    rect = Rectangle.Intersect(rect, Rectangle.Round(new RectangleF(b.X + (float)(J.AsNum(wa[0]) ?? 0), b.Y + (float)(J.AsNum(wa[1]) ?? 0),
+                                                                                    (float)(J.AsNum(wa[2]) ?? 0), (float)(J.AsNum(wa[3]) ?? 0))));
+            }
+        }
+        else
+        {
+            Native.GetCursorPos(out var cp);
+            rect = Native.MonitorRectAt(new PointF(cp.X, cp.Y));
+        }
+        rect = Rectangle.Intersect(rect, Native.VirtualScreen());
+        if (rect.Width < 4 || rect.Height < 4) return Fail("area is empty or off screen");
+
+        // the window's own pixels when possible (no overlay drawings, works while covered); else the screen without our windows
+        Bitmap? shot = window != IntPtr.Zero ? ScreenCapture.CaptureWindow(window, rect) : null;
+        if (shot == null)
+        {
+            bool flip = !Settings.Global.HideFromCapture;
+            if (flip) { Program.SetCapturable(false); Thread.Sleep(80); }
+            try { shot = ScreenCapture.Capture(rect); }
+            finally { if (flip) Program.SetCapturable(true); }
+        }
+        List<OcrLine> lines;
+        using (shot) lines = Ocr.Read(shot, lang);
+
+        RectangleF Screen(RectangleF r) => new(rect.X + r.X, rect.Y + r.Y, r.Width, r.Height);
+        var info = new JsonObject { ["area"] = J.RectJson(rect) };
+        if (query == null)
+        {
+            info["lines"] = new JsonArray(lines.Select(l => (JsonNode)new JsonObject { ["text"] = l.Text, ["rect"] = J.RectJson(Screen(l.Bounds)) }).ToArray());
+            if (lines.Count == 0) info["note"] = "no text recognised (tiny or low-contrast text? try a smaller area, or lang)";
+            return Text(info);
+        }
+        var found = Ocr.Find(lines, query, match).OrderBy(m => Math.Round(m.Rect.Y / 8)).ThenBy(m => m.Rect.X).ToList();
+        var arr = new JsonArray();
+        for (int i = 0; i < found.Count; i++)
+        {
+            var m = found[i];
+            var sr = Screen(m.Rect);
+            var c = new PointF(sr.X + sr.Width / 2, sr.Y + sr.Height / 2);
+            var o = new JsonObject { ["index"] = i, ["text"] = m.Text, ["rect"] = J.RectJson(sr), ["center"] = J.PtJson(c), ["score"] = Math.Round(m.Score, 3) };
+            if (anchorPoint is PointF ap) o["rel"] = J.PtJson(new PointF(c.X - ap.X, c.Y - ap.Y));
+            if (anchorJson is JsonObject aj)
+            {
+                var sug = (JsonObject)aj.DeepClone();
+                var find = new JsonObject { ["text"] = query };
+                if (match != "contains") find["match"] = match;
+                if (i > 0) find["index"] = i;
+                if (lang != null) find["lang"] = lang;
+                if (J.Get(args, "within") is JsonNode wn) find["within"] = wn.DeepClone();
+                sug["find"] = find;
+                sug.Remove("offset");
+                o["suggestedAnchor"] = sug;
+            }
+            arr.Add(o);
+        }
+        info["matches"] = arr;
+        if (element is RectangleF el) info["elementBounds"] = J.RectJson(el);
+        if (found.Count == 0)
+            info["near"] = new JsonArray(lines.Take(40).Select(l => (JsonNode)new JsonObject { ["text"] = l.Text, ["rect"] = J.RectJson(Screen(l.Bounds)) }).ToArray());
+        info["note"] = found.Count == 0 ? "not found; 'near' lists what the OCR read in this area"
+            : "suggestedAnchor marks the text's centre and follows it; add offset:[dx,dy] to point beside it";
+        return Text(info);
+    }
 
     private static JsonObject TemplateTool(JsonNode args)
     {

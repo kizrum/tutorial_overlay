@@ -114,6 +114,8 @@ internal sealed class Loc
     public string Sketch = "Обвести", Sketched = "Обведено: {0}", SketchTitle = "Обведите на экране, о чём речь",
         SketchText = "Рисуйте мышью · Enter или правый клик — готово · Ctrl+Z — убрать штрих · Esc — отмена", SketchClear = "Стереть";
 
+    public string AskTitle = "Вопрос от ассистента", AskHint = "Enter — отправить · Shift+Enter — новая строка · Esc — закрыть";
+
     // tray icon
     public string TrayRunning = "Работает · 127.0.0.1:{0}", TrayAgentNever = "Агент ещё не обращался", TrayAgentAgo = "Агент обращался {0} назад",
         TrayTutorial = "Туториал «{0}» · шаг {1} из {2}", TrayNoTutorial = "Туториал не запущен",
@@ -159,6 +161,7 @@ internal sealed class Loc
         OtherHint = "Enter — send · Shift+Enter — new line · Esc — cancel",
         Sketch = "Circle it", Sketched = "Circled: {0}", SketchTitle = "Circle the part of the screen you mean",
         SketchText = "Draw with the mouse · Enter or right click — done · Ctrl+Z — undo stroke · Esc — cancel", SketchClear = "Clear",
+        AskTitle = "The assistant asks", AskHint = "Enter — send · Shift+Enter — new line · Esc — close",
         TrayRunning = "Running · 127.0.0.1:{0}", TrayAgentNever = "No requests from the agent yet", TrayAgentAgo = "Agent's last request {0} ago",
         TrayTutorial = "Tutorial \"{0}\" · step {1} of {2}", TrayNoTutorial = "No tutorial running",
         TraySettings = "Settings…", TrayCopyKey = "Copy key", TrayCopyUrl = "Copy MCP address",

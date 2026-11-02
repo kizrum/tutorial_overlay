@@ -22,6 +22,14 @@ internal static class Program
     public static DateTime StartedAt { get; } = DateTime.Now;
     private static string[] _args = Array.Empty<string>();
 
+    /// <summary>Run on the UI thread (windows are created and closed there).</summary>
+    public static void OnUi(Action a)
+    {
+        var ui = _ui;
+        if (ui == null || ui.IsDisposed) return;
+        try { ui.BeginInvoke(a); } catch (InvalidOperationException) { }
+    }
+
     /// <summary>Global defaults → engine (after start-up and after the settings window saves).</summary>
     public static void ApplyGlobal(bool tutorialRunning)
     {

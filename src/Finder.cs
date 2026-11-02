@@ -62,6 +62,9 @@ internal static class Finder
 {
     public static readonly ConcurrentDictionary<string, Template> Templates = new();
     private static readonly ConcurrentDictionary<string, FindResult> Results = new();
+    private static readonly ConcurrentDictionary<string, DateTime> TextSearchedAt = new();
+    /// <summary>OCR is ~10× the cost of template matching: text anchors are re-read less often.</summary>
+    private const int TextIntervalMs = 700;
     private static volatile AnchorSpec[] _wanted = Array.Empty<AnchorSpec>();
     private static readonly AutoResetEvent Wake = new(false);
     private static volatile bool _stop;
@@ -85,6 +88,12 @@ internal static class Finder
         {
             foreach (var a in _wanted)
             {
+                if (a.Find!.Text != null)
+                {
+                    var now = DateTime.UtcNow;
+                    if (TextSearchedAt.TryGetValue(a.Key, out var at) && (now - at).TotalMilliseconds < TextIntervalMs) continue;
+                    TextSearchedAt[a.Key] = now;
+                }
                 try { Results[a.Key] = Search(a, Get(a.Key)); }
                 catch (Exception e) { Log.Debug("finder: " + e.Message); }
             }
@@ -98,7 +107,8 @@ internal static class Finder
         var f = a.Find!;
         PointF? last = prev?.Found == true ? prev.Rel : prev?.LastRel;
         FindResult Miss() => new(false, default, 1, last, DateTime.UtcNow);
-        if (!Templates.TryGetValue(f.Template, out var tpl)) return Miss();
+        Template? tpl = null;
+        if (f.Text == null && !Templates.TryGetValue(f.Template, out tpl)) return Miss();
         var r = Resolver.Get(a.WithoutFind().Key) ?? Resolver.ResolveNow(a.WithoutFind());
         if (!r.Found || Native.IsIconic(r.Root)) return Miss();
         var frame = Native.FrameRect(r.Root);
@@ -106,9 +116,20 @@ internal static class Finder
         // search area: the element, or a part of it ("within" is relative to the element's top-left)
         RectangleF area = f.Within is RectangleF w ? new RectangleF(b.X + w.X, b.Y + w.Y, w.Width, w.Height) : b;
         area.Intersect(b);
-        if (area.Width < tpl.W * 2 || area.Height < tpl.H * 2) return Miss();
+        if (tpl != null && (area.Width < tpl.W * 2 || area.Height < tpl.H * 2)) return Miss();
+        if (area.Width < 4 || area.Height < 4) return Miss();
         using var shot = ScreenCapture.CaptureWindow(r.Root, Rectangle.Round(area));
         if (shot == null) return Miss();
+        if (tpl == null)
+        {
+            // text: the centre of the n-th occurrence, reading order
+            var found = Ocr.Find(Ocr.Read(shot, f.Lang), f.Text!, f.TextMatch)
+                .OrderBy(m => Math.Round(m.Rect.Y / 8)).ThenBy(m => m.Rect.X).ToList();
+            if (found.Count <= f.Nth) return Miss();
+            var m = found[f.Nth].Rect;
+            var c = new PointF(area.X + m.X + m.Width / 2, area.Y + m.Y + m.Height / 2);
+            return new FindResult(true, new PointF(c.X - frame.X, c.Y - frame.Y), found[f.Nth].Score, last, DateTime.UtcNow);
+        }
         var img = Template.Gray(shot, out int iw, out int ih);
         var (bx, by, score) = Match(img, iw, ih, tpl);
         if (score > f.MaxScore) return Miss();

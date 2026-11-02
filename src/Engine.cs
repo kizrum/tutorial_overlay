@@ -1399,7 +1399,8 @@ internal static partial class Engine
     {
         var o = new JsonObject
         {
-            ["id"] = m.Id, ["name"] = m.Label, ["anchor"] = m.Anchor.Describe(), ["visibility"] = m.Visibility,
+            // a clicked-away mark is resolved and on screen, but nothing is drawn for it: say so
+            ["id"] = m.Id, ["name"] = m.Label, ["anchor"] = m.Anchor.Describe(), ["visibility"] = m.Dismissed && m.Visibility == "visible" ? "dismissed" : m.Visibility,
             ["dismissed"] = m.Dismissed, ["satisfied"] = m.Satisfied, ["hits"] = m.Hits,
         };
         if (m.Check != null) o["check"] = new JsonObject { ["expr"] = m.Check.Expr, ["ok"] = m.CheckOk };
