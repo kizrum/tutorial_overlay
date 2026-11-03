@@ -17,9 +17,13 @@ namespace TutorialOverlay;
 /// </summary>
 internal sealed class TrayIcon : IDisposable
 {
-    private readonly NotifyIcon _icon;
+    private readonly ShellTrayIcon _icon;
+    private string _shown = "", _lastTip = "";
     private readonly ContextMenuStrip _menu;
     private readonly ToolStripMenuItem _running, _agent, _tutorial, _library, _settings, _copyKey, _copyUrl, _copyCommand, _folder, _stop, _exit;
+
+    /// <summary>The icon of this process (Restart hides it before the new process starts).</summary>
+    public static TrayIcon? Current { get; private set; }
     private readonly System.Windows.Forms.Timer _timer;
     private IntPtr _hicon;
     private string _iconSig = "";
@@ -50,9 +54,12 @@ internal sealed class TrayIcon : IDisposable
             _stop, _exit,
         });
         _menu.Opening += (_, _) => { Refresh(); FillLibrary(); };
+        Current = this;
 
-        _icon = new NotifyIcon { ContextMenuStrip = _menu, Visible = true };
-        _icon.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) SettingsWindow.Open(); };
+        // an icon with a fixed GUID: a dead one left by a killed server can be removed (see ShellTrayIcon)
+        _icon = new ShellTrayIcon();
+        _icon.LeftClick += () => SettingsWindow.Open();
+        _icon.RightClick += () => _menu.Show(Cursor.Position);
         Refresh();
 
         _timer = new System.Windows.Forms.Timer { Interval = 1000 };
@@ -118,9 +125,9 @@ internal sealed class TrayIcon : IDisposable
         _stop.Enabled = active;
         _exit.Text = t.TrayExit;
 
-        // the tooltip is limited to 127 characters
+        // the tooltip is limited to 127 characters (ShellTrayIcon cuts it)
         var tip = $"TutorialOverlay · :{Program.Port}\n{_agent.Text}\n{_tutorial.Text}";
-        _icon.Text = tip.Length > 127 ? tip[..126] + "…" : tip;
+        _lastTip = tip;
 
         bool connected = since is TimeSpan s && s < Recent;
         float? progress = active && tut!.Steps.Count > 0 ? (tut.Index + 1f) / tut.Steps.Count : null;
@@ -129,6 +136,12 @@ internal sealed class TrayIcon : IDisposable
         {
             _iconSig = sig;
             SetIcon(connected, progress);
+        }
+        var shown = $"{_hicon}|{tip}";
+        if (shown != _shown)
+        {
+            _shown = shown;
+            _icon.Set(_hicon, tip);
         }
     }
 
@@ -167,9 +180,14 @@ internal sealed class TrayIcon : IDisposable
         }
         var h = bmp.GetHicon();
         var old = _hicon;
-        _icon.Icon = Icon.FromHandle(h);
         _hicon = h;
-        if (old != IntPtr.Zero) DestroyIcon(old);
+        if (old != IntPtr.Zero)
+        {
+            // the shell keeps its own copy: show the new icon before the old handle goes
+            _icon.Set(_hicon, _lastTip);
+            _shown = $"{_hicon}|{_lastTip}";
+            DestroyIcon(old);
+        }
     }
 
     private static void Copy(string text)
@@ -196,11 +214,17 @@ internal sealed class TrayIcon : IDisposable
         Application.Exit();
     }
 
+    /// <summary>Takes the icon out of the tray now (the process is about to go).</summary>
+    public void HideNow()
+    {
+        try { _timer.Stop(); _icon.Remove(); } catch (ObjectDisposedException) { }
+    }
+
     public void Dispose()
     {
+        if (Current == this) Current = null;
         _timer.Dispose();
-        _icon.Visible = false;     // otherwise a dead icon lingers until the mouse passes over it
-        _icon.Dispose();
+        _icon.Dispose();           // removes the icon: otherwise a dead one lingers until the mouse passes over it
         _menu.Dispose();
         if (_hicon != IntPtr.Zero) DestroyIcon(_hicon);
     }

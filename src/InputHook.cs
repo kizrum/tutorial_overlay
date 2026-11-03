@@ -53,6 +53,7 @@ internal static class InputHook
 
     [DllImport("user32.dll")] private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vk);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
 
     public static void Start()
     {
@@ -116,6 +117,13 @@ internal static class InputHook
             int silentFor = lastInput - _lastCallbackTick;          // input newer than our last callback
             if (silentFor > 1500 && now - lastInput < 10000)
             {
+                // input into a window "run as administrator" never reaches the hooks of a normal process: that is
+                // not a dropped hook, and re-installing would not help
+                if (Native.IsAboveUs(Native.ProcessId(GetForegroundWindow())))
+                {
+                    _lastCallbackTick = now;
+                    continue;
+                }
                 Reinstalls++;
                 Log.Warn($"input hooks went silent for {silentFor} ms while the user was active: re-installing");
                 Events.Emit("hook_reinstalled", new() { ["silentMs"] = silentFor, ["count"] = Reinstalls });

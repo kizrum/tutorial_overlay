@@ -11,7 +11,7 @@ namespace TutorialOverlay;
 
 internal static class Program
 {
-    public const string Version = "0.1.0";
+    public const string Version = "0.2.0";
     private static System.Windows.Forms.Control? _ui;
     private static MascotWindow? _mascot;
 
@@ -52,7 +52,9 @@ internal static class Program
             MessageBox.Show(string.Format(t.RestartBusy, next, Ports.Owner(next) ?? "?", Port), "TutorialOverlay", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-        // one server per user: let go of the instance lock first, or the new process would find "us" still running
+        // one server per user: let go of the instance lock first, or the new process would find "us" still running.
+        // Our tray icon goes now too — otherwise both icons sit in the tray while this one shuts its server down
+        TrayIcon.Current?.HideNow();
         ReleaseInstance();
         var psi = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
         for (int i = 0; i < _args.Length; i++)
@@ -65,17 +67,15 @@ internal static class Program
         Application.Exit();
     }
 
-    // ---- one running server per user (per --instance name, for side-by-side development builds)
+    // ---- exactly one running server per user: one tray icon, one client at a time (see ClientLease)
 
     private static Mutex? _single;
-    private static string _instance = "";
 
-    private static string InstanceFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TutorialOverlay",
-        _instance.Length == 0 ? "server.json" : $"server.{_instance}.json");
+    private static string InstanceFile => Instances.File;
 
     private static bool ClaimInstance()
     {
-        _single = new Mutex(true, "TutorialOverlay.Server" + (_instance.Length == 0 ? "" : "." + _instance), out bool first);
+        _single = new Mutex(true, "TutorialOverlay.Server", out bool first);
         if (first) return true;
         _single.Dispose();
         _single = null;
@@ -96,7 +96,7 @@ internal static class Program
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(InstanceFile)!);
-            File.WriteAllText(InstanceFile, new JsonObject
+            Files.WriteAtomic(InstanceFile, new JsonObject
             {
                 ["port"] = Port, ["pid"] = Environment.ProcessId, ["version"] = Version,
                 ["url"] = $"http://127.0.0.1:{Port}/mcp", ["startedAt"] = StartedAt.ToString("s"),
@@ -118,11 +118,27 @@ internal static class Program
     /// <summary>A second launch: say where the running one is (event for agents, a message for people) and quit.</summary>
     private static int AlreadyRunning()
     {
+        // two launches at the same moment: the other one holds the lock but may not have written where it listens
+        // yet (it does so once its server is up) — wait for that, or the agent would not know where to connect
         JsonNode? info = null;
-        try { if (File.Exists(InstanceFile)) info = JsonNode.Parse(File.ReadAllText(InstanceFile)); } catch { }
+        for (int i = 0; i < 100; i++)
+        {
+            try
+            {
+                if (File.Exists(InstanceFile) && JsonNode.Parse(File.ReadAllText(InstanceFile)) is JsonNode n
+                    && J.Int(n, "pid") is int p && Native.ProcessAlive(p)) { info = n; break; }
+            }
+            catch { }
+            Thread.Sleep(100);
+        }
         int? port = J.Int(info, "port"), pid = J.Int(info, "pid");
         Log.Warn($"TutorialOverlay is already running (port {port?.ToString() ?? "?"}, PID {pid?.ToString() ?? "?"}); not starting a second one");
-        Events.Emit("already_running", new JsonObject { ["port"] = port, ["pid"] = pid, ["url"] = J.Str(info, "url") });
+        Events.Emit("already_running", new JsonObject
+        {
+            ["port"] = port, ["pid"] = pid, ["url"] = J.Str(info, "url"),
+            ["advice"] = "connect to this server (same key); there is exactly one per user, and it serves one agent at a time. " +
+                         "If a tool answers 'busy', another agent is using it: call wait_for_turn.",
+        });
         // started by hand (no one reads stdout): tell the person
         if (!Console.IsOutputRedirected)
             MessageBox.Show(string.Format(Settings.Global.Text.AlreadyRunning, port?.ToString() ?? "?", pid?.ToString() ?? "?"),
@@ -148,6 +164,12 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        // the tray guard (started by the server itself): no windows, no settings, no server — see Instances.Guard
+        if (args.Length == 2 && int.TryParse(args[1], out int guarded))
+        {
+            if (args[0] == "--tray-guard-spawn") return Instances.GuardSpawn(guarded);
+            if (args[0] == "--tray-guard") return Instances.Guard(guarded);
+        }
         Native.SetProcessDpiAwarenessContext(Native.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
@@ -160,34 +182,56 @@ internal static class Program
         int port = Settings.Global.Port ?? 7788;
         string? key = Environment.GetEnvironmentVariable("TUTORIAL_OVERLAY_KEY");
         string? openSettings = null;
+        bool stop = false;
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i])
             {
-                case "--port" when i + 1 < args.Length: port = int.Parse(args[++i]); PortFromArgs = true; break;
+                case "--port" when i + 1 < args.Length:
+                    if (!int.TryParse(args[++i], out port) || port is < 1 or > 65535)
+                    {
+                        Console.Error.WriteLine($"--port: \"{args[i]}\" is not a port number (1–65535)");
+                        return 1;
+                    }
+                    PortFromArgs = true;
+                    break;
+                case "--port":
+                    Console.Error.WriteLine("--port needs a number, e.g. --port 7788");
+                    return 1;
                 case "--key" when i + 1 < args.Length: key = args[++i]; break;
                 case "--no-anim": Engine.Animate = false; break;
                 case "--show-inactive": Engine.HideWhenInactiveDefault = false; break;
                 case "--hide-from-capture": Settings.Global.HideFromCapture = true; break;
                 case "--verbose": Log.Verbose = true; break;
-                case "--instance" when i + 1 < args.Length: _instance = Tutorials.Slug(args[++i]); break;
+                case "--instance":
+                    // a second server beside the first meant a second tray icon and two overlays fighting over the screen
+                    Console.Error.WriteLine("--instance was removed: there is exactly one TutorialOverlay per user. " +
+                                            "Connect to the running one; another agent waits for its turn (wait_for_turn).");
+                    return 1;
+                // politely stop the running server (its tray icon goes with it)
+                case "--stop": stop = true; break;
                 // optional tab name: --settings look | keys
                 case "--settings": openSettings = i + 1 < args.Length && !args[i + 1].StartsWith("--") ? args[++i] : "server"; break;
                 case "--help" or "-h" or "/?":
-                    Console.Error.WriteLine("TutorialOverlay [--port 7788] [--key KEY] [--no-anim] [--show-inactive] [--verbose] [--settings [server|look|keys]] [--instance NAME]\n" +
+                    Console.Error.WriteLine("TutorialOverlay [--port 7788] [--key KEY] [--no-anim] [--show-inactive] [--verbose] [--settings [server|look|keys]] [--stop]\n" +
                                             "  --settings: open the settings window right away (on that tab)\n" +
-                                            "  one server per user; --instance NAME runs a separate one beside it (development)\n" +
+                                            "  one server per user (a second launch only reports where it runs) and one agent at a time\n" +
+                                            "  --stop: ask the running server to quit, as its tray menu would\n" +
                                             "  key: --key, env TUTORIAL_OVERLAY_KEY, or %LOCALAPPDATA%\\TutorialOverlay\\key.txt (created on first run)\n" +
                                             "  stdout: one JSON event per line; stderr: diagnostics");
                     return 0;
             }
         }
+        if (stop) return Instances.StopCommand();
         key ??= LoadOrCreateKey();
         Port = port;
         Key = key;
         KeyFrom = KeySource(args);
 
         if (!ClaimInstance()) return AlreadyRunning();
+        Log.OpenFile("");
+        CleanUpOldFiles();
+        _ = Instances.Running();     // removes a server.json left behind by a killed server
 
         var overlay = new OverlayWindow();
         var card = new CardWindow();
@@ -198,6 +242,7 @@ internal static class Program
         _ = overlay.Handle;
         _ = card.Handle;
         _ui = overlay;
+        Instances.ListenForQuit(() => OnUi(Application.Exit));
 
         Resolver.Start();
         Finder.Start();
@@ -225,6 +270,8 @@ internal static class Program
 
         Log.Info($"TutorialOverlay {Version} listening on http://127.0.0.1:{port}/mcp (key from {KeyFrom})");
         using var tray = new TrayIcon();
+        // if this process is killed, the guard takes its tray icon away (a killed process cannot do it itself)
+        Instances.StartTrayGuard();
         if (openSettings != null) SettingsWindow.Open(openSettings);
         Events.Emit("ready", new JsonObject { ["port"] = port, ["version"] = Version, ["pid"] = Environment.ProcessId });
         WriteInstanceFile();
@@ -247,6 +294,8 @@ internal static class Program
         Application.Run();
 
         timer.Stop();
+        // the icon goes first: the server below may take up to 2 s to stop
+        tray.HideNow();
         InputHook.Stop();
         Resolver.Stop();
         Finder.Stop();
@@ -254,7 +303,20 @@ internal static class Program
         DeleteInstanceFile();
         ReleaseInstance();
         Events.Emit("exit");
+        Events.Flush();
+        Log.CloseFile();
         return 0;
+    }
+
+    /// <summary>Help sketches pile up with every "circle it": keep the last 50, none older than 14 days.</summary>
+    private static void CleanUpOldFiles()
+    {
+        try
+        {
+            int n = Files.Prune(Path.Combine(Files.AppDir, "help"), "sketch-*.png", 50, TimeSpan.FromDays(14));
+            if (n > 0) Log.Info($"removed {n} old help sketch image(s)");
+        }
+        catch (Exception e) { Log.Debug("help cleanup: " + e.Message); }
     }
 
     private static string KeyFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TutorialOverlay", "key.txt");
@@ -273,8 +335,7 @@ internal static class Program
                 if (k.Length >= 16) return k;
             }
             var key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(24)).Replace('+', '-').Replace('/', '_').TrimEnd('=');
-            Directory.CreateDirectory(Path.GetDirectoryName(KeyFile)!);
-            File.WriteAllText(KeyFile, key);
+            Files.WriteAtomic(KeyFile, key);
             Log.Info($"generated a new key in {KeyFile}");
             return key;
         }

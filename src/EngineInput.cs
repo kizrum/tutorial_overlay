@@ -267,7 +267,7 @@ internal static partial class Engine
         lock (Sync)
         {
             var t = _tut;
-            var step = t is { State: "running", AdvanceAt: null } ? t.Current : null;
+            var step = t is { State: TutorialState.Running, AdvanceAt: null } ? t.Current : null;
             var drags = step?.Until.Where(c => c.Type == "drag").ToList();
             if (step == null || drags == null || drags.Count == 0) return;
             bool any = false;
@@ -339,7 +339,7 @@ internal static partial class Engine
         lock (Sync)
         {
             var t = _tut;
-            var step = t is { State: "running", AdvanceAt: null } ? t.Current : null;
+            var step = t is { State: TutorialState.Running, AdvanceAt: null } ? t.Current : null;
             if (step == null) return;
             int fgPid = ForegroundPid();
             foreach (var c in step.Until.Where(c => c.Type == "key" && !c.Met))

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tests of the screen-independent logic (spec parsing and checks, pixel expressions, hotkeys, OCR text matching,
+    the event buffer, file helpers). A plain console program with its own tiny assert helper: no test framework
+    and no NuGet packages, like the app itself. Run locally from the repository root: dotnet run with the project option pointing at tests
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>12</LangVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <AssemblyName>TutorialOverlay.Tests</AssemblyName>
+    <RootNamespace>TutorialOverlay.Tests</RootNamespace>
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\TutorialOverlay.csproj" />
+  </ItemGroup>
+
+</Project>

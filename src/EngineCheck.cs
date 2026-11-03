@@ -18,10 +18,15 @@ internal static partial class Engine
     {
         var spec = J.Unwrap(J.Get(args, "spec")) ?? (J.Has(args, "steps") ? args : null);
         var steps = new List<(int index, Step? step, string? error, JsonNode? raw)>();
+        List<string> lint = new();
+        string? scaleNote = null;
         if (spec != null)
         {
-            var defaults = AnchorSpec.Parse(J.Get(spec, "anchor") ?? new JsonObject { ["process"] = J.Str(spec, "app") ?? J.Str(spec, "process") }, null);
-            if (J.Str(spec, "window") is string w && defaults.Window == null) defaults.Window = w;
+            spec = spec.DeepClone();
+            lint = SpecLint.CheckSpec(spec);
+            TemplateStore.LoadFrom(spec);
+            var defaults = DefaultsOf(spec);
+            if (spec is JsonObject so0) scaleNote = Rescale(so0, defaults);
             int i = 0;
             foreach (var s in J.Items(J.Get(spec, "steps")))
             {
@@ -104,6 +109,8 @@ internal static partial class Engine
             ["ok"] = problems == 0,
             ["errors"] = problems,
             ["warnings"] = warnings,
+            ["unknownFields"] = lint.Count > 0 ? Warnings(lint) : null,
+            ["scale"] = scaleNote,
             ["steps"] = outSteps,
             ["advice"] = "errors: fix before starting (unknown template, unreadable step, window/element missing on the first step). " +
                          "warnings on later steps are often things an earlier step opens; check them when you get there " +
@@ -122,7 +129,7 @@ internal static partial class Engine
             o["severity"] = severity;
             return o;
         }
-        if (a.Find is { Text: null } f && !Finder.Templates.ContainsKey(f.Template))
+        if (a.Find is { Text: null } f && !TemplateStore.Exists(f.Template))
             return Bad($"template '{f.Template}' was never captured — call template(id:'{f.Template}', …) first", "error");
         if (a.IsScreen)
         {
@@ -136,6 +143,8 @@ internal static partial class Engine
         try { r = Resolver.ResolveNow(a.WithoutFind()); }
         catch (Exception e) when (Resolver.IsGone(e) || e is InvalidOperationException) { return Bad("element vanished while reading it: " + e.Message); }
         if (!r.Found) return Bad(r.Reason == "process not running" ? "process not running" : "not found: " + r.Reason, r.Reason == "process not running" ? "error" : "warning");
+        if (Native.IsAboveUs(Native.ProcessId(r.Root)))
+            return Bad("the app runs as administrator and TutorialOverlay does not: its clicks cannot be seen — start TutorialOverlay as administrator too", "error");
         if (Native.IsIconic(r.Root)) return Bad("window minimized");
         if (!Native.IsWindowVisible(r.Root) || Native.IsCloaked(r.Root)) return Bad("window hidden");
 

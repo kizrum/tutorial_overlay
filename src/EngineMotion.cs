@@ -38,7 +38,7 @@ internal static partial class Engine
     private static Step? MotionStep()
     {
         var t = _tut;
-        return t is { State: "running", AdvanceAt: null } ? t.Current : null;
+        return t is { State: TutorialState.Running, AdvanceAt: null } ? t.Current : null;
     }
 
     // =========================================================== the path on screen

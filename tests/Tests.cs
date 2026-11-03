@@ -1,0 +1,524 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Text.Json.Nodes;
+
+namespace TutorialOverlay.Tests;
+
+/// <summary>
+/// Screen-independent tests. Each public static void method named Test* runs; a failed Check throws.
+/// Exit code = number of failed tests.
+/// </summary>
+internal static class Program
+{
+    private static int Main(string[] args)
+    {
+        var filter = args.Length > 0 ? args[0] : null;
+        var tests = typeof(Program).Assembly.GetTypes()
+            .SelectMany(t => t.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
+            .Where(m => m.Name.StartsWith("Test") && m.GetParameters().Length == 0)
+            .Where(m => filter == null || $"{m.DeclaringType!.Name}.{m.Name}".Contains(filter, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(m => m.DeclaringType!.Name).ThenBy(m => m.Name)
+            .ToList();
+        int failed = 0;
+        foreach (var t in tests)
+        {
+            var name = $"{t.DeclaringType!.Name}.{t.Name}";
+            try
+            {
+                t.Invoke(null, null);
+                Console.WriteLine($"  ok    {name}");
+            }
+            catch (System.Reflection.TargetInvocationException e)
+            {
+                failed++;
+                Console.WriteLine($"  FAIL  {name}: {e.InnerException?.Message}");
+            }
+        }
+        Console.WriteLine(failed == 0 ? $"all {tests.Count} passed" : $"{failed} of {tests.Count} failed");
+        return failed;
+    }
+}
+
+internal static class A
+{
+    public static void Check(bool cond, string what)
+    {
+        if (!cond) throw new Exception(what);
+    }
+
+    public static void Eq<T>(T expected, T actual, string what)
+    {
+        if (!EqualityComparer<T>.Default.Equals(expected, actual)) throw new Exception($"{what}: expected <{expected}>, got <{actual}>");
+    }
+
+    public static JsonNode Json(string s) => JsonNode.Parse(s)!;
+}
+
+public static class JsonTests
+{
+    public static void TestNumbersFromStringsAndNumbers()
+    {
+        var o = A.Json("""{"a": 3, "b": "4.5", "c": "x", "d": true}""");
+        A.Eq(3.0, J.Num(o, "a"), "number");
+        A.Eq(4.5, J.Num(o, "b"), "numeric string");
+        A.Eq(null, J.Num(o, "c"), "text");
+        A.Eq(true, J.Bool(o, "d"), "bool");
+        A.Eq(5, J.Int(A.Json("""{"v": 4.6}"""), "v"), "rounded int");
+    }
+
+    public static void TestBoolFromStrings()
+    {
+        A.Eq(true, J.Bool(A.Json("""{"v": "yes"}"""), "v"), "yes");
+        A.Eq(false, J.Bool(A.Json("""{"v": "no"}"""), "v"), "no");
+        A.Eq(true, J.Bool(A.Json("""{"v": 1}"""), "v"), "1");
+    }
+
+    public static void TestUnwrapDoubleEncoded()
+    {
+        var o = A.Json("""{"spec": "{\"title\":\"T\"}"}""");
+        A.Eq("T", J.Str(J.Unwrap(J.Get(o, "spec")), "title"), "double-encoded object");
+        A.Eq(2, J.Items(A.Json("[1, 2]")).Count(), "items of an array");
+        A.Eq(1, J.Items(A.Json("""{"x":1}""")).Count(), "single object as one item");
+    }
+
+    public static void TestPoints()
+    {
+        A.Eq(new PointF(1, 2), J.Pt(A.Json("""{"p": [1, 2]}"""), "p"), "array point");
+        A.Eq(new PointF(3, 4), J.Pt(A.Json("""{"p": {"x": 3, "y": 4}}"""), "p"), "object point");
+    }
+
+    public static void TestColors()
+    {
+        A.Eq(Color.FromArgb(255, 0x1A, 0xD2, 0x8F).ToArgb(), J.ParseColor("#1AD28F", Color.Black).ToArgb(), "hex");
+        A.Eq(Color.FromArgb(255, 0xFF, 0x00, 0xFF).ToArgb(), J.ParseColor("#F0F", Color.Black).ToArgb(), "short hex");
+        A.Eq(Color.Black.ToArgb(), J.ParseColor("not a colour", Color.Black).ToArgb(), "fallback");
+    }
+}
+
+public static class PixelTests
+{
+    private static bool Eval(string expr, int r, int g, int b) => new PixelCheck { Expr = expr }.Evaluate(Color.FromArgb(r, g, b));
+
+    public static void TestComparisons()
+    {
+        A.Check(Eval("r>140 && g<100", 200, 50, 0), "and: both true");
+        A.Check(!Eval("r>140 && g<100", 200, 150, 0), "and: one false");
+        A.Check(Eval("r>250 || b>=100", 0, 0, 100), "or");
+        A.Check(Eval("g==128", 0, 128, 0), "equals");
+        A.Check(Eval("g!=128", 0, 129, 0), "not equals");
+    }
+
+    public static void TestChannelsAndDifference()
+    {
+        A.Check(Eval("r-g>50", 200, 100, 0), "difference");
+        A.Check(Eval("sat>100", 250, 100, 100), "saturation");
+        A.Check(Eval("lum<30", 10, 10, 10), "luminance");
+        A.Check(!Eval("foo>1", 255, 255, 255), "unknown channel is never true");
+    }
+
+    public static void TestColourDistance()
+    {
+        A.Check(Eval("~#1AD28F:40", 0x1A + 10, 0xD2 - 10, 0x8F), "near the colour");
+        A.Check(!Eval("~#1AD28F:10", 0, 0, 0), "far from the colour");
+    }
+}
+
+public static class KeyTests
+{
+    public static void TestParse()
+    {
+        var c = Keys.Parse("Ctrl+Alt+Right")!.Value;
+        A.Eq(Native.MOD_CONTROL | Native.MOD_ALT, c.Mods, "mods");
+        A.Eq(0x27u, c.Vk, "right arrow");
+        A.Eq(0x75u, Keys.Parse("F6")!.Value.Vk, "F6");
+        A.Eq((uint)'S', Keys.Parse("ctrl+s")!.Value.Vk, "letter");
+        A.Eq(0xBBu, Keys.Parse("Ctrl++")!.Value.Vk, "plus key");
+        A.Eq(null, Keys.Parse("Ctrl+Foo"), "unknown key");
+        A.Eq(null, Keys.Parse("Ctrl"), "modifier only");
+    }
+
+    public static void TestFormatRoundTrip()
+    {
+        foreach (var s in new[] { "Ctrl+Alt+Z", "Shift+F6", "Ctrl+S" })
+            A.Eq(Keys.Parse(s), Keys.Parse(Keys.Parse(s)!.Value.ToString()), "round trip " + s);
+    }
+
+    public static void TestSettingsHotkeys()
+    {
+        var s = new Settings().Apply(A.Json("""{"hotkeys": {"done": "Ctrl+Shift+D", "stop": "none"}, "lang": "en", "port": 99999}"""));
+        A.Eq(Keys.Parse("Ctrl+Shift+D"), (Chord?)s.Hotkeys["done"], "hotkey replaced");
+        A.Check(!s.Hotkeys.ContainsKey("stop"), "'none' turns a hotkey off");
+        A.Eq("en", s.Lang, "language");
+        A.Eq(null, s.Port, "out-of-range port ignored");
+    }
+}
+
+public static class ModelTests
+{
+    public static void TestGridExpands()
+    {
+        var cells = Grid.Expand(A.Json("""{"id":"c","name":"Step {col}","grid":{"from":[10,20],"step":[24,0],"cells":[1,3]}}""")).ToList();
+        A.Eq(2, cells.Count, "two cells");
+        A.Eq("c-1-3", J.Str(cells[1], "id"), "cell id");
+        A.Eq("Step 3", J.Str(cells[1], "name"), "name template");
+        A.Eq(new PointF(58, 20), J.Pt(cells[1], "__cell"), "cell centre = from + (col-1)·step");
+    }
+
+    public static void TestStepDefaults()
+    {
+        var s = Step.Parse(A.Json("""{"title":"T","numbered":true,"targets":[{"anchor":{"process":"x"}},{"anchor":{"process":"x"},"optional":true}]}"""), null, 0);
+        A.Eq(2, s.Targets.Count, "targets");
+        A.Eq("all_clicked", s.Until.Single().Type, "default condition");
+        A.Check(s.Targets.All(t => t.Shapes.Any(x => x.Type == "badge")), "numbered: badges added");
+        A.Eq(1, s.Required.Count(), "optional target not required");
+    }
+
+    public static void TestAnchorInheritsTutorialApp()
+    {
+        var d = AnchorSpec.Parse(A.Json("""{"process":"FL64.exe"}"""), null);
+        A.Eq("FL64", d.Process, ".exe dropped");
+        var a = AnchorSpec.Parse(A.Json("""{"element":{"name":"Channel rack"},"offset":[5,6]}"""), d);
+        A.Eq("FL64", a.Process, "inherited process");
+        A.Eq(5f, a.Dx, "offset x");
+        var screen = AnchorSpec.Parse(A.Json("""{"screen":true,"offset":[100,200]}"""), d);
+        A.Check(screen.IsScreen, "screen:true is not inherited");
+    }
+
+    public static void TestConditionAliases()
+    {
+        A.Eq("appear", Condition.Norm("window_opened"), "alias");
+        A.Eq("scroll", Condition.Norm("Wheel"), "case-insensitive");
+        A.Eq("untill", Condition.Norm("untill"), "unknown stays as is");
+        var key = Condition.Parse(A.Json("""{"type":"key","keys":["F6","Ctrl+S"]}"""), null);
+        A.Eq(2, key.Keys.Count, "key chords");
+        var thrown = false;
+        try { Condition.Parse(A.Json("""{"type":"key","keys":"Ctrl+Nope"}"""), null); } catch (ArgumentException) { thrown = true; }
+        A.Check(thrown, "bad key name is an error");
+    }
+
+    public static void TestTutorialState()
+    {
+        var t = new Tutorial();
+        A.Check(t.Active, "running is active");
+        A.Eq("running", t.StateName, "reported name");
+        t.State = TutorialState.Waiting;
+        A.Check(t.Active, "waiting is active");
+        t.State = TutorialState.Stopped;
+        A.Check(!t.Active, "stopped is not");
+    }
+}
+
+public static class LintTests
+{
+    public static void TestCleanSpecHasNoWarnings()
+    {
+        var spec = A.Json("""
+        { "title": "T", "app": "notepad", "steps": [
+            { "id": "a", "title": "Click", "targets": [ { "name": "Bold", "anchor": { "element": [{ "name": "Bold", "role": "Button" }], "offset": [2, 3] },
+                                                         "shapes": [{ "type": "circle", "r": 20 }], "check": { "at": [1, 2], "expr": "g>140" } } ],
+              "until": [ "all_clicked", { "type": "appear", "title": "Font" }, { "type": "scroll", "in": { "element": { "name": "List" } }, "notches": 3 } ],
+              "buttons": [{ "id": "y", "text": "Yes" }], "controls": ["back", "done"] } ] }
+        """);
+        var w = SpecLint.CheckSpec(spec);
+        A.Eq(0, w.Count, "warnings: " + string.Join("; ", w));
+    }
+
+    public static void TestTyposAreReportedWithAGuess()
+    {
+        var spec = A.Json("""{ "title": "T", "steps": [ { "title": "x", "untill": ["all_clicked"], "tagrets": [] , "targets": [ { "ancor": {} } ] } ] }""");
+        var w = SpecLint.CheckSpec(spec);
+        A.Check(w.Any(x => x.StartsWith("steps[0].untill") && x.Contains("'until'")), "untill → until: " + string.Join("; ", w));
+        A.Check(w.Any(x => x.StartsWith("steps[0].tagrets") && x.Contains("'targets'")), "swapped letters → targets");
+        A.Check(w.Any(x => x.StartsWith("steps[0].targets[0].ancor") && x.Contains("'anchor'")), "nested target field");
+    }
+
+    public static void TestUnknownTypes()
+    {
+        var spec = A.Json("""{ "steps": [ { "until": [{ "type": "aper" }], "targets": [ { "shapes": [{ "type": "circel" }] } ], "controls": ["dne"] } ] }""");
+        var w = SpecLint.CheckSpec(spec);
+        A.Check(w.Any(x => x.Contains("unknown condition 'aper'")), "condition type");
+        A.Check(w.Any(x => x.Contains("unknown shape 'circel'") && x.Contains("'circle'")), "shape type");
+        A.Check(w.Any(x => x.Contains("unknown control 'dne'")), "control");
+    }
+
+    public static void TestDrawArguments()
+    {
+        A.Eq(0, SpecLint.CheckDraw(A.Json("""{"anchor":{"process":"x"},"shapes":[{"type":"label","text":"hi"}],"id":"m"}""")).Count, "clean draw");
+        A.Check(SpecLint.CheckDraw(A.Json("""{"shapes":[],"dismisOnClick":false}""")).Any(x => x.Contains("'dismissOnClick'")), "draw typo");
+    }
+
+    public static void TestDistance()
+    {
+        A.Eq(1, SpecLint.Distance("tagrets", "targets"), "transposition is one edit");
+        A.Eq(1, SpecLint.Distance("untill", "until"), "one extra letter");
+    }
+}
+
+public static class ScaleTests
+{
+    public static void TestPixelFieldsScaled()
+    {
+        var steps = A.Json("""
+        [ { "title": "x", "anchor": { "process": "p", "offset": [10, 20], "hwnd": 1234 },
+            "targets": [ { "shapes": [{ "type": "circle", "x": 4, "y": 6, "r": 10, "thickness": 3 }], "grid": { "from": [2, 2], "step": [10, 0], "cols": 4 } } ],
+            "until": [ { "type": "trace", "path": [[0, 0], [100, 50]], "tolerance": 24 }, { "type": "drag", "from": { "anchor": { "process": "p" }, "rect": [0, 0, 10, 10] } } ] } ]
+        """);
+        SpecScale.Apply(steps, 2);
+        var s = steps[0]!;
+        A.Eq("[20,40]", s["anchor"]!["offset"]!.ToJsonString(), "anchor offset");
+        A.Eq(1234.0, J.Num(s["anchor"], "hwnd"), "hwnd untouched");
+        var sh = s["targets"]![0]!["shapes"]![0]!;
+        A.Eq(8.0, J.Num(sh, "x"), "shape x");
+        A.Eq(20.0, J.Num(sh, "r"), "radius");
+        A.Eq(3.0, J.Num(sh, "thickness"), "line width (already DPI-scaled) untouched");
+        A.Eq("[20,0]", s["targets"]![0]!["grid"]!["step"]!.ToJsonString(), "grid step");
+        A.Eq(4.0, J.Num(s["targets"]![0]!["grid"], "cols"), "count untouched");
+        A.Eq("[[0,0],[200,100]]", s["until"]![0]!["path"]!.ToJsonString(), "trace path");
+        A.Eq(24.0, J.Num(s["until"]![0], "tolerance"), "tolerance (scaled at run time) untouched");
+        A.Eq("[0,0,20,20]", s["until"]![1]!["from"]!["rect"]!.ToJsonString(), "drag rect inside an object");
+        A.Eq("p", J.Str(s["until"]![1]!["from"]!["anchor"], "process"), "anchor object itself untouched");
+    }
+
+    public static void TestArrowDirectionUntouched()
+    {
+        var n = A.Json("""[{ "shapes": [{ "type": "arrow", "from": "nw" }] }]""");
+        SpecScale.Apply(n, 1.5);
+        A.Eq("nw", J.Str(n[0]!["shapes"]![0], "from"), "direction word");
+    }
+}
+
+public static class LibraryTests
+{
+    public static void TestSlug()
+    {
+        A.Eq("fl-studio-урок-1", Tutorials.Slug("  FL Studio: урок #1 "), "letters of any script kept");
+        A.Eq("con-1", Tutorials.Slug("Con"), "reserved device name");
+        A.Eq("nul-1", Tutorials.Slug("NUL"), "reserved, any case");
+        A.Check(Tutorials.Slug(new string('a', 100)).Length <= 60, "length limit");
+    }
+
+    public static void TestTemplatesUsedBySpec()
+    {
+        var spec = A.Json("""
+        { "steps": [ { "anchor": { "find": { "template": "kick" } },
+                       "targets": [ { "anchor": { "find": "snare" } }, { "anchor": { "find": { "text": "Kick" } } } ] } ],
+          "templates": { "old": "AAAA" } }
+        """);
+        var ids = TemplateStore.UsedBy(spec);
+        A.Check(ids.SetEquals(new[] { "kick", "snare" }), "template ids: " + string.Join(",", ids));
+    }
+
+    public static void TestTemplateFileNamesKeepIdsApart()
+    {
+        A.Check(TemplateStore.FileOf("C5") != TemplateStore.FileOf("c5"), "case matters");
+        A.Check(TemplateStore.FileOf("a/b") != TemplateStore.FileOf("a-b"), "punctuation matters");
+    }
+}
+
+public static class OcrTests
+{
+    private static List<OcrLine> Lines(params string[] texts)
+    {
+        var res = new List<OcrLine>();
+        int y = 0;
+        foreach (var t in texts)
+        {
+            var l = new OcrLine();
+            int x = 0;
+            foreach (var w in t.Split(' ')) { l.Words.Add(new OcrWord(w, new RectangleF(x, y, w.Length * 8, 14))); x += w.Length * 8 + 6; }
+            res.Add(l);
+            y += 20;
+        }
+        return res;
+    }
+
+    public static void TestContainsAndExact()
+    {
+        var lines = Lines("808 Kick", "808 Snare", "Kicks");
+        A.Eq(2, Ocr.Find(lines, "kick").Count, "contains: 'Kick' and the 'Kick' inside 'Kicks'");
+        A.Eq("808 Kick", Ocr.Find(lines, "808 kick", "exact").Single().Text, "exact line");
+    }
+
+    public static void TestLookAlikeLettersForgivenInWholeWords()
+    {
+        var lines = Lines("Channel rack", "Resample");
+        A.Eq(1, Ocr.Find(lines, "Channe1 rack").Count, "1 read for l");
+        A.Eq(0, Ocr.Find(lines, "Sample").Count(m => m.Score > 0), "no fuzzy match inside a longer word");
+    }
+
+    public static void TestYoAndRegex()
+    {
+        A.Eq(1, Ocr.Find(Lines("Ещё раз"), "еще").Count, "ё = е");
+        A.Eq(1, Ocr.Find(Lines("Pattern 12"), @"pattern \d+", "regex").Count, "regex");
+    }
+}
+
+public static class EventTests
+{
+    public static void TestSinceAndGap()
+    {
+        Events.ResetForTests();
+        for (int i = 0; i < 5; i++) Events.Emit("t", new JsonObject { ["i"] = i });
+        var got = Events.Since(2, out bool gap);
+        A.Eq(3, got.Count, "after seq 2");
+        A.Check(!gap, "no gap");
+        got = Events.Since(0, out gap, max: 2);
+        A.Eq(2, got.Count, "limited");
+        A.Eq(5L, (long)got[^1]["seq"]!, "newest kept");
+        A.Check(gap, "gap when limited");
+    }
+
+    public static void TestGapWhenOlderThanTheRing()
+    {
+        Events.ResetForTests();
+        for (int i = 0; i < 1005; i++) Events.Emit("t");
+        Events.Since(0, out bool gap, max: 2000);
+        A.Check(gap, "the first events fell out of the buffer");
+        Events.Since(1004, out gap);
+        A.Check(!gap, "recent ones are all there");
+    }
+
+    public static void TestEmitMovesFields()
+    {
+        Events.ResetForTests();
+        var data = new JsonObject { ["a"] = 1 };
+        Events.Emit("t", data);
+        A.Eq(0, data.Count, "fields moved into the event");
+        A.Eq(1, J.Int(Events.Since(0)[0], "a"), "event has the field");
+    }
+}
+
+public static class FileTests
+{
+    public static void TestWriteAtomicCreatesAndReplaces()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "to-tests-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var f = Path.Combine(dir, "sub", "x.json");
+            Files.WriteAtomic(f, "one");
+            A.Eq("one", File.ReadAllText(f), "created (with its folder)");
+            Files.WriteAtomic(f, "two");
+            A.Eq("two", File.ReadAllText(f), "replaced");
+            A.Eq(1, Directory.GetFiles(Path.Combine(dir, "sub")).Length, "no temporary file left");
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    public static void TestPruneKeepsNewest()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "to-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            for (int i = 0; i < 5; i++)
+            {
+                var f = Path.Combine(dir, $"sketch-{i}.png");
+                File.WriteAllText(f, "");
+                File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddMinutes(-i));
+            }
+            var old = Path.Combine(dir, "sketch-old.png");
+            File.WriteAllText(old, "");
+            File.SetLastWriteTimeUtc(old, DateTime.UtcNow.AddDays(-30));
+            File.WriteAllText(Path.Combine(dir, "other.txt"), "");
+            A.Eq(3, Files.Prune(dir, "sketch-*.png", 3, TimeSpan.FromDays(14)), "two over the limit and one too old");
+            A.Check(File.Exists(Path.Combine(dir, "sketch-0.png")) && !File.Exists(old), "newest kept, old removed");
+            A.Check(File.Exists(Path.Combine(dir, "other.txt")), "other files untouched");
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+}
+
+public static class ExampleTests
+{
+    /// <summary>The shipped examples are real, working tutorials: the lint must find nothing in them.</summary>
+    public static void TestExamplesHaveNoUnknownFields()
+    {
+        var dir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples");
+        for (int up = 0; !Directory.Exists(dir) && up < 8; up++) dir = Path.Combine(AppContext.BaseDirectory, string.Concat(Enumerable.Repeat("../", up)), "examples");
+        A.Check(Directory.Exists(dir), "examples folder not found from " + AppContext.BaseDirectory);
+        var problems = new List<string>();
+        foreach (var f in Directory.GetFiles(dir, "*.json"))
+        {
+            var n = JsonNode.Parse(File.ReadAllText(f));
+            var w = J.Has(n, "steps") || J.Has(n, "spec") ? SpecLint.CheckSpec(J.Get(n, "spec") ?? n) : SpecLint.CheckSteps(J.Get(n, "steps") ?? n, 0);
+            problems.AddRange(w.Select(x => $"{Path.GetFileName(f)}: {x}"));
+        }
+        A.Check(problems.Count == 0, string.Join("\n    ", problems.Prepend("")));
+    }
+}
+
+public static class EventRestartTests
+{
+    public static void TestSinceFromBeforeARestart()
+    {
+        Events.ResetForTests();
+        Events.Emit("ready");
+        var got = Events.Since(500, out bool gap);
+        A.Eq(1, got.Count, "everything there is");
+        A.Check(gap, "flagged");
+        var (list, gap2) = Events.WaitSince(500, 5000, System.Threading.CancellationToken.None).GetAwaiter().GetResult();
+        A.Eq(1, list.Count, "long-poll returns at once instead of waiting");
+        A.Check(gap2, "flagged too");
+    }
+}
+
+public static class LeaseTests
+{
+    private sealed class Clock { public DateTime Now = new(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc); }
+
+    public static void TestOneClientAtATime()
+    {
+        var c = new Clock();
+        var l = new ClientLease(() => c.Now);
+        A.Check(l.TryUse("a", out _), "first agent takes the server");
+        A.Check(!l.TryUse("b", out var busy) && busy!.Contains("another agent"), "second agent is refused");
+        A.Check(l.TryUse("a", out _), "the holder keeps using it");
+        A.Eq("a", l.Holder, "holder");
+    }
+
+    public static void TestReleaseLetsTheNextOneIn()
+    {
+        var l = new ClientLease();
+        l.TryUse("a", out _);
+        A.Check(!l.Release("b", "x"), "only the holder can release");
+        A.Check(l.Release("a", "session ended"), "holder releases");
+        A.Check(l.TryUse("b", out _), "next agent gets it");
+    }
+
+    public static void TestSilentHolderExpires()
+    {
+        var c = new Clock();
+        var l = new ClientLease(() => c.Now);
+        l.TryUse("a", out _);
+        c.Now += ClientLease.IdleTimeout - TimeSpan.FromSeconds(1);
+        A.Check(!l.TryUse("b", out _), "still within the idle time");
+        c.Now += TimeSpan.FromSeconds(2);
+        A.Check(l.TryUse("b", out _), "silent holder expired");
+    }
+
+    public static void TestHolderWithATutorialKeptLonger()
+    {
+        var c = new Clock();
+        var l = new ClientLease(() => c.Now) { HolderHasTutorial = s => s == "a" };
+        l.TryUse("a", out _);
+        c.Now += ClientLease.IdleTimeout + TimeSpan.FromMinutes(1);
+        A.Check(!l.TryUse("b", out _), "the user is still on a's tutorial");
+        c.Now += ClientLease.TutorialTimeout;
+        A.Check(l.TryUse("b", out _), "but not forever");
+    }
+
+    public static void TestChangeEvents()
+    {
+        var log = new List<string>();
+        var l = new ClientLease();
+        l.Changed += (now, was, why) => log.Add($"{now ?? "-"}<{was ?? "-"}:{why}");
+        l.TryUse("a", out _);
+        l.TryUse("b", out _);
+        l.Release("a", "session ended");
+        A.Eq("a<-:first request|-<a:session ended", string.Join("|", log), "events");
+    }
+}

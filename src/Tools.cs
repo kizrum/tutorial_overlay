@@ -18,6 +18,8 @@ internal static class Tools
         "events tool with long-poll) — react to them instead of asking the user whether they are done. " +
         "Write steps that teach: put the reason in each step's 'why' (what the tool does, why this way, the common mistake). " +
         "When a problem is found, explain its cause in hint() so the user learns, not only what to click. " +
+        "One server per user and ONE agent at a time: the first agent to call a tool holds it; any other gets 'busy' and must call " +
+        "wait_for_turn (never start a second TutorialOverlay). Call release when you are done. " +
         "Use keepOpen + append_steps to feed steps incrementally. Marks auto-hide when the app is minimised, covered or " +
         "not in the foreground and come back on the same step. For apps that draw their own UI, call pick(anchor) and ask " +
         "the user to click the spot: you get the exact offset (and with count=2 on neighbouring cells, a grid step).";
@@ -73,7 +75,7 @@ internal static class Tools
             "{type:'uia', anchor|element|title, property:'exists'|'name'|'value'|'toggle'|'selected'|'expanded'|'enabled'|'focused'|'text', equals|contains|matches, not}], " +
             "untilMode:'any'|'all', numbered, checklist, sequence (targets one by one, e.g. right-click → popup item; chain restarts if the popup closes), " +
             "buttons:[{id,text,action,style}], controls:['back','undo','skip','done','stop']}]} " +
-            "or {name, startAt} to replay a saved one. No 'until': done when all targets clicked; no targets: waits for Done. " +
+            "Or {name, startAt} to replay a saved one. No 'until': done when all targets clicked; no targets: waits for Done. " +
             "'disappear' needs the thing seen first. Clicks match by the PROCESS under the cursor. Anchors: see draw.anchor.",
             Obj(("spec", T("object", "tutorial spec (fields may be top level)")))),
         Tool("append_steps", "Add steps to the running tutorial (resumes one waiting after its last step).",
@@ -116,6 +118,9 @@ internal static class Tools
             Obj(("name", T("string", "default: from title")), ("spec", T("object", "instead of the current one")))),
         Tool("list_tutorials", "Saved tutorials.", new JsonObject()),
         Tool("delete_tutorial", "Remove a saved tutorial.", Obj(("name", T("string", "from list_tutorials")))),
+        Tool("wait_for_turn", "The overlay serves ONE agent at a time. If a call answered 'busy', wait here until the other agent is done; you then hold it. Never start another TutorialOverlay instead.",
+            Obj(("timeoutMs", T("integer", "default 600000, max 1800000")))),
+        Tool("release", "Done with the overlay: let another agent use it (a running tutorial keeps running for the user).", new JsonObject()),
         Tool("events", "Events after seq: hit, miss, step_*, tutorial_*, window_opened/closed, anchor_found/lost, opened, no_effect, blocked, button, pick, " +
             "help (reason cant_find|dont_understand|other; other: user text + optional pencil sketch with image path → answer with hint), " +
             "continue_requested (append the next lesson), outro, …. timeoutMs long-polls.",
@@ -133,13 +138,15 @@ internal static class Tools
         ["inputSchema"] = new JsonObject { ["type"] = "object", ["properties"] = props, ["additionalProperties"] = true },
     };
 
-    public static async Task<JsonObject> Call(string name, JsonNode args, CancellationToken ct)
+    public static async Task<JsonObject> Call(string name, JsonNode args, CancellationToken ct, string? session = null)
     {
+        // whose call this is: a tutorial belongs to the agent (session) that started it
+        Engine.Caller.Value = session;
         try
         {
             return name switch
             {
-                "draw" => Text(new JsonObject { ["ids"] = new JsonArray(Engine.Draw(args).Select(i => (JsonNode)i).ToArray()) }),
+                "draw" => DrawTool(args),
                 "clear" => Text(new JsonObject { ["removed"] = Engine.Clear(J.Str(args, "id")) }),
                 "start_tutorial" => Text(Engine.StartTutorial(args)),
                 "append_steps" => Text(Engine.AppendSteps(args)),
@@ -322,8 +329,9 @@ internal static class Tools
         if (rect.Width < 6 || rect.Height < 6) return Fail("template too small (at least 6x6 px)");
         using var shot = ScreenCapture.CaptureWindow(r.Root, rect);
         if (shot == null) return Fail("could not capture the window (minimized?)");
-        Finder.Templates[id] = Template.From(shot);
         var png = ScreenCapture.Png(shot, 0, out _);
+        // kept on disk too, and carried inside saved tutorials that use it
+        TemplateStore.Put(id, Template.From(shot), png);
         return new JsonObject
         {
             ["content"] = new JsonArray(
@@ -332,16 +340,30 @@ internal static class Tools
         };
     }
 
+    private static JsonObject DrawTool(JsonNode args)
+    {
+        var res = new JsonObject { ["ids"] = new JsonArray(Engine.Draw(args).Select(i => (JsonNode)i).ToArray()) };
+        var lint = SpecLint.CheckDraw(args);
+        if (lint.Count > 0) res["warnings"] = new JsonArray(lint.Take(30).Select(x => (JsonNode)x).ToArray());
+        return Text(res);
+    }
+
     private static async Task<JsonObject> EventsTool(JsonNode args, CancellationToken ct)
     {
         long since = (long)(J.Num(args, "since") ?? 0);
         int timeout = Math.Clamp(J.Int(args, "timeoutMs") ?? 0, 0, 60000);
-        var list = timeout > 0 ? await Events.WaitSince(since, timeout, ct) : Events.Since(since);
-        return Text(new JsonObject
+        List<JsonObject> list;
+        bool gap;
+        if (timeout > 0) (list, gap) = await Events.WaitSince(since, timeout, ct);
+        else list = Events.Since(since, out gap);
+        var res = new JsonObject
         {
             ["events"] = new JsonArray(list.Select(e => e.DeepClone()).ToArray()),
             ["lastSeq"] = list.Count > 0 ? (long)list[^1]["seq"]! : Math.Max(since, 0),
-        });
+        };
+        // older events than these were not returned (too many at once, or older than the buffer of 1000)
+        if (gap) res["gap"] = "some events after 'since' were dropped, or 'since' is from before a server restart; call status() to resync the current state";
+        return Text(res);
     }
 
     private static JsonObject Screenshot(JsonNode args)

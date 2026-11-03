@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -191,5 +192,86 @@ internal static class Native
         var root = GetAncestor(h, GA_ROOT);
         if (root == IntPtr.Zero) root = h;
         return (root, ProcessId(root), ProcessId(h));
+    }
+
+    // ---- integrity levels: UIPI keeps a process from hooking or automating windows of a higher one
+
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+    [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr h);
+    [DllImport("kernel32.dll")] private static extern IntPtr GetCurrentProcess();
+    [DllImport("advapi32.dll", SetLastError = true)] private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError = true)] private static extern bool GetTokenInformation(IntPtr token, int cls, IntPtr info, int len, out int needed);
+    [DllImport("advapi32.dll")] private static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
+    [DllImport("advapi32.dll")] private static extern IntPtr GetSidSubAuthority(IntPtr sid, uint index);
+
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000, TOKEN_QUERY = 0x0008;
+    private const int TokenIntegrityLevel = 25, ERROR_ACCESS_DENIED = 5;
+
+    [DllImport("kernel32.dll")] private static extern uint WaitForSingleObject(IntPtr h, uint ms);
+    private const uint SYNCHRONIZE = 0x00100000, WAIT_TIMEOUT = 0x102;
+
+    /// <summary>The process is still running (two cheap system calls, no process list).</summary>
+    public static bool ProcessAlive(int pid)
+    {
+        var h = OpenProcess(SYNCHRONIZE, false, pid);
+        if (h == IntPtr.Zero) return Marshal.GetLastWin32Error() == ERROR_ACCESS_DENIED;   // exists, just not ours to open
+        try { return WaitForSingleObject(h, 0) == WAIT_TIMEOUT; }
+        finally { CloseHandle(h); }
+    }
+
+    private static int? _ownLevel;
+    private static readonly Dictionary<int, (bool above, long at)> AboveCache = new();
+
+    /// <summary>Integrity level RID of a process (0x2000 medium, 0x3000 high = "as administrator"); -1 = may not look, null = unknown.</summary>
+    private static int? IntegrityLevel(IntPtr process)
+    {
+        if (!OpenProcessToken(process, TOKEN_QUERY, out var token))
+            return Marshal.GetLastWin32Error() == ERROR_ACCESS_DENIED ? -1 : null;
+        try
+        {
+            GetTokenInformation(token, TokenIntegrityLevel, IntPtr.Zero, 0, out int len);
+            if (len <= 0) return null;
+            var buf = Marshal.AllocHGlobal(len);
+            try
+            {
+                if (!GetTokenInformation(token, TokenIntegrityLevel, buf, len, out _)) return null;
+                var sid = Marshal.ReadIntPtr(buf);   // TOKEN_MANDATORY_LABEL.Label.Sid
+                int count = Marshal.ReadByte(GetSidSubAuthorityCount(sid));
+                return count == 0 ? null : Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)(count - 1)));
+            }
+            finally { Marshal.FreeHGlobal(buf); }
+        }
+        finally { CloseHandle(token); }
+    }
+
+    /// <summary>
+    /// The process runs at a higher integrity level than we do (typically "Run as administrator" while we do not):
+    /// our input hooks see none of its input and UI Automation sees little of it. Cached for 10 s per PID.
+    /// </summary>
+    public static bool IsAboveUs(int pid)
+    {
+        if (pid <= 0 || pid == Environment.ProcessId) return false;
+        long now = Environment.TickCount64;
+        lock (AboveCache)
+            if (AboveCache.TryGetValue(pid, out var c) && now - c.at < 10000) return c.above;
+        _ownLevel ??= IntegrityLevel(GetCurrentProcess()) ?? 0x2000;
+        bool above = false;
+        var h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        if (h == IntPtr.Zero) above = Marshal.GetLastWin32Error() == ERROR_ACCESS_DENIED && _ownLevel < 0x3000;
+        else
+        {
+            try
+            {
+                var lvl = IntegrityLevel(h);
+                above = lvl == -1 ? _ownLevel < 0x3000 : lvl is int l && l > _ownLevel;
+            }
+            finally { CloseHandle(h); }
+        }
+        lock (AboveCache)
+        {
+            if (AboveCache.Count > 256) AboveCache.Clear();
+            AboveCache[pid] = (above, now);
+        }
+        return above;
     }
 }

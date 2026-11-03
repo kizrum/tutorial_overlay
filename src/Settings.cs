@@ -152,7 +152,8 @@ internal sealed class Loc
     public string HelpSent = "Передал ассистенту — сейчас подскажу.", Highlighting = "Подсвечиваю, куда нажать…";
     public string IssueMinimized = "Окно свёрнуто — разверните его.", IssueOccluded = "Нужное место закрыто другим окном.",
         IssueInactive = "Переключитесь в нужное приложение.", IssueMissing = "Не нахожу нужный элемент на экране.",
-        IssueOffscreen = "Нужное место за пределами экрана.", IssueNotRunning = "Приложение не запущено.";
+        IssueOffscreen = "Нужное место за пределами экрана.", IssueNotRunning = "Приложение не запущено.",
+        IssueElevated = "Программа запущена от имени администратора — запустите TutorialOverlay так же, иначе я не вижу ваших кликов в ней.";
 
     public static readonly Loc Ru = new();
 
@@ -210,6 +211,7 @@ internal sealed class Loc
         IssueMinimized = "The window is minimized — restore it.", IssueOccluded = "Another window covers the spot.",
         IssueInactive = "Switch to the app.", IssueMissing = "Can't find the element on screen.",
         IssueOffscreen = "The spot is off screen.", IssueNotRunning = "The app is not running.",
+        IssueElevated = "The app runs as administrator — start TutorialOverlay as administrator too, or I can't see your clicks in it.",
     };
 
     public static Loc For(string? lang) => (lang ?? "ru").StartsWith("en", StringComparison.OrdinalIgnoreCase) ? En : Ru;

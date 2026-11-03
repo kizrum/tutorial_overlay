@@ -153,7 +153,7 @@ internal static class Finder
                                           : prev?.Moving ?? false;
         FindResult Miss() => new(false, default, 1, last, DateTime.UtcNow, before, seenAt, moving, went);
         Template? tpl = null;
-        if (f.Text == null && !Templates.TryGetValue(f.Template, out tpl)) return Miss();
+        if (f.Text == null && !TemplateStore.TryGet(f.Template, out tpl)) return Miss();
         var r = Resolver.Get(a.WithoutFind().Key) ?? Resolver.ResolveNow(a.WithoutFind());
         if (!r.Found || Native.IsIconic(r.Root)) return Miss();
         var frame = Native.FrameRect(r.Root);
@@ -255,13 +255,14 @@ internal static class Finder
     {
         if (a.Process == null) return true;
         int pid = Native.ProcessId(GetForegroundWindow());
-        try { return pid != 0 && System.Diagnostics.Process.GetProcessById(pid).ProcessName.Equals(a.Process, StringComparison.OrdinalIgnoreCase); }
-        catch (ArgumentException) { return false; }
+        // cached name lookup: a Process object per anchor per pass is needless garbage
+        return pid != 0 && Engine.ProcName(pid).Equals(a.Process, StringComparison.OrdinalIgnoreCase);
     }
 
     private static readonly ConcurrentDictionary<string, Track> Tracks = new();
     private const int TrackMs = 33;
     private const float TrackMaxScore = 0.16f;
+    private const int RestMs = 250;
 
     /// <summary>Pixels clearly off the background (the median): the letters.</summary>
     private static int[] InkOf(byte[] px)
@@ -376,7 +377,13 @@ internal static class Finder
             }
         if (best > TrackMaxScore) { Lost(key, tr, cur); return; }
         var moved = new Rectangle(region.X + fx, region.Y + fy, tr.W, tr.H);
-        if (moved.Location == tr.Screen.Location) return;
+        if (moved.Location == tr.Screen.Location)
+        {
+            // it is where it was, only looks a little different (hovered, selected, redrawn): the full search found
+            // nothing new — rest instead of repeating it 30 times a second until the look changes back
+            tr.RestUntil = DateTime.UtcNow.AddMilliseconds(RestMs);
+            return;
+        }
         tr.ContentAcc = 0;
         tr.PrevImg = null;
         tr.Screen = moved;

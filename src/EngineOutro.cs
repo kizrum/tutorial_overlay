@@ -60,9 +60,13 @@ internal static partial class Engine
             case "outro_save":
                 try
                 {
-                    var (name, path) = Tutorials.Save(t.Spec);
-                    t.SavedAs = name;
-                    Events.Emit("tutorial_saved", new() { ["name"] = name, ["path"] = path, ["title"] = t.Title, ["source"] = source });
+                    StampScale(t.Spec, t.Defaults);
+                    var r = Tutorials.Save(t.Spec, t.SavedAs);
+                    t.SavedAs = r.Name;
+                    var ev = new JsonObject { ["name"] = r.Name, ["path"] = r.Path, ["title"] = t.Title, ["source"] = source };
+                    if (r.Replaced) ev["replaced"] = true;
+                    if (r.MissingTemplates.Count > 0) ev["missingTemplates"] = new JsonArray(r.MissingTemplates.Select(x => (JsonNode)x).ToArray());
+                    Events.Emit("tutorial_saved", ev);
                 }
                 catch (Exception e)
                 {
@@ -74,12 +78,13 @@ internal static partial class Engine
                 var spec = (JsonObject)t.Spec.DeepClone();
                 var saved = t.SavedAs;
                 StartTutorial(spec);
-                if (_tut != null) _tut.SavedAs = saved;
+                // going through it again is still that agent's tutorial
+                if (_tut != null) { _tut.SavedAs = saved; _tut.Owner = t.Owner; }
                 break;
             case "outro_continue":
                 // the card waits ("preparing the next step") until the agent appends steps
                 t.OutroOpen = false;
-                t.State = "waiting";
+                t.State = TutorialState.Waiting;
                 Events.Emit("continue_requested", new()
                 {
                     ["title"] = t.Title, ["completed"] = t.Steps.Count, ["app"] = t.Defaults.Process, ["savedAs"] = t.SavedAs,
@@ -104,10 +109,18 @@ internal static partial class Engine
             if (J.Unwrap(J.Get(args, "spec")) is JsonObject given) spec = given;
             else if (_tut != null) spec = _tut.Spec;
             else throw new InvalidOperationException("pass spec, or run a tutorial first");
-            var (name, path) = Tutorials.Save(spec, J.Str(args, "name"));
-            if (_tut != null && ReferenceEquals(spec, _tut.Spec)) { _tut.SavedAs = name; _stepVersion++; }
-            Events.Emit("tutorial_saved", new() { ["name"] = name, ["path"] = path, ["title"] = J.Str(spec, "title"), ["source"] = "agent" });
-            return new JsonObject { ["name"] = name, ["path"] = path, ["steps"] = J.Items(J.Get(spec, "steps")).Count() };
+            var defaults = _tut != null && ReferenceEquals(spec, _tut.Spec) ? _tut.Defaults : DefaultsOf(spec);
+            StampScale(spec, defaults);
+            var r = Tutorials.Save(spec, J.Str(args, "name"));
+            if (_tut != null && ReferenceEquals(spec, _tut.Spec)) { _tut.SavedAs = r.Name; _stepVersion++; }
+            var saved = new JsonObject { ["name"] = r.Name, ["path"] = r.Path, ["title"] = J.Str(spec, "title"), ["source"] = "agent" };
+            if (r.Replaced) saved["replaced"] = true;
+            Events.Emit("tutorial_saved", saved);
+            var res = new JsonObject { ["name"] = r.Name, ["path"] = r.Path, ["steps"] = J.Items(J.Get(spec, "steps")).Count() };
+            if (r.Replaced) res["replaced"] = "a saved tutorial with this name was overwritten";
+            if (r.MissingTemplates.Count > 0)
+                res["missingTemplates"] = $"{string.Join(", ", r.MissingTemplates)}: never captured here, saved without them — capture with template() and save again";
+            return res;
         }
     }
 }

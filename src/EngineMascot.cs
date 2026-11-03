@@ -22,7 +22,7 @@ internal static partial class Engine
     private static bool HoldForMascot(Tutorial t, Step step, DateTime now) =>
         // not "was the mascot on screen last frame": on a step's (or a tutorial's) first frame it is not yet,
         // and the highlight would start fading in under a mascot that is only beginning to appear
-        t.Mascot && Settings.Current.Mascot && t.State == "running" && t.AdvanceAt == null && step.Targets.Count > 0
+        t.Mascot && Settings.Current.Mascot && t.State == TutorialState.Running && t.AdvanceAt == null && step.Targets.Count > 0
         && MascotSettledKey != MascotKey(t) && (now - step.EnteredAt).TotalSeconds < MascotHoldSeconds;
 
     /// <summary>
@@ -39,11 +39,11 @@ internal static partial class Engine
             Avoid = card.Avoid.ToList(),
             Progress = t.Steps.Count == 0 ? 1 : (t.Index + (t.AdvanceAt != null ? 1 : 0)) / (float)t.Steps.Count,
             Outro = t.OutroOpen,
-            Waiting = t.State == "waiting",
+            Waiting = t.State == TutorialState.Waiting,
             StepKey = MascotKey(t),
             Scale = Native.ScaleAt(card.Focus),
         };
-        var step = t.State == "running" && !t.OutroOpen ? t.Current : null;
+        var step = t.State == TutorialState.Running && !t.OutroOpen ? t.Current : null;
         if (step == null) return m;
 
         m.Say = step.Say ?? step.Title;

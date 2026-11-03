@@ -149,10 +149,21 @@ internal static class Resolver
 
     // ---------------- resolution ----------------
 
+    private static readonly Dictionary<string, (int[] pids, long at)> PidCache = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Process lists are re-read at most this often (enumerating all processes is the costly part of a cycle).</summary>
+    private const int PidTtlMs = 1000;
+
     public static int[] Pids(string process, Dictionary<string, int[]>? cache = null)
     {
         if (cache != null && cache.TryGetValue(process, out var c)) return c;
+        long now = Environment.TickCount64;
         int[] res;
+        lock (PidCache)
+            if (PidCache.TryGetValue(process, out var pc) && now - pc.at < PidTtlMs && pc.pids.All(AliveCheap))
+            {
+                if (cache != null) cache[process] = pc.pids;
+                return pc.pids;
+            }
         try
         {
             var ps = Process.GetProcessesByName(process);
@@ -160,9 +171,17 @@ internal static class Resolver
             foreach (var p in ps) p.Dispose();
         }
         catch { res = Array.Empty<int>(); }
+        lock (PidCache)
+        {
+            if (PidCache.Count > 64) PidCache.Clear();
+            PidCache[process] = (res, now);
+        }
         if (cache != null) cache[process] = res;
         return res;
     }
+
+    /// <summary>A cached PID still names a live process with that id (a closed app must not linger for a second).</summary>
+    private static bool AliveCheap(int pid) => Native.ProcessAlive(pid);
 
     public static List<TopWindow> EnumTopWindows()
     {

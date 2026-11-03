@@ -577,7 +577,7 @@ internal sealed class Condition
         return c;
     }
 
-    private static string Norm(string t) => t.ToLowerInvariant() switch
+    internal static string Norm(string t) => t.ToLowerInvariant() switch
     {
         "all_clicked" or "targets" or "clicked" or "all" => "all_clicked",
         "appear" or "appeared" or "window_open" or "window_opened" or "open" or "opened" or "exists" => "appear",
@@ -727,13 +727,17 @@ internal sealed class Step
     public IEnumerable<Mark> Required => Targets.Where(t => !t.Optional && (t.HasHitArea || t.Check != null || t.HasButtons));
 }
 
+/// <summary>running: on a step · waiting: after the last step for append_steps · finished · stopped.</summary>
+internal enum TutorialState { Running, Waiting, Finished, Stopped }
+
 internal sealed class Tutorial
 {
     public string Title = "";
     public AnchorSpec Defaults = new();
     public List<Step> Steps = new();
     public int Index = -1;
-    public string State = "running";     // running | waiting | finished | stopped
+    public TutorialState State = TutorialState.Running;
+    public string StateName => State.ToString().ToLowerInvariant();   // as tools and events report it
     public bool KeepOpen;
     public bool Toggle;
     public float? Dim;
@@ -743,13 +747,14 @@ internal sealed class Tutorial
     public bool Mascot = true;           // "Шажок" points at the targets (also needs the global setting)
     public JsonObject Spec = new();      // what it was started from (+ appended steps) — what "save" writes
     public string? SavedAs;              // name in the tutorial library, once saved
+    public string? Owner;                // MCP session that started it (null: the user, from the tray)
 
     public bool OutroOpen;               // finished, the end card is showing
     public DateTime? AdvanceAt;          // step completed, waiting for the short "✓" moment
     public string? CompletedHow;
 
     public Step? Current => Index >= 0 && Index < Steps.Count ? Steps[Index] : null;
-    public bool Active => State is "running" or "waiting";
+    public bool Active => State is TutorialState.Running or TutorialState.Waiting;
 }
 
 /// <summary>

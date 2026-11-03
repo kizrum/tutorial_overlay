@@ -22,23 +22,39 @@ internal static class Tutorials
         foreach (var ch in s.Trim().ToLowerInvariant())
             sb.Append(char.IsLetterOrDigit(ch) ? ch : '-');
         var slug = string.Join("-", sb.ToString().Split('-', StringSplitOptions.RemoveEmptyEntries));
-        return slug.Length > 60 ? slug[..60].TrimEnd('-') : slug;
+        slug = slug.Length > 60 ? slug[..60].TrimEnd('-') : slug;
+        // names Windows keeps for devices: "con.json" cannot be created
+        if (Reserved.Contains(slug)) slug += "-1";
+        return slug;
     }
+
+    private static readonly HashSet<string> Reserved = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "con", "prn", "aux", "nul", "conin$", "conout$",
+        "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+        "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+    };
+
+    public sealed record SaveResult(string Name, string Path, bool Replaced, List<string> MissingTemplates);
 
     private static string PathOf(string name) => Path.Combine(Dir, name + ".json");
 
-    /// <summary>Saves (or overwrites) a spec; returns the name it is stored under.</summary>
-    public static (string name, string path) Save(JsonObject spec, string? name = null)
+    /// <summary>
+    /// Saves (or overwrites — then Replaced is true) a spec, with the PNGs of the templates it uses inside.
+    /// </summary>
+    public static SaveResult Save(JsonObject spec, string? name = null)
     {
         var n = Slug(name ?? J.Str(spec, "title") ?? "");
         if (n.Length == 0) n = $"tutorial-{DateTime.Now:yyyyMMdd-HHmmss}";
         var copy = (JsonObject)spec.DeepClone();
         copy.Remove("startAt");          // a saved tutorial always starts from the beginning
         copy["savedAt"] = DateTime.Now.ToString("s");
-        Directory.CreateDirectory(Dir);
+        var missing = TemplateStore.EmbedInto(copy);
+        if (missing.Count > 0) Log.Warn($"tutorial '{n}': template(s) {string.Join(", ", missing)} not found, saved without them");
         var path = PathOf(n);
-        File.WriteAllText(path, copy.ToJsonString(J.Pretty));
-        return (n, path);
+        bool replaced = File.Exists(path);
+        Files.WriteAtomic(path, copy.ToJsonString(J.Pretty));
+        return new SaveResult(n, path, replaced, missing);
     }
 
     /// <summary>All saved tutorials, newest first.</summary>
@@ -57,6 +73,7 @@ internal static class Tutorials
                     ["title"] = J.Str(n, "title") ?? Path.GetFileNameWithoutExtension(f),
                     ["app"] = J.Str(n, "app") ?? J.Str(n, "process") ?? J.Str(J.Get(n, "anchor"), "process"),
                     ["steps"] = J.Items(J.Get(n, "steps")).Count(),
+                    ["templates"] = J.Get(n, "templates") is JsonObject tp && tp.Count > 0 ? tp.Count : null,
                     ["savedAt"] = J.Str(n, "savedAt") ?? File.GetLastWriteTime(f).ToString("s"),
                     ["path"] = f,
                 });

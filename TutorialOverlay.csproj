@@ -26,4 +26,12 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
+  <!-- the test project lives beside the sources: keep it out of the exe -->
+  <ItemGroup>
+    <Compile Remove="tests/**" />
+    <None Remove="tests/**" />
+    <EmbeddedResource Remove="tests/**" />
+    <InternalsVisibleTo Include="TutorialOverlay.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -47,7 +47,9 @@ internal static partial class Engine
     private static int _stepVersion;
     private static DateTime _lastPixel, _lastCond;
     private static readonly int OwnPid = Environment.ProcessId;
-    private static readonly Dictionary<int, string> ProcNames = new();
+    private static readonly Dictionary<int, (string name, long at)> ProcNames = new();
+    /// <summary>PIDs are reused by Windows: a cached name is trusted only this long.</summary>
+    private const int ProcNameTtlMs = 5000;
     private static string _lastSignature = "";
 
     public static Tutorial? Tutorial => _tut;
@@ -96,7 +98,9 @@ internal static partial class Engine
     {
         lock (Sync)
         {
+            var args0 = spec;
             spec = J.Unwrap(J.Get(spec, "spec")) ?? spec;
+            CheckStartAllowed(J.Bool(args0, "replace") == true || J.Bool(spec, "replace") == true);
             string? savedAs = null;
             if (J.Str(spec, "name") is string libName && !J.Has(spec, "steps"))
             {
@@ -105,6 +109,13 @@ internal static partial class Engine
                 if (startAt != null) spec["startAt"] = startAt;
                 savedAs = Tutorials.Slug(libName);
             }
+            if (spec is not JsonObject) throw new ArgumentException("spec must be an object {title, app, steps:[…]}");
+            spec = (JsonObject)spec.DeepClone();
+            var warnings = SpecLint.CheckSpec(spec);
+            // templates carried by a saved tutorial; pixel offsets measured at another display scale
+            int templates = TemplateStore.LoadFrom(spec);
+            var defaults0 = DefaultsOf(spec);
+            var scaleNote = Rescale((JsonObject)spec, defaults0);
             ApplySettings(Settings.Global.Clone().Apply(spec));
             var t = new Tutorial
             {
@@ -116,21 +127,78 @@ internal static partial class Engine
                 HideWhenInactive = J.Bool(spec, "hideWhenInactive") ?? Settings.Current.HideWhenInactive ?? HideWhenInactiveDefault,
                 Outro = J.Bool(spec, "outro") ?? true,
                 Mascot = J.Bool(spec, "mascot") ?? true,
-                Spec = spec is JsonObject so ? (JsonObject)so.DeepClone() : new JsonObject(),
+                Spec = (JsonObject)spec.DeepClone(),
                 SavedAs = savedAs,
             };
             t.Spec.Remove("startAt");
-            t.Defaults = AnchorSpec.Parse(J.Get(spec, "anchor") ?? new JsonObject { ["process"] = J.Str(spec, "app") ?? J.Str(spec, "process") }, null);
-            if (J.Str(spec, "window") is string w && t.Defaults.Window == null) t.Defaults.Window = w;
+            t.Spec.Remove("replace");
+            t.Defaults = defaults0;
+            t.Owner = Caller.Value;
             int i = 0;
             foreach (var s in J.Items(J.Get(spec, "steps"))) t.Steps.Add(Step.Parse(s, t.Defaults, i++));
-            if (_tut is { Active: true }) Events.Emit("tutorial_stopped", new() { ["title"] = _tut.Title, ["reason"] = "replaced" });
+            if (_tut is { Active: true })
+            {
+                // tell the previous tutorial's agent who took it over (the event goes to every agent)
+                bool other = _tut.Owner != t.Owner;
+                Events.Emit("tutorial_stopped", new()
+                {
+                    ["title"] = _tut.Title, ["reason"] = "replaced", ["by"] = other ? (t.Owner == null ? "user" : "another agent") : null,
+                    ["newTitle"] = t.Title,
+                });
+            }
             _tut = t;
             Events.Emit("tutorial_started", new() { ["title"] = t.Title, ["total"] = t.Steps.Count, ["app"] = t.Defaults.Process });
             int start = Math.Clamp(J.Int(spec, "startAt") ?? 0, 0, Math.Max(0, t.Steps.Count - 1));
             if (t.Steps.Count == 0) Finish(); else Enter(start);
-            return TutorialJson();
+            var res = TutorialJson();
+            if (warnings.Count > 0) res["warnings"] = Warnings(warnings);
+            if (scaleNote != null) res["scale"] = scaleNote;
+            if (templates > 0) res["templatesLoaded"] = templates;
+            return res;
         }
+    }
+
+    private static JsonArray Warnings(List<string> w) =>
+        new(w.Take(30).Select(x => (JsonNode)x).Concat(w.Count > 30 ? new JsonNode[] { $"… and {w.Count - 30} more" } : Array.Empty<JsonNode>()).ToArray());
+
+    /// <summary>The tutorial-wide default anchor: spec.anchor, or spec.app / spec.process (+ spec.window).</summary>
+    public static AnchorSpec DefaultsOf(JsonNode? spec)
+    {
+        var d = AnchorSpec.Parse(J.Get(spec, "anchor") ?? new JsonObject { ["process"] = J.Str(spec, "app") ?? J.Str(spec, "process") }, null);
+        if (J.Str(spec, "window") is string w && d.Window == null) d.Window = w;
+        return d;
+    }
+
+    /// <summary>Display scale of the monitor the app's main (largest) window is on; null when the app is not running.</summary>
+    public static float? AppScale(AnchorSpec defaults)
+    {
+        if (defaults.IsScreen) return null;
+        var a = defaults.WithoutFind();
+        a.Path = new List<ElementSpec>();
+        var wins = Resolver.MatchingWindows(a);
+        if (wins.Count == 0) return null;
+        var main = wins.Select(h => Native.FrameRect(h)).OrderByDescending(r => (long)r.Width * r.Height).First();
+        return Native.ScaleAt(new PointF(main.X + main.Width / 2f, main.Y + main.Height / 2f));
+    }
+
+    /// <summary>Saved specs remember the display scale their pixel offsets were measured at.</summary>
+    public static void StampScale(JsonObject spec, AnchorSpec defaults)
+    {
+        if (J.Num(spec, "scale") != null) return;
+        if (AppScale(defaults) is float s) spec["scale"] = Math.Round(s, 3);
+    }
+
+    /// <summary>Converts the spec's pixel fields when it was made at another display scale; a note for the result, or null.</summary>
+    private static string? Rescale(JsonObject spec, AnchorSpec defaults)
+    {
+        if (J.Num(spec, "scale") is not double was || was <= 0) return null;
+        if (AppScale(defaults) is not float now) return $"made at scale {was:0.##}; the app is not running, so offsets are used as they are";
+        double k = now / was;
+        if (Math.Abs(k - 1) < 0.02) return null;
+        int n = SpecScale.Apply(J.Get(spec, "steps"), k) + SpecScale.Apply(J.Get(spec, "anchor"), k);
+        spec["scale"] = Math.Round(now, 3);
+        Log.Info($"spec made at scale {was:0.##}, display is {now:0.##}: {n} pixel values ×{k:0.###}");
+        return $"made at scale {was:0.##}, display is {now:0.##}: {n} pixel offsets multiplied by {k:0.###}";
     }
 
     public static JsonObject AppendSteps(JsonNode args)
@@ -138,9 +206,14 @@ internal static partial class Engine
         lock (Sync)
         {
             if (_tut == null || !_tut.Active) throw new InvalidOperationException("no active tutorial (start_tutorial first)");
+            RequireOwned();
             int i = _tut.Steps.Count, added = 0;
             int? insertAt = J.Int(args, "insertAt");
-            var raw = J.Items(J.Get(args, "steps") ?? args).ToList();
+            var raw = J.Items(J.Get(args, "steps") ?? args).Select(x => x.DeepClone()).ToList();
+            var warnings = SpecLint.CheckSteps(new JsonArray(raw.Select(x => x.DeepClone()).ToArray()), i);
+            // steps measured at another display scale (args.scale) are converted to the tutorial's
+            if (J.Num(_tut.Spec, "scale") is double now && J.Num(args, "scale") is double was && was > 0 && Math.Abs(now / was - 1) >= 0.02)
+                foreach (var r in raw) SpecScale.Apply(r, now / was);
             var parsed = raw.Select(s => Step.Parse(s, _tut.Defaults, i++)).ToList();
             if (_tut.Spec["steps"] is not JsonArray specSteps) _tut.Spec["steps"] = specSteps = new JsonArray();
             if (insertAt is int at && at > _tut.Index && at <= _tut.Steps.Count)
@@ -155,9 +228,11 @@ internal static partial class Engine
             }
             added = parsed.Count;
             Events.Emit("steps_appended", new() { ["added"] = added, ["total"] = _tut.Steps.Count });
-            if (_tut.State == "waiting" && added > 0) { _tut.State = "running"; Enter(_tut.Index + 1); }
+            if (_tut.State == TutorialState.Waiting && added > 0) { _tut.State = TutorialState.Running; Enter(_tut.Index + 1); }
             _stepVersion++;
-            return TutorialJson();
+            var res = TutorialJson();
+            if (warnings.Count > 0) res["warnings"] = Warnings(warnings);
+            return res;
         }
     }
 
@@ -165,11 +240,11 @@ internal static partial class Engine
     {
         lock (Sync)
         {
-            var t = Require();
+            var t = RequireOwned();
             int idx = J.Str(args, "id") is string id ? t.Steps.FindIndex(s => s.Id == id) : J.Int(args, "index") ?? -1;
             if (J.Str(args, "relative") is string rel) idx = t.Index + (rel == "back" || rel == "prev" ? -1 : 1);
             if (idx < 0 || idx >= t.Steps.Count) throw new ArgumentException($"no such step (have {t.Steps.Count})");
-            t.State = "running";
+            t.State = TutorialState.Running;
             Enter(idx, "agent");
             return TutorialJson();
         }
@@ -179,10 +254,10 @@ internal static partial class Engine
     {
         lock (Sync)
         {
-            var t = Require();
+            var t = RequireOwned();
             if (J.Int(args, "expectIndex") is int e && e != t.Index)
                 throw new InvalidOperationException($"current step is {t.Index}, not {e}");
-            if (t.State == "running" && t.AdvanceAt == null) Complete("agent", immediate: J.Bool(args, "immediate") ?? false);
+            if (t.State == TutorialState.Running && t.AdvanceAt == null) Complete("agent", immediate: J.Bool(args, "immediate") ?? false);
             return TutorialJson();
         }
     }
@@ -193,7 +268,8 @@ internal static partial class Engine
         {
             if (_tut is { Active: true })
             {
-                _tut.State = "stopped";
+                RequireOwned();
+                _tut.State = TutorialState.Stopped;
                 ApplySettings(Settings.Global);
                 Events.Emit("tutorial_stopped", new() { ["title"] = _tut.Title, ["index"] = _tut.Index, ["reason"] = "agent" });
             }
@@ -218,15 +294,15 @@ internal static partial class Engine
             {
                 case "done":
                 case "next":
-                    if (t.State == "running" && t.AdvanceAt == null) Complete(source);
+                    if (t.State == TutorialState.Running && t.AdvanceAt == null) Complete(source);
                     break;
                 case "back":
                     Events.Emit("step_back", new() { ["from"] = t.Index, ["to"] = Math.Max(0, t.Index - 1), ["source"] = source });
-                    t.State = "running";
+                    t.State = TutorialState.Running;
                     Enter(Math.Max(0, t.Index - 1), source);
                     break;
                 case "skip":
-                    if (t.State != "running") break;
+                    if (t.State != TutorialState.Running) break;
                     Events.Emit("step_skipped", new() { ["index"] = t.Index, ["id"] = t.Current?.Id, ["source"] = source });
                     Next();
                     break;
@@ -241,7 +317,7 @@ internal static partial class Engine
                     RequestHelp("dont_understand", source);
                     break;
                 case "stop":
-                    t.State = "stopped";
+                    t.State = TutorialState.Stopped;
                     ApplySettings(Settings.Global);
                     Events.Emit("tutorial_stopped", new() { ["title"] = t.Title, ["index"] = t.Index, ["reason"] = source });
                     _stepVersion++;
@@ -330,12 +406,12 @@ internal static partial class Engine
         t.AdvanceAt = null;
         if (t.KeepOpen)
         {
-            t.State = "waiting";
+            t.State = TutorialState.Waiting;
             Events.Emit("tutorial_waiting", new() { ["title"] = t.Title, ["completed"] = t.Steps.Count });
         }
         else
         {
-            t.State = "finished";
+            t.State = TutorialState.Finished;
             t.OutroOpen = t.Outro;
             // the end card keeps the tutorial's look until it is closed
             if (!t.OutroOpen) ApplySettings(Settings.Global);
@@ -366,7 +442,7 @@ internal static partial class Engine
         lock (Sync)
         {
             var t = _tut;
-            var step = t is { State: "running", AdvanceAt: null } ? t.Current : null;
+            var step = t is { State: TutorialState.Running, AdvanceAt: null } ? t.Current : null;
             var candidates = (step?.Targets ?? Enumerable.Empty<Mark>()).Concat(Free);
             Mark? best = null; float bestD = float.MaxValue;
             foreach (var m in candidates)
@@ -495,7 +571,7 @@ internal static partial class Engine
         lock (Sync)
         {
             var t = _tut;
-            var step = t is { State: "running" } ? t.Current : null;
+            var step = t is { State: TutorialState.Running } ? t.Current : null;
             var marks = (step?.Targets ?? Enumerable.Empty<Mark>()).Concat(Free).ToList();
 
             // what the resolver should keep fresh
@@ -642,7 +718,19 @@ internal static partial class Engine
     /// </summary>
     private static string? BlockingDialog(Step s) => BlockingDialogWindow(s)?.title;
 
+    // the card, the dialog frame and help all ask within one frame: work it out once per frame (and per step)
+    private static (Step step, long tick, (IntPtr hwnd, string title, Rectangle frame)? value)? _dialogMemo;
+
     private static (IntPtr hwnd, string title, Rectangle frame)? BlockingDialogWindow(Step s)
+    {
+        long tick = Environment.TickCount64;
+        if (_dialogMemo is { } dm && ReferenceEquals(dm.step, s) && tick - dm.tick < 25) return dm.value;
+        var v = ComputeBlockingDialog(s);
+        _dialogMemo = (s, tick, v);
+        return v;
+    }
+
+    private static (IntPtr hwnd, string title, Rectangle frame)? ComputeBlockingDialog(Step s)
     {
         var fg = GetForegroundWindow();
         if (fg == IntPtr.Zero) return null;
@@ -703,12 +791,16 @@ internal static partial class Engine
 
     public static string ProcName(int pid)
     {
+        long now = Environment.TickCount64;
         lock (ProcNames)
         {
-            if (ProcNames.TryGetValue(pid, out var n)) return n;
+            if (ProcNames.TryGetValue(pid, out var c) && now - c.at < ProcNameTtlMs) return c.name;
+            string n;
             try { using var p = Process.GetProcessById(pid); n = p.ProcessName; } catch { n = ""; }
-            if (ProcNames.Count > 512) ProcNames.Clear();
-            return ProcNames[pid] = n;
+            if (ProcNames.Count > 512)
+                foreach (var k in ProcNames.Where(kv => now - kv.Value.at >= ProcNameTtlMs).Select(kv => kv.Key).ToList()) ProcNames.Remove(k);
+            ProcNames[pid] = (n, now);
+            return n;
         }
     }
 
@@ -848,6 +940,14 @@ internal static partial class Engine
             // a text/template not seen yet: which way is unknown, but where to scroll is — the area it is looked for in
             m.ScrollHint = reason is "text not visible" or "template not visible" && FindArea(m.Anchor) is RectangleF fa
                 ? ("any", fa, new PointF(fa.X + fa.Width / 2, fa.Y + fa.Height / 2), -1) : null;
+            return;
+        }
+        if (!m.Anchor.IsScreen && ag.Pids.Length > 0 && Native.IsAboveUs(Native.ProcessId(ag.Root)))
+        {
+            // the app runs as administrator and we do not: its clicks never reach our hooks
+            m.Geo = null;
+            m.Visibility = "elevated";
+            m.ScrollHint = null;
             return;
         }
         if (!m.Anchor.IsScreen)
@@ -1223,7 +1323,7 @@ internal static partial class Engine
 
     private static void EvaluateTutorial(Tutorial t, DateTime now, int fgPid)
     {
-        if (t.State != "running") return;
+        if (t.State != TutorialState.Running) return;
         var s = t.Current;
         if (s == null) return;
         if (t.AdvanceAt is DateTime at)
@@ -1299,12 +1399,12 @@ internal static partial class Engine
         var vs = Native.VirtualScreen();
         foreach (var w in Resolver.Popups)
             if (w.Frame.IntersectsWith(vs)) card.Avoid.Add(w.Frame);
-        card.State = t.State;
+        card.State = t.StateName;
         card.Index = t.Index;
         card.Total = t.Steps.Count;
         card.AppFrame = appGeo?.Bounds;
         card.Completed = t.AdvanceAt != null;
-        if (t.State == "waiting" || s == null)
+        if (t.State == TutorialState.Waiting || s == null)
         {
             card.Title = t.Title.Length > 0 ? t.Title : Settings.Current.Text.Tutorial;
             card.Text = "";
@@ -1390,6 +1490,7 @@ internal static partial class Engine
             "inactive" => t.IssueInactive,
             "offscreen" => t.IssueOffscreen,
             "process not running" => t.IssueNotRunning,
+            "elevated" => t.IssueElevated,
             "resolving" or "searching" => null,
             _ => t.IssueMissing,
         };
@@ -1408,7 +1509,7 @@ internal static partial class Engine
         lock (Sync)
         {
             var t = _tut;
-            var s = t is { State: "running" } ? t.Current : null;
+            var s = t is { State: TutorialState.Running } ? t.Current : null;
             if (s == null) return;
             s.HelpPending = true;
             s.Sketch = sketch is { Empty: false } ? sketch.Strokes.ToList() : null;
@@ -1491,7 +1592,7 @@ internal static partial class Engine
     {
         lock (Sync)
         {
-            var t = Require();
+            var t = RequireOwned();
             if (J.Int(args, "expectIndex") is int e && e != t.Index) throw new InvalidOperationException($"current step is {t.Index}, not {e}");
             var s = t.Current ?? throw new InvalidOperationException("no current step");
             s.Hint = J.Str(args, "text");
@@ -1536,8 +1637,8 @@ internal static partial class Engine
         if (t == null) return new JsonObject { ["state"] = "none" };
         var o = new JsonObject
         {
-            ["state"] = t.State, ["title"] = t.Title, ["index"] = t.Index, ["total"] = t.Steps.Count,
-            ["app"] = t.Defaults.Process, ["completing"] = t.AdvanceAt != null,
+            ["state"] = t.StateName, ["title"] = t.Title, ["index"] = t.Index, ["total"] = t.Steps.Count,
+            ["app"] = t.Defaults.Process, ["completing"] = t.AdvanceAt != null, ["owner"] = OwnerLabel(t),
         };
         var s = t.Current;
         if (s != null && t.Active)

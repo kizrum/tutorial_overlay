@@ -486,8 +486,15 @@ internal sealed class SettingsWindow : Form
         try
         {
             JsonObject root;
-            try { root = File.Exists(Settings.FilePath) ? JsonNode.Parse(File.ReadAllText(Settings.FilePath)) as JsonObject ?? new() : new(); }
-            catch { root = new JsonObject(); }     // unreadable file: start over rather than refuse to save
+            try { root = File.Exists(Settings.FilePath) ? JsonNode.Parse(File.ReadAllText(Settings.FilePath)) as JsonObject ?? throw new InvalidDataException("not a JSON object") : new(); }
+            catch (Exception pe)
+            {
+                // unreadable file (a typo made by hand): keep it next to the new one instead of losing what was in it
+                var bak = Settings.FilePath + $".broken-{DateTime.Now:yyyyMMdd-HHmmss}";
+                try { File.Copy(Settings.FilePath, bak, overwrite: true); Log.Warn($"config.json was unreadable ({pe.Message}); kept as {bak}"); }
+                catch (Exception be) { Log.Warn($"config.json unreadable and not backed up: {be.Message}"); }
+                root = new JsonObject();
+            }
             root["port"] = port;
             root["lang"] = _english ? "en" : "ru";
             root["accent"] = $"#{_accent.R:X2}{_accent.G:X2}{_accent.B:X2}";
@@ -499,8 +506,7 @@ internal sealed class SettingsWindow : Form
             var hk = new JsonObject();
             foreach (var a in Settings.Actions) hk[a] = _chords[a] is Chord c ? c.ToString() : "none";
             root["hotkeys"] = hk;
-            Directory.CreateDirectory(Path.GetDirectoryName(Settings.FilePath)!);
-            File.WriteAllText(Settings.FilePath, root.ToJsonString(J.Pretty));
+            Files.WriteAtomic(Settings.FilePath, root.ToJsonString(J.Pretty));
         }
         catch (Exception e)
         {
