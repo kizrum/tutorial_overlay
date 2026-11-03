@@ -150,7 +150,7 @@ internal sealed class CardWindow : NoActivateForm
     }
 
     private static string Signature(CardModel m, float s) =>
-        string.Join("\u0001", Settings.Current.Lang, Settings.Current.Accent.ToArgb(), Settings.Current.HotkeySignature, m.State, m.Index, m.Total, m.Title, m.Text, m.Done, m.Required, m.Completed, m.CanBack, m.CanUndo,
+        string.Join("\u0001", Settings.Current.Lang, Settings.Current.Accent.ToArgb(), Settings.Current.HotkeySignature, m.State, m.Index, m.Prep, m.Total, m.Title, m.Text, m.Done, m.Required, m.Completed, m.CanBack, m.CanUndo,
             string.Join(",", m.Checklist.Select(c => c.label + c.done)), string.Join(",", m.Extra.Select(b => b.Id + b.Text)),
             string.Join(",", m.Controls), m.Why, m.Hint, m.HintTitle, m.Issue, m.HelpPending, m.Highlighting, m.Review, s);
 
@@ -431,7 +431,7 @@ internal sealed class CardWindow : NoActivateForm
 
         // header: STEP n / N and close
         var loc = Settings.Current.Text;
-        var head = m.State == "waiting" ? loc.Waiting : m.State == "outro" ? loc.OutroHead : $"{loc.Step} {m.Index + 1} / {m.Total}";
+        var head = m.State == "waiting" ? loc.Waiting : m.State == "outro" ? loc.OutroHead : $"{loc.Step} {(m.Prep ? 0 : m.Index + 1)} / {m.Total}";
         using (var b = new SolidBrush(Palette.Accent)) g.DrawString(head, Theme.Font(12 * s, true), b, Pad, y + 2 * s);
         if (m.Completed)
         {
@@ -452,13 +452,14 @@ internal sealed class CardWindow : NoActivateForm
         // progress: one segment per step
         if (m.Total > 0)
         {
+            int idx = m.Prep ? -1 : m.Index;     // step 0 (getting ready): no step under way yet
             float gap = 4 * s, segW = (ContentWidth - gap * (m.Total - 1)) / m.Total;
             if (segW < 4 * s) { segW = ContentWidth; gap = 0; }
             for (int i = 0; i < (segW == ContentWidth ? 1 : m.Total); i++)
             {
                 var r = new RectangleF(Pad + i * (segW + gap), y + 2 * s, segW, 4 * s);
-                float frac = segW == ContentWidth ? (m.Index + (m.Completed ? 1 : 0)) / (float)m.Total : 1;
-                Color c = i < m.Index || (i == m.Index && m.Completed) ? Palette.Accent : i == m.Index ? Palette.WithAlpha(Palette.Accent, 0.45f) : Palette.InkRaised;
+                float frac = segW == ContentWidth ? Math.Max(0, idx + (m.Completed ? 1 : 0)) / (float)m.Total : 1;
+                Color c = i < idx || (i == idx && m.Completed) ? Palette.Accent : i == idx ? Palette.WithAlpha(Palette.Accent, 0.45f) : Palette.InkRaised;
                 using var path = Theme.Rounded(r, 2 * s);
                 using (var b = new SolidBrush(segW == ContentWidth ? Palette.InkRaised : c)) g.FillPath(b, path);
                 if (segW == ContentWidth)

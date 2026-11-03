@@ -49,6 +49,18 @@ internal static partial class Engine
         m.Say = step.Say ?? step.Title;
         m.Thinking = step.HelpPending && step.Hint == null;
         if (t.AdvanceAt != null) return m;     // done, the next step is a moment away: stay put
+        // the app waits on a dialog: nothing else on the step can happen until it is answered, so go there and say so
+        if (BlockingDialogWindow(step) is { } dlg)
+        {
+            var fr = (RectangleF)dlg.frame;
+            m.Target = new PointF(fr.X + fr.Width / 2, fr.Y + fr.Height / 2);
+            m.TargetBounds = fr;
+            m.Root = dlg.hwnd;
+            m.Say = Settings.Current.Text.DialogMark;
+            m.StepKey += "/dialog" + dlg.hwnd;      // another dialog is another spot to go to
+            m.Scale = Native.ScaleAt(m.Target.Value);
+            return m;
+        }
         var target = step.Targets.FirstOrDefault(x => !x.Satisfied && !x.Optional && x.Geo != null)
                   ?? step.Targets.FirstOrDefault(x => !x.Satisfied && x.Geo != null);
         // the target is past the edge of its pane: stay where it is (no walking while the user scrolls — the wheel

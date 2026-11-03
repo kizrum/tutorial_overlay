@@ -121,7 +121,7 @@ internal static class Tools
         Tool("wait_for_turn", "The overlay serves ONE agent at a time. If a call answered 'busy', wait here until the other agent is done; you then hold it. Never start another TutorialOverlay instead.",
             Obj(("timeoutMs", T("integer", "default 600000, max 1800000")))),
         Tool("release", "Done with the overlay: let another agent use it (a running tutorial keeps running for the user).", new JsonObject()),
-        Tool("events", "Events after seq: hit, miss, step_*, tutorial_*, window_opened/closed, anchor_found/lost, opened, no_effect, blocked, button, pick, " +
+        Tool("events", "Events after seq: hit, miss, step_*, tutorial_*, window_opened/closed, anchor_found/lost, opened, no_effect, blocked, prepare_started/done (step 0: a dialog to answer before step 1), button, pick, " +
             "help (reason cant_find|dont_understand|other; other: user text + optional pencil sketch with image path → answer with hint), " +
             "continue_requested (append the next lesson), outro, …. timeoutMs long-polls.",
             Obj(("since", T("integer", "last seen seq")), ("timeoutMs", T("integer", "max 60000")))),

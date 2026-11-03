@@ -202,6 +202,12 @@ internal sealed class MascotWindow : Form
                 if (SpotOk(inp, glued, size, s)) { _pos = glued; _respot = false; }
                 else _respot = true;
             }
+            else if (!_respot && !SpotOk(inp, _pos, size, s))
+            {
+                // the target did not move but grew over us (or something else now covers the spot): step aside
+                _respot = true;
+                _targetMovedAt = DateTime.UtcNow;
+            }
             if (!_respot || (DateTime.UtcNow - _targetMovedAt).TotalSeconds < 0.7) return;
             _respot = false;
             _spotKey = "";
@@ -219,6 +225,7 @@ internal sealed class MascotWindow : Form
         }
         var dest = ChooseSpot(inp, t, size, s);
         _offset = new PointF(dest.X - t.X, dest.Y - t.Y);
+        if (Dist(_pos, dest) < size.Width * 0.3f) return;     // the best there is is about here: no shuffling on the spot
         if (Dist(_pos, dest) <= size.Width * WalkFigures) StartWalk(dest, s);
         else StartVanish(dest);
     }
@@ -318,7 +325,6 @@ internal sealed class MascotWindow : Form
     private PointF ChooseSpot(MascotInput inp, PointF t, SizeF size, float s)
     {
         var tb = TargetBox(inp, t, s);
-        float r = Math.Clamp(Math.Max(tb.Width, tb.Height) / 2, 10 * s, 90 * s);
         var work = Native.WorkAreaAt(t);
         var avoid = inp.Avoid.ToList();
         avoid.Add(RectangleF.Inflate(tb, 6 * s, 6 * s));
@@ -333,10 +339,14 @@ internal sealed class MascotWindow : Form
             var dir = new PointF(MathF.Cos(a), MathF.Sin(a));
             for (int d = 0; d < 2; d++)
             {
-                float reach = (r + size.Width * 0.62f) * (d == 0 ? 1 : 1.55f);
+                // out from the target's own edge (a dialog-sized target is far wider than the figure), then the
+                // figure's half-size that way plus a gap; the second ring a little farther out
+                float edge = EdgeDistance(tb, t, dir) + 6 * s;
+                float half = MathF.Abs(dir.X) * size.Width / 2 + MathF.Abs(dir.Y) * size.Height / 2;
+                float reach = edge + (half + 8 * s) * (d == 0 ? 1 : 1.55f);
                 // below and beside reads naturally (the hand points up and across); right above is last
                 float pref = (dir.Y < -0.5f ? 6 : dir.Y < 0 ? 3 : 0) + d * 5;
-                cands.Add((new PointF(t.X + dir.X * reach, t.Y + dir.Y * reach * 0.9f), pref));
+                cands.Add((new PointF(t.X + dir.X * reach, t.Y + dir.Y * reach), pref));
             }
         }
 
@@ -360,6 +370,14 @@ internal sealed class MascotWindow : Form
             if (score < bestScore) { bestScore = score; best = c; }
         }
         return best;
+    }
+
+    /// <summary>How far from t (inside or at the box) the ray along dir leaves the box.</summary>
+    private static float EdgeDistance(RectangleF box, PointF t, PointF dir)
+    {
+        float tx = dir.X > 1e-4f ? (box.Right - t.X) / dir.X : dir.X < -1e-4f ? (box.Left - t.X) / dir.X : float.MaxValue;
+        float ty = dir.Y > 1e-4f ? (box.Bottom - t.Y) / dir.Y : dir.Y < -1e-4f ? (box.Top - t.Y) / dir.Y : float.MaxValue;
+        return Math.Max(0, Math.Min(tx, ty));
     }
 
     /// <summary>0 (plain background) … 1 (dense UI) for each box, from the window's own pixels.</summary>

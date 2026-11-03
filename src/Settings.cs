@@ -108,7 +108,9 @@ internal sealed class Loc
     public string ScrollIssue = "Нужное место за краем окна — {0}.", ScrollFind = "Прокрутите окно, чтобы показать нужное место.",
         ScrollHere = "Покрутите здесь — я найду «{0}»", ScrollHereAny = "Покрутите здесь — я найду нужное место";
     public string IssueDialog = "Сначала закройте окно «{0}» — пока оно открыто, программа не принимает клики.";
-    public string DialogMark = "Сначала подтвердите это окно (Enter) или закройте его";
+    public string PrepareTitle = "Подготовимся к началу туториала", DialogTitle = "Сначала закроем окно",
+        PrepareText = "В программе открыто окно «{0}». Ответьте на него или закройте — пока оно открыто, программа не принимает клики. Потом продолжим.";
+    public string DialogMark = "Сначала ответьте на это окно или закройте его";
     public string CantFind = "Не вижу, куда жать", DontGet = "Не понимаю, что делать", Cancel = "Отмена", HintHelp = "помощь";
     public string Other = "Другое — опишу сам", OtherTitle = "Опишите, что не получается", Send = "Отправить",
         OtherHint = "Enter — отправить · Shift+Enter — новая строка · Esc — отмена";
@@ -171,7 +173,9 @@ internal sealed class Loc
         ScrollHere = "Scroll here — I'll spot “{0}”", ScrollHereAny = "Scroll here — I'll spot the place",
 
         IssueDialog = "Close the \"{0}\" window first — the app ignores clicks while it is open.",
-        DialogMark = "Confirm this window first (Enter) or close it",
+        PrepareTitle = "Let's get ready to start", DialogTitle = "First, close this window",
+        PrepareText = "The app has the \"{0}\" window open. Answer or close it — the app ignores clicks while it is open. Then we carry on.",
+        DialogMark = "Answer or close this window first",
         CantFind = "I can't find where to click", DontGet = "I don't get what to do", Cancel = "Cancel", HintHelp = "help",
         Other = "Something else — I'll describe it", OtherTitle = "Describe what isn't working", Send = "Send",
         OtherHint = "Enter — send · Shift+Enter — new line · Esc — cancel",

@@ -18,6 +18,7 @@ internal sealed class CardModel
     public string? Why;
     public int Done, Required;
     public bool Completed;
+    public bool Prep;                    // step 0: getting the app ready (a dialog to answer) before step 1 begins
     public bool CanBack, CanUndo;
     public string? Hint, HintTitle, Issue;
     public bool HelpPending, Highlighting, Review;
@@ -648,7 +649,8 @@ internal static partial class Engine
             CheckOpens(marks, step, now);
             AddPickVisuals(sc, f.Card.Avoid);
             if (step?.Sketch is { } sketch) AddSketchVisuals(sketch, sc, f.Card.Avoid);
-            AddScrollVisuals(marks, sc, f.Card.Avoid, fgPid);
+            // a dialog the app waits on comes first: scrolling the pane behind it does nothing until it is answered
+            if (step == null || BlockingDialogWindow(step) == null) AddScrollVisuals(marks, sc, f.Card.Avoid, fgPid);
             if (step?.HighlightUntil is DateTime hu)
             {
                 if (now < hu)
@@ -730,9 +732,26 @@ internal static partial class Engine
         return v;
     }
 
-    private static (IntPtr hwnd, string title, Rectangle frame)? ComputeBlockingDialog(Step s)
+    private static IntPtr _lastAppFgWindow;
+
+    /// <summary>
+    /// The foreground window, except that a screenshot tool in front does not count: while the user snips the
+    /// screen, the app's window that was in front before (a dialog, say) still is as far as the step is concerned.
+    /// </summary>
+    private static IntPtr AppForegroundWindow()
     {
         var fg = GetForegroundWindow();
+        if (fg == IntPtr.Zero) return fg;
+        int pid = Native.ProcessId(fg);
+        if (pid != 0 && CaptureTools.Contains(ProcName(pid)))
+            return _lastAppFgWindow != IntPtr.Zero && Native.IsWindowVisible(_lastAppFgWindow) ? _lastAppFgWindow : fg;
+        _lastAppFgWindow = fg;
+        return fg;
+    }
+
+    private static (IntPtr hwnd, string title, Rectangle frame)? ComputeBlockingDialog(Step s)
+    {
+        var fg = AppForegroundWindow();
         if (fg == IntPtr.Zero) return null;
         var roots = s.Targets.Where(m => m.Geo != null && !m.Satisfied).Select(m => m.Geo!.A.Root).Where(r => r != IntPtr.Zero).ToHashSet();
         int[] pids = s.Targets.Where(m => m.Geo != null).SelectMany(m => m.Geo!.A.Pids).ToArray();
@@ -747,12 +766,28 @@ internal static partial class Engine
         if (!pids.Contains(pid)) return null;
         // a sequence step that points into this very window is not "blocked" by it
         if (s.Targets.Any(m => !m.Satisfied && m.Geo?.A.Root == fg)) return null;
-        var title = Native.WindowTitle(fg);
+        var title = CleanTitle(Native.WindowTitle(fg));
         if (title.Length == 0) return null;
         var frame = Native.FrameRect(fg);
         var main = Native.FrameRect(roots.First());
         if ((long)frame.Width * frame.Height >= (long)main.Width * main.Height * 0.6) return null;   // another big window, not a dialog
         return (fg, title, frame);
+    }
+
+    /// <summary>Window titles may carry control or invisible characters (FL Studio's do): spaces instead, once.</summary>
+    private static string CleanTitle(string title)
+    {
+        var sb = new System.Text.StringBuilder(title.Length);
+        foreach (var ch in title)
+        {
+            var cat = char.GetUnicodeCategory(ch);
+            bool junk = char.IsControl(ch) || cat is System.Globalization.UnicodeCategory.Format or System.Globalization.UnicodeCategory.PrivateUse
+                        or System.Globalization.UnicodeCategory.Surrogate or System.Globalization.UnicodeCategory.OtherNotAssigned;
+            char c = junk || char.IsWhiteSpace(ch) ? ' ' : ch;
+            if (c == ' ' && (sb.Length == 0 || sb[^1] == ' ')) continue;
+            sb.Append(c);
+        }
+        return sb.ToString().TrimEnd();
     }
 
     /// <summary>Frames the app's blocking dialog so the user sees what has to be answered first.</summary>
@@ -764,6 +799,9 @@ internal static partial class Engine
         var r = (RectangleF)d.frame;
         r.Inflate(6 * k, 6 * k);
         sc.Prims.Add((new Prim { Kind = PrimKind.Rect, Rect = r, Color = Palette.Warn, Width = 3.5f * k, Radius = 8 * k, Scale = k }, 1f));
+        avoid.Add(r);
+        // the mascot stands by the dialog and says this itself; a caption of its own only when there is no mascot
+        if (_tut is { Mascot: true } && Settings.Current.Mascot) return;
         var text = Settings.Current.Text.DialogMark;
         float px = 15 * k;
         var sz = Theme.Measure(text, Theme.Font(px), 360 * k);
@@ -774,7 +812,6 @@ internal static partial class Engine
         if (y < mon.Top + 4 * k) y = r.Bottom + 10 * k;
         var box = new RectangleF(x, y, w, h);
         sc.Prims.Add((new Prim { Kind = PrimKind.Label, Rect = box, Text = text, Size = px, Color = Palette.Warn, Scale = k, Radius = 8 * k }, 1f));
-        avoid.Add(r);
         avoid.Add(box);
     }
 
@@ -1430,10 +1467,52 @@ internal static partial class Engine
             card.Issue = TargetIssue(s);
             card.Review = s.Review && !s.Until.Any(c => c.SeenUnmet && c.Type != "manual");
             card.Controls = s.Controls ?? new HashSet<string> { "back", "undo", "skip", "done", "stop", "help" };
+            if (BlockingDialog(s) is string dialog) ShowDialogFirst(card, t, s, dialog);
+            NotePrep(t, card.Prep ? BlockingDialog(s) : null);
             var firstVisible = s.Targets.FirstOrDefault(m => m.Geo != null);
             if (firstVisible != null) card.Focus = firstVisible.Geo!.Center;
         }
         if (card.Focus == default && appGeo?.Bounds is RectangleF ab) card.Focus = new PointF(ab.X + ab.Width / 2, ab.Y + ab.Height / 2);
+    }
+
+    /// <summary>
+    /// The app waits on a dialog the step knows nothing about: the step's own text would describe a screen the user
+    /// cannot reach yet, so the card asks to deal with the dialog instead — "let's get ready" before the first step.
+    /// </summary>
+    private static void ShowDialogFirst(CardModel card, Tutorial t, Step s, string dialog)
+    {
+        var loc = Settings.Current.Text;
+        bool notStarted = t.Index == 0 && s.History.Count == 0 && !s.Targets.Any(m => m.Satisfied);
+        card.Prep = notStarted;
+        card.Title = notStarted ? loc.PrepareTitle : loc.DialogTitle;
+        card.Text = string.Format(loc.PrepareText, dialog);
+        card.Why = null;
+        card.Issue = null;
+        card.Hint = null;
+        card.HintTitle = null;
+        card.Checklist.Clear();
+        card.Extra = new();
+        card.Review = false;
+        // "done" or "skip" would move the tutorial on while the app is still stuck on the dialog
+        card.Controls = new HashSet<string> { "stop", "help" };
+    }
+
+    private static (Tutorial t, string dialog)? _prep;
+
+    /// <summary>Step 0 began (a dialog to answer before step 1) or ended: the agent hears about both.</summary>
+    private static void NotePrep(Tutorial t, string? dialog)
+    {
+        if (dialog != null && _prep is not { } p0)
+        {
+            _prep = (t, dialog);
+            Events.Emit("prepare_started", new() { ["dialog"] = dialog, ["note"] = "step 0: the app waits on this dialog; the card asks the user to answer or close it before step 1" });
+        }
+        else if (dialog == null && _prep is { } p && ReferenceEquals(p.t, t))
+        {
+            _prep = null;
+            Events.Emit("prepare_done", new() { ["dialog"] = p.dialog, ["note"] = "the dialog is gone: step 1 is shown" });
+        }
+        else if (_prep is { } q && !ReferenceEquals(q.t, t)) _prep = null;
     }
 
     // =========================================================== sequence
