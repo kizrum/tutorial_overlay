@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using System.Threading;
@@ -11,7 +12,9 @@ namespace TutorialOverlay;
 
 internal static class Program
 {
-    public const string Version = "0.2.0";
+    // the one place to change it is <Version> in TutorialOverlay.csproj
+    public static readonly string Version =
+        typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
     private static System.Windows.Forms.Control? _ui;
     private static MascotWindow? _mascot;
 
@@ -212,10 +215,13 @@ internal static class Program
                     return 1;
                 // politely stop the running server (its tray icon goes with it)
                 case "--stop": stop = true; break;
+                case "--version" or "-v":
+                    Console.WriteLine(Version);
+                    return 0;
                 // optional tab name: --settings look | keys
                 case "--settings": openSettings = i + 1 < args.Length && !args[i + 1].StartsWith("--") ? args[++i] : "server"; break;
                 case "--help" or "-h" or "/?":
-                    Console.Error.WriteLine("TutorialOverlay [--port 7788] [--key KEY] [--no-anim] [--show-inactive] [--verbose] [--settings [server|look|keys]] [--stop]\n" +
+                    Console.Error.WriteLine("TutorialOverlay [--port 7788] [--key KEY] [--no-anim] [--show-inactive] [--verbose] [--settings [server|look|keys]] [--stop] [--version]\n" +
                                             "  --settings: open the settings window right away (on that tab)\n" +
                                             "  one server per user (a second launch only reports where it runs) and one agent at a time\n" +
                                             "  --stop: ask the running server to quit, as its tray menu would\n" +
