@@ -842,6 +842,18 @@ internal static partial class Engine
     }
 
     /// <summary>Is the user currently working in this app? (foreground window belongs to it)</summary>
+    /// <summary>Windows' own UI the user passes through: Start menu, search, notification centre, quick settings.</summary>
+    private static readonly HashSet<string> ShellHosts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "StartMenuExperienceHost", "SearchHost", "SearchApp", "ShellExperienceHost", "ShellHost",
+    };
+
+    private static readonly HashSet<string> ShellSurfaces = new(StringComparer.OrdinalIgnoreCase) { "Shell_TrayWnd", "Shell_SecondaryTrayWnd" };
+
+    /// <summary>The taskbar: part of the desktop, always visible, never "the app in front".</summary>
+    private static bool OnShellSurface(AnchorSpec a, IntPtr root) =>
+        (a.WindowClass != null && ShellSurfaces.Contains(a.WindowClass)) || (root != IntPtr.Zero && ShellSurfaces.Contains(Native.ClassName(root)));
+
     private static bool AppActive(int[] pids, string? process, int fgPid)
     {
         if (fgPid == 0) return false;
@@ -859,6 +871,8 @@ internal static partial class Engine
         if (t.Defaults.Process != null) procs.Add(t.Defaults.Process);
         foreach (var m in s.Targets)
         {
+            // the taskbar is always on screen: a step pointing at it is "on" whatever app is in front
+            if (!m.Satisfied && OnShellSurface(m.Anchor, m.Geo?.A.Root ?? IntPtr.Zero)) return true;
             if (m.Anchor.Process != null) procs.Add(m.Anchor.Process);
             if (m.Opens != null)
             {
@@ -870,7 +884,11 @@ internal static partial class Engine
             foreach (var a in new[] { c.Anchor, c.Pixel?.Anchor, c.From?.Anchor, c.To?.Anchor })
                 if (a?.Process != null) procs.Add(a.Process);
         if (procs.Count == 0) return true;
-        return fgPid != 0 && procs.Contains(ProcName(fgPid));
+        if (fgPid == 0) return false;
+        var fg = ProcName(fgPid);
+        // the Start menu, search or the notification centre is in front: the user is on the way to (or back from)
+        // the program the step is about — launching it from Start is part of the tutorial, not leaving it
+        return procs.Contains(fg) || ShellHosts.Contains(fg);
     }
 
     /// <summary>Armed "opens" targets: satisfied by a NEW matching window, or a pane that was absent at click time.</summary>
@@ -990,7 +1008,7 @@ internal static partial class Engine
         if (!m.Anchor.IsScreen)
         {
             bool hideInactive = m.HideInactive ?? t?.HideWhenInactive ?? HideWhenInactiveDefault;
-            if (hideInactive && !AppActive(ag.Pids, m.Anchor.Process, fgPid)) { m.Geo = null; m.Visibility = "inactive"; return; }
+            if (hideInactive && !OnShellSurface(m.Anchor, ag.Root) && !AppActive(ag.Pids, m.Anchor.Process, fgPid)) { m.Geo = null; m.Visibility = "inactive"; return; }
         }
         var geo = Layout.Build(m, ag, m.Satisfied);
         m.ScrollHint = null;
@@ -1098,7 +1116,7 @@ internal static partial class Engine
             if (h.dir is not ("up" or "down" or "left" or "right" or "any")) continue;
             // like the marks: nothing over another app the user switched to
             if (!m.Anchor.IsScreen && (m.HideInactive ?? _tut?.HideWhenInactive ?? HideWhenInactiveDefault)
-                && !AppActive(m.Geo?.A.Pids ?? Array.Empty<int>(), m.Anchor.Process, fgPid)) continue;
+                && !OnShellSurface(m.Anchor, m.Geo?.A.Root ?? IntPtr.Zero) && !AppActive(m.Geo?.A.Pids ?? Array.Empty<int>(), m.Anchor.Process, fgPid)) continue;
             if (!shown.Add(h.dir + h.view)) continue;        // one hint per pane and direction
             float s = Native.ScaleAt(h.toward);
             var at = ScrollHintPoint(h.dir, h.view, h.toward, s);

@@ -45,8 +45,12 @@ internal static partial class Engine
 
         int problems = 0, warnings = 0;
         var outSteps = new JsonArray();
+        int? firstIndex = null;
+        int curIndex = 0;
         foreach (var (index, step, error, raw) in steps)
         {
+            firstIndex ??= index;
+            curIndex = index;
             var so = new JsonObject { ["index"] = index };
             if (step == null)
             {
@@ -101,6 +105,12 @@ internal static partial class Engine
         void Count(JsonObject r)
         {
             if (J.Bool(r, "ok") == true) return;
+            // a program a later step works in is usually started by an earlier one (Start menu, a link, "opens")
+            if (J.Str(r, "reason") == "process not running" && curIndex != firstIndex)
+            {
+                r["reason"] = "process not running yet — fine if an earlier step starts it";
+                r["severity"] = "warning";
+            }
             if (J.Str(r, "severity") == "error") problems++; else warnings++;
         }
 
@@ -176,7 +186,7 @@ internal static partial class Engine
         if (a.Path.Count > 0 && a.HasPoint && a.Find == null && !RectangleF.Inflate(bounds, 2, 2).Contains(ag.P))
             o["note"] = "the point lies outside its element — check the offset";
         if (!ShowsAnchorWindow(ag.P, ag)) return Bad("occluded: another window is on top of this point right now");
-        if (!AppActive(ag.Pids, a.Process, ForegroundPid())) o["note"] = "the app is not in front now: marks stay hidden until it is (hideWhenInactive)";
+        if (!OnShellSurface(a, ag.Root) && !AppActive(ag.Pids, a.Process, ForegroundPid())) o["note"] = "the app is not in front now: marks stay hidden until it is (hideWhenInactive)";
         o["ok"] = true;
         return o;
     }
