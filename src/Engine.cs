@@ -790,7 +790,7 @@ internal static partial class Engine
             var fr = Finder.Get(a.Key);
             if (fr == null) { reason = "searching"; return null; }
             PointF? seen = fr.Found ? fr.Rel : fr.LastRel;
-            if (seen is not PointF m) { reason = "template not visible"; return null; }
+            if (seen is not PointF m) { reason = a.Find.Text != null ? "text not visible" : "template not visible"; return null; }
             var hit = new PointF(frame.X + m.X, frame.Y + m.Y);
             float px = a.Find.Axis == "y" ? o.X : hit.X, py = a.Find.Axis == "x" ? o.Y : hit.Y;
             geo.P = new PointF(px + a.Dx, py + a.Dy);
@@ -1266,7 +1266,7 @@ internal static partial class Engine
             "scroll-down" => string.Format(t.ScrollIssue, t.ScrollDown.ToLowerInvariant()),
             "scroll-left" => string.Format(t.ScrollIssue, t.ScrollLeft.ToLowerInvariant()),
             "scroll-right" => string.Format(t.ScrollIssue, t.ScrollRight.ToLowerInvariant()),
-            "scroll-unknown" or "template not visible" => t.ScrollFind,
+            "scroll-unknown" or "template not visible" or "text not visible" => t.ScrollFind,
             "occluded" => t.IssueOccluded,
             "inactive" => t.IssueInactive,
             "offscreen" => t.IssueOffscreen,

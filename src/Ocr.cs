@@ -100,8 +100,12 @@ internal static unsafe class Ocr
         finally { WindowsDeleteString(h); }
     }
 
+    private static List<string>? _languages;
+
     /// <summary>Languages the OCR engine can read on this machine (BCP-47 tags).</summary>
-    public static List<string> Languages()
+    public static List<string> Languages() => _languages ??= LoadLanguages();
+
+    private static List<string> LoadLanguages()
     {
         var res = new List<string>();
         var stat = Factory("Windows.Media.Ocr.OcrEngine", IID_IOcrEngineStatics);
@@ -172,11 +176,97 @@ internal static unsafe class Ocr
         return items;
     }
 
+    // =========================================================== which recognizer
+
+    // A recognizer reads one script: the English one turns Russian into Latin junk, the Russian one turns
+    // "You" into "Уои". So the recognizer is chosen by the script of what we look for.
+    private static readonly string[] CyrillicLangs = { "ru", "uk", "be", "bg", "sr", "kk", "mk" };
+
+    private static bool IsCyrillicLang(string tag) => CyrillicLangs.Any(c => tag.StartsWith(c, StringComparison.OrdinalIgnoreCase));
+
+    private static (int cyr, int lat) Letters(string s)
+    {
+        int cyr = 0, lat = 0;
+        foreach (var ch in s)
+        {
+            if (ch is >= 'Ѐ' and <= 'ӿ') cyr++;
+            else if (ch is >= 'a' and <= 'z' or >= 'A' and <= 'Z') lat++;
+        }
+        return (cyr, lat);
+    }
+
+    private static double CyrillicShare(string s)
+    {
+        var (cyr, lat) = Letters(s);
+        return cyr + lat == 0 ? 0 : cyr / (double)(cyr + lat);
+    }
+
+    /// <summary>An installed recognizer for Cyrillic (true) or Latin (false) text, or null if there is none.</summary>
+    private static string? LangFor(bool cyrillic)
+    {
+        var langs = Languages();
+        return cyrillic ? langs.FirstOrDefault(IsCyrillicLang)
+                        : langs.FirstOrDefault(l => l.StartsWith("en", StringComparison.OrdinalIgnoreCase)) ?? langs.FirstOrDefault(l => !IsCyrillicLang(l));
+    }
+
+    /// <summary>The recognizer for a query: by its script (null = the user's profile languages, e.g. digits only).</summary>
+    public static string? AutoLang(string query)
+    {
+        var (cyr, lat) = Letters(query);
+        if (cyr == 0 && lat == 0) return null;
+        return LangFor(cyr >= lat);
+    }
+
     /// <summary>
-    /// Reads the text in <paramref name="img"/>. Small UI text is read better enlarged, so the image is scaled
-    /// up to 2× (within the engine's size limit); rectangles come back in <paramref name="img"/>'s pixels.
+    /// Reads the text in <paramref name="img"/>. lang given → that recognizer; else chosen by the script of
+    /// <paramref name="query"/>; with neither (read everything) both a Latin and a Cyrillic recognizer run, if
+    /// installed, and each line keeps the reading that fits it.
     /// </summary>
-    public static List<OcrLine> Read(Bitmap img, string? lang = null)
+    public static List<OcrLine> Read(Bitmap img, string? lang = null, string? query = null)
+    {
+        if (lang != null) return ReadWith(img, lang);
+        if (!string.IsNullOrWhiteSpace(query)) return ReadWith(img, AutoLang(query));
+        string? latin = LangFor(false), cyrillic = LangFor(true);
+        if (latin == null || cyrillic == null) return ReadWith(img, null);
+        return Merge(ReadWith(img, latin), ReadWith(img, cyrillic));
+    }
+
+    /// <summary>Latin reading by default; where the Cyrillic recognizer saw mostly Cyrillic letters, its reading wins.</summary>
+    private static List<OcrLine> Merge(List<OcrLine> latin, List<OcrLine> cyrillic)
+    {
+        var res = new List<OcrLine>(latin);
+        foreach (var c in cyrillic)
+        {
+            if (CyrillicShare(c.Text) < 0.6) continue;
+            var cb = c.Bounds;
+            res.RemoveAll(l => Overlap(l.Bounds, cb) > 0.3);
+            res.Add(c);
+        }
+        return res.OrderBy(l => Math.Round(l.Bounds.Y / 8)).ThenBy(l => l.Bounds.X).ToList();
+    }
+
+    /// <summary>Intersection over the smaller rectangle.</summary>
+    private static double Overlap(RectangleF a, RectangleF b)
+    {
+        var i = RectangleF.Intersect(a, b);
+        if (i.IsEmpty) return 0;
+        double small = Math.Min(a.Width * a.Height, b.Width * b.Height);
+        return small <= 0 ? 0 : i.Width * i.Height / small;
+    }
+
+    /// <summary>
+    /// One recognizer run. Small UI text is read better enlarged, so the image is scaled up to 2× (within the
+    /// engine's size limit); rectangles come back in <paramref name="img"/>'s pixels.
+    /// The engine fails with E_ABORT when two recognitions overlap, so runs are queued.
+    /// </summary>
+    private static List<OcrLine> ReadWith(Bitmap img, string? lang)
+    {
+        lock (RecognizeGate) return ReadUnlocked(img, lang);
+    }
+
+    private static readonly object RecognizeGate = new();
+
+    private static List<OcrLine> ReadUnlocked(Bitmap img, string? lang)
     {
         var engine = Engine(lang);
         const int maxDim = 2600;    // conservative; OcrEngine.MaxImageDimension is 10000 on current Windows
@@ -339,16 +429,19 @@ internal static unsafe class Ocr
                 }
                 continue;
             }
-            if (tol == 0 || text.Length < q.Length - tol) continue;
-            // near match: the best window of the line
-            int best = int.MaxValue, bestAt = -1, bestLen = 0;
-            for (int len = Math.Max(1, q.Length - tol); len <= q.Length + tol; len++)
-                for (int s = 0; s + len <= text.Length; s++)
-                {
-                    int d = Distance(text.Substring(s, len), q);
-                    if (d < best) { best = d; bestAt = s; bestLen = len; }
-                }
-            if (bestAt >= 0 && best <= tol) res.Add(new TextMatch(Original(bestAt, bestLen), Span(bestAt, bestLen), best / (float)q.Length));
+            if (tol == 0 || text.Length < q.Length) continue;
+            // near match: an OCR slip swaps a letter for a look-alike (l/I, 0/O) — same length, whole words only.
+            // Letting letters go missing turned "Sampler" into the "sample" inside "Resample".
+            int best = int.MaxValue, bestAt = -1;
+            for (int s = 0; s + q.Length <= text.Length; s++)
+            {
+                int e = s + q.Length;
+                if ((s > 0 && text[s - 1] != ' ') || (e < text.Length && text[e] != ' ')) continue;
+                int d = 0;
+                for (int k = 0; k < q.Length && d <= tol; k++) if (text[s + k] != q[k]) d++;
+                if (d < best) { best = d; bestAt = s; }
+            }
+            if (bestAt >= 0 && best <= tol) res.Add(new TextMatch(Original(bestAt, q.Length), Span(bestAt, q.Length), best / (float)q.Length));
         }
         return res.OrderBy(m => m.Score).ToList();
     }

@@ -51,6 +51,8 @@ internal static class Program
             MessageBox.Show(string.Format(t.RestartBusy, next, Ports.Owner(next) ?? "?", Port), "TutorialOverlay", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
+        // one server per user: let go of the instance lock first, or the new process would find "us" still running
+        ReleaseInstance();
         var psi = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
         for (int i = 0; i < _args.Length; i++)
         {
@@ -60,6 +62,71 @@ internal static class Program
         }
         Process.Start(psi);
         Application.Exit();
+    }
+
+    // ---- one running server per user (per --instance name, for side-by-side development builds)
+
+    private static Mutex? _single;
+    private static string _instance = "";
+
+    private static string InstanceFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TutorialOverlay",
+        _instance.Length == 0 ? "server.json" : $"server.{_instance}.json");
+
+    private static bool ClaimInstance()
+    {
+        _single = new Mutex(true, "TutorialOverlay.Server" + (_instance.Length == 0 ? "" : "." + _instance), out bool first);
+        if (first) return true;
+        _single.Dispose();
+        _single = null;
+        return false;
+    }
+
+    private static void ReleaseInstance()
+    {
+        if (_single == null) return;
+        try { _single.ReleaseMutex(); } catch (ApplicationException) { }
+        _single.Dispose();
+        _single = null;
+    }
+
+    /// <summary>Where the running server is: for a second launch, scripts and agents (port, pid).</summary>
+    private static void WriteInstanceFile()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(InstanceFile)!);
+            File.WriteAllText(InstanceFile, new JsonObject
+            {
+                ["port"] = Port, ["pid"] = Environment.ProcessId, ["version"] = Version,
+                ["url"] = $"http://127.0.0.1:{Port}/mcp", ["startedAt"] = StartedAt.ToString("s"),
+            }.ToJsonString(J.Pretty));
+        }
+        catch (Exception e) { Log.Warn("server.json not written: " + e.Message); }
+    }
+
+    private static void DeleteInstanceFile()
+    {
+        try
+        {
+            // only our own: after a restart the new instance has already written its file
+            if (File.Exists(InstanceFile) && J.Int(JsonNode.Parse(File.ReadAllText(InstanceFile)), "pid") == Environment.ProcessId) File.Delete(InstanceFile);
+        }
+        catch (Exception e) { Log.Debug("server.json not removed: " + e.Message); }
+    }
+
+    /// <summary>A second launch: say where the running one is (event for agents, a message for people) and quit.</summary>
+    private static int AlreadyRunning()
+    {
+        JsonNode? info = null;
+        try { if (File.Exists(InstanceFile)) info = JsonNode.Parse(File.ReadAllText(InstanceFile)); } catch { }
+        int? port = J.Int(info, "port"), pid = J.Int(info, "pid");
+        Log.Warn($"TutorialOverlay is already running (port {port?.ToString() ?? "?"}, PID {pid?.ToString() ?? "?"}); not starting a second one");
+        Events.Emit("already_running", new JsonObject { ["port"] = port, ["pid"] = pid, ["url"] = J.Str(info, "url") });
+        // started by hand (no one reads stdout): tell the person
+        if (!Console.IsOutputRedirected)
+            MessageBox.Show(string.Format(Settings.Global.Text.AlreadyRunning, port?.ToString() ?? "?", pid?.ToString() ?? "?"),
+                            "TutorialOverlay", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        return 2;
     }
 
     /// <summary>Switches capture exclusion of all our windows (screenshot() with/without the overlay).</summary>
@@ -101,11 +168,13 @@ internal static class Program
                 case "--show-inactive": Engine.HideWhenInactiveDefault = false; break;
                 case "--hide-from-capture": Settings.Global.HideFromCapture = true; break;
                 case "--verbose": Log.Verbose = true; break;
+                case "--instance" when i + 1 < args.Length: _instance = Tutorials.Slug(args[++i]); break;
                 // optional tab name: --settings look | keys
                 case "--settings": openSettings = i + 1 < args.Length && !args[i + 1].StartsWith("--") ? args[++i] : "server"; break;
                 case "--help" or "-h" or "/?":
-                    Console.Error.WriteLine("TutorialOverlay [--port 7788] [--key KEY] [--no-anim] [--show-inactive] [--verbose] [--settings [server|look|keys]]\n" +
+                    Console.Error.WriteLine("TutorialOverlay [--port 7788] [--key KEY] [--no-anim] [--show-inactive] [--verbose] [--settings [server|look|keys]] [--instance NAME]\n" +
                                             "  --settings: open the settings window right away (on that tab)\n" +
+                                            "  one server per user; --instance NAME runs a separate one beside it (development)\n" +
                                             "  key: --key, env TUTORIAL_OVERLAY_KEY, or %LOCALAPPDATA%\\TutorialOverlay\\key.txt (created on first run)\n" +
                                             "  stdout: one JSON event per line; stderr: diagnostics");
                     return 0;
@@ -116,8 +185,7 @@ internal static class Program
         Key = key;
         KeyFrom = KeySource(args);
 
-        using var single = new Mutex(true, $"TutorialOverlay.{port}", out bool first);
-        if (!first) { Log.Warn($"another TutorialOverlay is already serving port {port}"); return 2; }
+        if (!ClaimInstance()) return AlreadyRunning();
 
         var overlay = new OverlayWindow();
         var card = new CardWindow();
@@ -144,6 +212,7 @@ internal static class Program
         catch (Exception e)
         {
             Log.Warn($"cannot listen on 127.0.0.1:{port}: {e.Message}");
+            ReleaseInstance();
             return 3;
         }
         server.Stopping += () => { try { overlay.BeginInvoke(Application.Exit); } catch { } };
@@ -153,6 +222,7 @@ internal static class Program
         using var tray = new TrayIcon();
         if (openSettings != null) SettingsWindow.Open(openSettings);
         Events.Emit("ready", new JsonObject { ["port"] = port, ["version"] = Version, ["pid"] = Environment.ProcessId });
+        WriteInstanceFile();
 
         var timer = new System.Windows.Forms.Timer { Interval = 30 };
         timer.Tick += (_, _) =>
@@ -175,6 +245,8 @@ internal static class Program
         Resolver.Stop();
         Finder.Stop();
         try { server.StopAsync().Wait(2000); } catch { }
+        DeleteInstanceFile();
+        ReleaseInstance();
         Events.Emit("exit");
         return 0;
     }

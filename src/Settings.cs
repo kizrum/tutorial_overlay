@@ -125,6 +125,7 @@ internal sealed class Loc
         TrayTutorial = "Туториал «{0}» · шаг {1} из {2}", TrayNoTutorial = "Туториал не запущен",
         TraySettings = "Настройки…", TrayCopyKey = "Скопировать ключ", TrayCopyUrl = "Скопировать адрес MCP",
         TrayCopyCommand = "Скопировать команду для агента",
+        AlreadyRunning = "TutorialOverlay уже запущен: 127.0.0.1:{0} (PID {1}).\n\nЕго значок — в области уведомлений, второй сервер не нужен.",
         TrayOpenFolder = "Открыть папку настроек", TrayStopTutorial = "Остановить туториал", TrayExit = "Закрыть TutorialOverlay",
         TrayExitConfirm = "Сейчас идёт туториал. Всё равно закрыть TutorialOverlay?", Sec = "с", Min = "мин", Hour = "ч";
 
@@ -180,6 +181,7 @@ internal sealed class Loc
         TrayTutorial = "Tutorial \"{0}\" · step {1} of {2}", TrayNoTutorial = "No tutorial running",
         TraySettings = "Settings…", TrayCopyKey = "Copy key", TrayCopyUrl = "Copy MCP address",
         TrayCopyCommand = "Copy the command for the agent",
+        AlreadyRunning = "TutorialOverlay is already running: 127.0.0.1:{0} (PID {1}).\n\nIts icon is in the notification area; a second server is not needed.",
         TrayOpenFolder = "Open settings folder", TrayStopTutorial = "Stop tutorial", TrayExit = "Quit TutorialOverlay",
         TrayExitConfirm = "A tutorial is running. Quit TutorialOverlay anyway?", Sec = "s", Min = "min", Hour = "h",
         SetTitle = "TutorialOverlay settings", SetTabServer = "Server", SetTabLook = "Look", SetTabKeys = "Hotkeys",

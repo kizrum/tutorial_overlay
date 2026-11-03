@@ -31,112 +31,97 @@ internal static class Tools
 
     private static JsonObject T(string type, string desc) => new() { ["type"] = type, ["description"] = desc };
 
+    // The full anchor and shape formats live in draw's parameters only; other tools point there.
+    // Tool definitions sit in the agent's context for the whole session — every word here costs tokens.
     private const string AnchorDesc =
-        "Anchor: {process:'FL64'|'notepad', window:'title substring', title:'top-level title OR UIA Window/Pane name (substring)', " +
-        "element:{name,role,automationId,className,match:'contains'|'exact',pick:'largest'|'first'|'smallest',index} or an array of those (nested path), " +
+        "{process:'FL64', window:'title substr', title:'window OR UIA pane name substr', " +
+        "element:{name,role,automationId,className,match:'contains'|'exact',pick:'largest'|'first'|'smallest',index} or array (nested path), " +
         "origin:'topleft'|'center'|'topright'|'bottomleft'|'bottomright'|'top'|'bottom'|'left'|'right', offset:[dx,dy], relativeTo:'frame'|'client', hwnd, screen:true, " +
-        "find:{template, within, axis} (visual anchor from the template tool: offset is measured from the match's top-left, so marks follow scrolling; " +
-        "or find:{text:'Piano roll', match:'contains'|'exact'|'regex', index, lang, within} — found by OCR, offset measured from the text's centre, " +
-        "for apps that draw their own UI and expose nothing to UIA; check the wording first with find_text; " +
-        "targets that scroll out of the pane get an edge arrow 'scroll up/down/left/right')}. " +
-        "Omit for screen-absolute coordinates (offset = absolute point). Shapes are positioned relative to origin+offset.";
+        "find:{text, match:'contains'|'exact'|'regex', index, lang, within:[x,y,w,h]} (OCR: point = text centre; for self-drawn UIs, check wording with find_text) " +
+        "or find:{template, within, axis:'xy'|'x'|'y'} (point = match top-left). Marks follow found text/templates when content scrolls. " +
+        "No anchor = absolute screen point (offset).";
+
+    private const string SameAnchor = "anchor, same format as draw.anchor";
 
     private const string ShapesDesc =
-        "Shapes (all coords relative to the anchor point, physical px): " +
-        "circle{x,y,r} (no x/y → ring around the anchor element), rect{x,y,w,h,pad,radius} (no w/h → frame around the element), " +
-        "arrow{from:[x,y]|'nw'|'n'|..., to:[x,y], length} (auto-aims at the target), badge{text|n} (step number), " +
-        "label{text} (caption, auto-placed without overlapping), info{title,text} (info box with icon), " +
-        "check{} (green tick), checkbox{x,y,w,h} (shows ✓ once the target is done — good for toggle cells), " +
-        "button{text,id,action:'done'|'next'|'back'|'skip'|'stop'|'undo'|'dismiss',style:'primary'|'secondary'|'success'|'danger'} " +
-        "(a REAL clickable button window; emits a 'button' event), dim{opacity} (darken screen except targets). " +
-        "Common: color ('#RRGGBB' or accent/red/orange/yellow/green/teal/blue/purple/white), thickness, size (font px @100%), target:false.";
+        "coords rel. to anchor point, physical px: circle{x,y,r} (no x/y: ring around element), rect{x,y,w,h,pad,radius} (no w/h: frame element), " +
+        "arrow{from:[x,y]|'nw'|'n'…, to, length}, badge{text}, label{text} (auto-placed), info{title,text}, check{}, " +
+        "checkbox{x,y,w,h} (✓ when target done), button{text,id,action:'done'|'next'|'back'|'skip'|'stop'|'undo'|'dismiss',style} (real clickable window → 'button' event), " +
+        "dim{opacity}. Common: color ('#RRGGBB'|accent|red|orange|yellow|green|teal|blue|purple|white), thickness, size, target:false.";
 
     public static JsonArray List() => new()
     {
-        Tool("draw", "Draw marks over any window (outside of a tutorial). Each mark = shapes sharing one anchor; clicking its hit area dismisses it (and still reaches the app). Returns mark ids. " + ShapesDesc,
+        Tool("draw", "Draw marks over any window outside a tutorial; a mark = shapes on one anchor. Clicking it dismisses it (click still reaches the app). Returns ids.",
             Obj(("shapes", T("array", ShapesDesc)), ("anchor", T("object", AnchorDesc)), ("dismissOnClick", T("boolean", "default true")),
-                ("id", T("string", "mark id (re-using an id replaces the mark)")), ("toggle", T("boolean", "click on a dismissed mark re-lights it")),
-                ("check", T("object", "pixel check {at:[x,y], expr:'r>140', radius} — mark counts as done while it holds")),
-                ("button", T("string", "left|right|middle|any (default left)")), ("hideWhenInactive", T("boolean", "hide while the app is not in the foreground (default true)")),
-                ("marks", T("array", "several marks at once: [{id, anchor, shapes, ...}]")), ("replace", T("boolean", "remove all other free marks")))),
-        Tool("clear", "Remove free marks drawn with draw (all, or one id). Does not touch the tutorial.",
-            Obj(("id", T("string", "mark id; omit for all")))),
-        Tool("start_tutorial", "Start a step-by-step tutorial. Only the current step's targets are shown; steps advance by themselves. " +
-            "spec = {title, app:'process name' (default for every anchor), window, dim:0..1, toggle, keepOpen (wait for append_steps after the last step), advanceDelayMs, hideWhenInactive, startAt, " +
-            "outro (default true: after the last step the card offers Save / Go through again / Keep learning), " +
-            "or {name:'saved-name', startAt} to replay a tutorial from the library (save_tutorial / list_tutorials), " +
-            "lang:'ru'|'en', accent:'#RRGGBB', hotkeys:{done,back,skip,undo,stop:'Ctrl+Alt+Right'|'none'}, " +
-            "steps:[{id, title, text, why (short 'why it works this way' shown on the card — TEACH the idea, not just the click; use it on every step where there is something to understand), anchor (default for targets), targets:[{id, name (checklist label; with grid may use {row} {col} {n}), anchor, shapes, toggle, check, button, optional, doneStyle:'hide'|'check', hint, number, arrow, " +
-            "opens:{title|window|process|element, anyProcess, timeoutMs} (the click counts only when this NEW window/pane appears — inside the app or in another program; otherwise event no_effect), grid:{from:[x,y] centre of first cell rel. to anchor point, step:[dx,dy], rows, cols, cells:[[row,col],...] or [col,...] (1-based), w, h} → one target per cell (default shape: checkbox)}], " +
-            "until:[ 'all_clicked' | {type:'appear'|'disappear', title|window|element|anchor} | {type:'pixel', anchor, at, expr} | {type:'count', count} " +
-            "| {type:'key', keys:'Ctrl+S' or ['F6','Ctrl+F6']} (only while the app is in front; other keys are never recorded) " +
-            "| {type:'drag', from:{anchor|element|title, rect:[x,y,w,h] rel. to anchor point, radius}, to:{...}, button, show} (drawn as source → drop zone arrow) " +
-            "| {type:'uia', anchor|element|title, property:'exists'|'name'|'value'|'toggle'|'selected'|'expanded'|'enabled'|'focused'|'text', equals|contains|matches, not} ], untilMode:'any'|'all', " +
-            "dim, numbered, checklist, sequence (targets one at a time in order, e.g. right-click → item of the popup menu anchored by {windowClass:'TQuickPopupMenuWindow'}; if that menu closes the chain restarts: event sequence_reset), buttons:[{id,text,action,style}] (extra card buttons), controls:['back','undo','skip','done','stop']}]}. " +
-            "Without 'until', a step with targets completes when all targets are clicked; without targets it waits for Done / complete_step. " +
-            "'disappear' only fires after the thing was first seen present. Clicks are matched by the PROCESS of the window under the cursor.",
-            Obj(("spec", T("object", "tutorial spec (fields may also be passed at top level)")))),
-        Tool("append_steps", "Append steps to the running tutorial (resumes it if it was waiting after the last step).",
-            Obj(("steps", T("array", "steps, same format as in start_tutorial")), ("insertAt", T("integer", "optional index to insert at (after the current step)")))),
-        Tool("goto_step", "Jump to a step (targets shown again, conditions reset).",
-            Obj(("index", T("integer", "0-based")), ("id", T("string", "step id")), ("relative", T("string", "'next' or 'back'")))),
-        Tool("complete_step", "Mark the current step done (as if the user pressed Done) and advance.",
-            Obj(("expectIndex", T("integer", "only if the current step is this one (avoids races)")), ("immediate", T("boolean", "skip the short ✓ pause")))),
+                ("id", T("string", "same id replaces")), ("toggle", T("boolean", "click re-lights a dismissed mark")),
+                ("check", T("object", "{at:[x,y], expr:'r>140', radius}: done while the pixel test holds")),
+                ("button", T("string", "left|right|middle|any")), ("hideWhenInactive", T("boolean", "default true")),
+                ("marks", T("array", "several: [{id, anchor, shapes, …}]")), ("replace", T("boolean", "remove other free marks")))),
+        Tool("clear", "Remove free marks (all, or one id).", Obj(("id", T("string", "omit for all")))),
+        Tool("start_tutorial", "Start a tutorial; only the current step's targets show, steps advance by themselves. " +
+            "spec={title, app (default process for anchors), window, dim, toggle, keepOpen (wait for append_steps after last step), advanceDelayMs, hideWhenInactive, startAt, " +
+            "outro (default true: end card offers Save/Repeat/Keep learning), lang:'ru'|'en', accent, hotkeys:{done,back,skip,undo,stop:'Ctrl+Alt+Right'|'none'}, " +
+            "steps:[{id, title, text, why (shown on the card: teach the idea, not just the click), anchor, " +
+            "targets:[{id, name, anchor, shapes, toggle, check, button, optional, doneStyle:'hide'|'check', hint, number, arrow, " +
+            "opens:{title|window|process|element, timeoutMs} (counts only if this NEW window appears, else event no_effect), " +
+            "grid:{from:[x,y] first cell centre, step:[dx,dy], rows, cols, cells:[[r,c]…]|[c…], w, h} (target per cell; name may use {row} {col} {n})}], " +
+            "until:['all_clicked' | {type:'appear'|'disappear', title|window|element|anchor} | {type:'pixel', anchor, at, expr} | {type:'count', count} | " +
+            "{type:'key', keys:'Ctrl+S'|[…]} | {type:'drag', from:{anchor|element|title, rect, radius}, to, button} | " +
+            "{type:'uia', anchor|element|title, property:'exists'|'name'|'value'|'toggle'|'selected'|'expanded'|'enabled'|'focused'|'text', equals|contains|matches, not}], " +
+            "untilMode:'any'|'all', numbered, checklist, sequence (targets one by one, e.g. right-click → popup item; chain restarts if the popup closes), " +
+            "buttons:[{id,text,action,style}], controls:['back','undo','skip','done','stop']}]} " +
+            "or {name, startAt} to replay a saved one. No 'until': done when all targets clicked; no targets: waits for Done. " +
+            "'disappear' needs the thing seen first. Clicks match by the PROCESS under the cursor. Anchors: see draw.anchor.",
+            Obj(("spec", T("object", "tutorial spec (fields may be top level)")))),
+        Tool("append_steps", "Add steps to the running tutorial (resumes one waiting after its last step).",
+            Obj(("steps", T("array", "as in start_tutorial")), ("insertAt", T("integer", "index after the current step")))),
+        Tool("goto_step", "Jump to a step (conditions reset).",
+            Obj(("index", T("integer", "0-based")), ("id", T("string", "step id")), ("relative", T("string", "'next'|'back'")))),
+        Tool("complete_step", "Complete the current step as if Done was pressed.",
+            Obj(("expectIndex", T("integer", "only if still this step")), ("immediate", T("boolean", "skip the ✓ pause")))),
         Tool("stop_tutorial", "Stop the tutorial and hide its card.", new JsonObject()),
-        Tool("status", "Current tutorial state, step targets with resolved screen rectangles and visibility reasons (visible/occluded/minimized/inactive/...), free marks, foreground window.", new JsonObject()),
-        Tool("describe", "List windows and the UI Automation tree of an app with physical rectangles (and rel = offset from the window frame). Without app: lists top-level windows of all apps.",
-            Obj(("app", T("string", "process name, e.g. FL64, notepad, chrome")), ("window", T("string", "title substring")),
-                ("element", T("object", "only the subtree of this element (same format as anchor.element)")), ("depth", T("integer", "default 8")),
-                ("maxNodes", T("integer", "default 600")), ("namedOnly", T("boolean", "skip nodes without name/automationId")))),
-        Tool("screenshot", "Screenshot of an anchor's rectangle (window / element) or a screen area, WITHOUT the overlay's own drawings. Returns the mapping from image pixels to screen and to the anchor.",
-            Obj(("anchor", T("object", AnchorDesc)), ("rect", T("array", "[x,y,w,h] absolute screen rect instead of an anchor")),
-                ("pad", T("integer", "extra pixels around the anchor rect")), ("maxEdge", T("integer", "downscale so the long edge is ≤ this (default 1568, 0 = full size)")),
-                ("includeOverlay", T("boolean", "also capture the overlay's drawings and the card (to verify placement; implies source=screen)")),
-                ("source", T("string", "'window' (default with an anchor: the app's own pixels even when other windows cover it) or 'screen'")))),
-        Tool("template", "Remember a small piece of an app's UI as a visual anchor (e.g. the 'C5' label on a piano roll keyboard, a bar number on a ruler). " +
-            "Then any anchor can use find:{template:id, within:[x,y,w,h], axis:'y'|'x'|'xy'} to measure its offset from wherever that piece currently is — " +
-            "marks follow scrolling content. Captured from the window's own pixels (works while covered). Returns the captured image.",
-            Obj(("id", T("string", "name of the template")), ("anchor", T("object", AnchorDesc)),
-                ("rect", T("array", "[x,y,w,h] relative to the anchor element's top-left (keep it small and distinctive, ~20-60 px)")))),
-        Tool("hint", "Show your answer inside the step card (after a 'help' event, or proactively). Cleared when the step changes. highlight:true also dims the screen and pings the targets.",
-            Obj(("text", T("string", "hint text")), ("title", T("string", "optional heading")), ("highlight", T("boolean", "spotlight the targets")),
-                ("seconds", T("integer", "highlight duration (default 6)")), ("expectIndex", T("integer", "only if this is still the current step")))),
-        Tool("pick", "Calibration: asks the user to click 1..count points and returns, for each, absolute coords, rel (offset from the anchor point), relToBounds, " +
-            "the window, pixel colour, the UIA element under the point with ancestors, and a suggestedAnchor. The click is swallowed (does not reach the app) unless passThrough. " +
-            "With count ≥ 2 on consecutive cells it also returns gridHint {from, step}. Esc cancels.",
-            Obj(("anchor", T("object", "anchor to measure rel offsets against")), ("count", T("integer", "number of points (default 1)")),
-                ("prompt", T("string", "text shown next to the cursor")), ("passThrough", T("boolean", "let the click reach the app (default false)")),
-                ("timeoutMs", T("integer", "default 60000")))),
-        Tool("find_text", "Read text on screen with the OCR built into Windows (works on apps that draw their own UI, e.g. FL Studio). " +
-            "With text: where it is — screen rect, centre, rel (centre − anchor point) and a suggestedAnchor with find:{text} that keeps following it. " +
-            "Without text: every recognised line with its rect (to see what is there and how the OCR spells it). Overlay drawings are excluded.",
-            Obj(("text", T("string", "text to look for (case-insensitive; small OCR slips tolerated)")), ("anchor", T("object", AnchorDesc)),
-                ("rect", T("array", "[x,y,w,h] absolute screen rect instead of an anchor")),
-                ("within", T("array", "[x,y,w,h] part of the anchor element (relative to its top-left)")),
-                ("match", T("string", "contains (default) | exact (whole line) | regex")),
-                ("lang", T("string", "OCR language tag, e.g. 'en-US', 'ru' (default: the user's languages)")))),
-        Tool("validate", "Check a tutorial before starting it (or the running one): resolves every target and condition anchor NOW and reports per step " +
-            "ok / reason (process not running, not found, minimized, occluded, off screen, template not captured, text not visible). " +
-            "Later steps often target things earlier steps open — those warnings are expected.",
-            Obj(("spec", T("object", "same as start_tutorial's spec; omit to check the running tutorial")))),
-        Tool("ask", "Ask the user a question in a panel above the step card (or in the screen corner, with no tutorial) and WAIT for the answer. " +
-            "options → answer buttons ({choice, label}); input:true → a text field ({text}). Returns {cancelled} if closed, {timedOut} after timeoutMs.",
-            Obj(("question", T("string", "the question")), ("title", T("string", "small heading (default: 'The assistant asks')")),
-                ("options", T("array", "buttons: ['Yes','No'] or [{id, text, style:'primary'|'secondary'}]")),
-                ("input", T("boolean", "add a text field (default: true when there are no options)")), ("placeholder", T("string", "text field hint")),
-                ("timeoutMs", T("integer", "default 300000")))),
-        Tool("ask_area", "Ask the user to circle something on screen (frozen screenshot + pencil) and WAIT. Returns bounds/strokes in screen px, " +
-            "the UIA element at the centre with a suggestedAnchor and rel to the current step's first target, plus the image of the area with the circling.",
-            Obj(("prompt", T("string", "what to circle, e.g. 'Circle the channel you want to edit'")), ("timeoutMs", T("integer", "default 180000")))),
-        Tool("save_tutorial", "Save a tutorial to the user's library (%LOCALAPPDATA%\\TutorialOverlay\\tutorials): the current/last one (with appended steps) or the given spec. " +
-            "Saved tutorials can be replayed from the tray menu without an agent, or with start_tutorial({name}). " +
-            "At the end of every tutorial the card itself offers Save / Go through again / Keep learning (events: outro, tutorial_saved, continue_requested).",
-            Obj(("name", T("string", "file name (default: from the title)")), ("spec", T("object", "spec to save instead of the current tutorial")))),
-        Tool("list_tutorials", "Saved tutorials: name, title, app, number of steps, when saved.", new JsonObject()),
-        Tool("delete_tutorial", "Remove a saved tutorial from the library.", Obj(("name", T("string", "its name from list_tutorials")))),
-        Tool("events", "Events since a sequence number (hit, miss, unhit, undo, step_started, step_completed, step_back, step_skipped, tutorial_*, window_opened/closed, anchor_found/lost, check_changed, uia_changed, key_matched, drag, opened, no_effect, blocked (target clicked while a modal dialog of the app was open), button, pick, help (user pressed '?': reason cant_find|dont_understand|other — other carries the user's own text and, if they circled something with the pencil, sketch {bounds, strokes, atCenter, image: PNG path} — with target visibility and recent misses; answer with hint()), hook_reinstalled). With timeoutMs it long-polls until something happens.",
-            Obj(("since", T("integer", "last seq you have seen (default 0)")), ("timeoutMs", T("integer", "wait up to this long for new events (max 60000)")))),
+        Tool("status", "Tutorial state, step targets with screen rects and visibility (visible/occluded/minimized/inactive/dismissed…), free marks, foreground window.", new JsonObject()),
+        Tool("describe", "Windows and UI Automation tree of an app (physical rects; rel = offset from window frame). No app: all top-level windows.",
+            Obj(("app", T("string", "process name")), ("window", T("string", "title substr")), ("element", T("object", "subtree root, as anchor.element")),
+                ("depth", T("integer", "default 8")), ("maxNodes", T("integer", "default 600")), ("namedOnly", T("boolean", "skip unnamed nodes")))),
+        Tool("screenshot", "Image of an anchor's rect or a screen area, without the overlay's drawings, plus image→screen mapping. " +
+            "Prefer an element anchor over the whole window: image tokens grow with size.",
+            Obj(("anchor", T("object", SameAnchor)), ("rect", T("array", "[x,y,w,h] screen rect")), ("pad", T("integer", "px around the anchor rect")),
+                ("maxEdge", T("integer", $"long edge ≤ this (default {DefaultMaxEdge}; 0 = full size, for tiny details)")),
+                ("includeOverlay", T("boolean", "with drawings and card, to verify placement")),
+                ("source", T("string", "'window' (default with anchor: own pixels even if covered) | 'screen'")))),
+        Tool("template", "Remember a small UI piece (~20-60 px, distinctive) as a visual anchor for find:{template}. Captured from the window's own pixels. Returns the image.",
+            Obj(("id", T("string", "template name")), ("anchor", T("object", SameAnchor)), ("rect", T("array", "[x,y,w,h] rel. to the element's top-left")))),
+        Tool("hint", "Your answer in the step card (after a 'help' event, or proactively); cleared on step change.",
+            Obj(("text", T("string", "hint")), ("title", T("string", "heading")), ("highlight", T("boolean", "dim screen and ping targets")),
+                ("seconds", T("integer", "highlight time, default 6")), ("expectIndex", T("integer", "only if still this step")))),
+        Tool("pick", "User clicks 1..count points; returns coords, rel to the anchor point, colour, UIA element, suggestedAnchor (count≥2 on neighbour cells: gridHint). Click is swallowed unless passThrough; Esc cancels.",
+            Obj(("anchor", T("object", SameAnchor)), ("count", T("integer", "default 1")), ("prompt", T("string", "text by the cursor")),
+                ("passThrough", T("boolean", "let the click reach the app")), ("timeoutMs", T("integer", "default 60000")))),
+        Tool("find_text", "OCR (built into Windows) for self-drawn UIs. With text: matches (rect, centre, rel) and one suggestedAnchor with find:{text}. Without text: all recognised lines.",
+            Obj(("text", T("string", "case-insensitive, small OCR slips tolerated")), ("anchor", T("object", SameAnchor)), ("rect", T("array", "[x,y,w,h] screen rect")),
+                ("within", T("array", "[x,y,w,h] part of the element")), ("match", T("string", "contains|exact|regex")), ("lang", T("string", "e.g. 'en-US', 'ru'")),
+                ("max", T("integer", $"most matches returned (default {DefaultMaxMatches})")))),
+        Tool("validate", "Resolve every anchor of a spec (or the running tutorial) now; per step: ok or why not. Later steps often wait for windows earlier steps open.",
+            Obj(("spec", T("object", "as start_tutorial; omit for the running one")))),
+        Tool("ask", "Ask the user (panel above the card) and WAIT: options → {choice,label}; input → {text}; else {cancelled}|{timedOut}.",
+            Obj(("question", T("string", "")), ("title", T("string", "heading")), ("options", T("array", "['Yes','No'] or [{id,text,style}]")),
+                ("input", T("boolean", "text field (default when no options)")), ("placeholder", T("string", "")), ("timeoutMs", T("integer", "default 300000")))),
+        Tool("ask_area", "User circles an area with a pencil; WAIT. Returns bounds, strokes, UIA element at the centre with suggestedAnchor, and the image.",
+            Obj(("prompt", T("string", "what to circle")), ("timeoutMs", T("integer", "default 180000")))),
+        Tool("save_tutorial", "Save the current/last tutorial (with appended steps) or a spec to the user's library; replay from the tray or start_tutorial({name}). The end card also offers Save.",
+            Obj(("name", T("string", "default: from title")), ("spec", T("object", "instead of the current one")))),
+        Tool("list_tutorials", "Saved tutorials.", new JsonObject()),
+        Tool("delete_tutorial", "Remove a saved tutorial.", Obj(("name", T("string", "from list_tutorials")))),
+        Tool("events", "Events after seq: hit, miss, step_*, tutorial_*, window_opened/closed, anchor_found/lost, opened, no_effect, blocked, button, pick, " +
+            "help (reason cant_find|dont_understand|other; other: user text + optional pencil sketch with image path → answer with hint), " +
+            "continue_requested (append the next lesson), outro, …. timeoutMs long-polls.",
+            Obj(("since", T("integer", "last seen seq")), ("timeoutMs", T("integer", "max 60000")))),
     };
+
+    /// <summary>Screenshots: the long edge an image is scaled to unless the agent asks for more.</summary>
+    private const int DefaultMaxEdge = 1024;
+    private const int DefaultMaxMatches = 5;
 
     private static JsonObject Tool(string name, string desc, JsonObject props) => new()
     {
@@ -181,7 +166,23 @@ internal static class Tools
         }
     }
 
-    private static JsonObject Text(JsonNode o) => TextRaw(o.ToJsonString(J.Pretty));
+    /// <summary>Tool results go into the agent's context: compact JSON, no null fields (~40% fewer tokens than indented).</summary>
+    private static string Json(JsonNode o) => Prune(o.DeepClone())!.ToJsonString(J.Compact);
+
+    private static JsonNode? Prune(JsonNode? n)
+    {
+        if (n is JsonObject o)
+            foreach (var k in o.Select(p => p.Key).ToList())
+            {
+                if (o[k] is null) o.Remove(k);
+                else Prune(o[k]);
+            }
+        else if (n is JsonArray a)
+            foreach (var x in a) Prune(x);
+        return n;
+    }
+
+    private static JsonObject Text(JsonNode o) => TextRaw(Json(o));
 
     private static JsonObject TextRaw(string s) => new()
     {
@@ -196,14 +197,15 @@ internal static class Tools
 
     private static JsonObject AreaResult((JsonObject info, byte[]? png) r)
     {
-        var content = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = r.info.ToJsonString(J.Pretty) });
+        var content = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = Json(r.info) });
         if (r.png != null) content.Add(new JsonObject { ["type"] = "image", ["data"] = Convert.ToBase64String(r.png), ["mimeType"] = "image/png" });
         return new JsonObject { ["content"] = content };
     }
 
     private static JsonObject FindText(JsonNode args)
     {
-        var query = J.Str(args, "text");
+        // empty or blank text = read everything
+        var query = string.IsNullOrWhiteSpace(J.Str(args, "text")) ? null : J.Str(args, "text");
         string match = (J.Str(args, "match") ?? "contains").ToLowerInvariant();
         string? lang = J.Str(args, "lang");
         Rectangle rect;
@@ -256,7 +258,7 @@ internal static class Tools
             finally { if (flip) Program.SetCapturable(true); }
         }
         List<OcrLine> lines;
-        using (shot) lines = Ocr.Read(shot, lang);
+        using (shot) lines = Ocr.Read(shot, lang, query);
 
         RectangleF Screen(RectangleF r) => new(rect.X + r.X, rect.Y + r.Y, r.Width, r.Height);
         var info = new JsonObject { ["area"] = J.RectJson(rect) };
@@ -267,34 +269,39 @@ internal static class Tools
             return Text(info);
         }
         var found = Ocr.Find(lines, query, match).OrderBy(m => Math.Round(m.Rect.Y / 8)).ThenBy(m => m.Rect.X).ToList();
+        int max = Math.Max(1, J.Int(args, "max") ?? DefaultMaxMatches);
         var arr = new JsonArray();
-        for (int i = 0; i < found.Count; i++)
+        for (int i = 0; i < found.Count && i < max; i++)
         {
             var m = found[i];
             var sr = Screen(m.Rect);
             var c = new PointF(sr.X + sr.Width / 2, sr.Y + sr.Height / 2);
-            var o = new JsonObject { ["index"] = i, ["text"] = m.Text, ["rect"] = J.RectJson(sr), ["center"] = J.PtJson(c), ["score"] = Math.Round(m.Score, 3) };
+            // score only when it is not an exact read
+            var o = new JsonObject { ["index"] = i, ["text"] = m.Text, ["rect"] = J.RectJson(sr), ["center"] = J.PtJson(c), ["score"] = m.Score > 0 ? Math.Round(m.Score, 2) : null };
             if (anchorPoint is PointF ap) o["rel"] = J.PtJson(new PointF(c.X - ap.X, c.Y - ap.Y));
-            if (anchorJson is JsonObject aj)
-            {
-                var sug = (JsonObject)aj.DeepClone();
-                var find = new JsonObject { ["text"] = query };
-                if (match != "contains") find["match"] = match;
-                if (i > 0) find["index"] = i;
-                if (lang != null) find["lang"] = lang;
-                if (J.Get(args, "within") is JsonNode wn) find["within"] = wn.DeepClone();
-                sug["find"] = find;
-                sug.Remove("offset");
-                o["suggestedAnchor"] = sug;
-            }
             arr.Add(o);
         }
         info["matches"] = arr;
+        if (found.Count > max) info["more"] = found.Count - max;
+        // one ready anchor for match 0; any other match is the same with find.index = its index
+        if (found.Count > 0 && anchorJson is JsonObject aj)
+        {
+            var sug = (JsonObject)aj.DeepClone();
+            var find = new JsonObject { ["text"] = query };
+            if (match != "contains") find["match"] = match;
+            if (lang != null) find["lang"] = lang;
+            if (J.Get(args, "within") is JsonNode wn) find["within"] = wn.DeepClone();
+            sug["find"] = find;
+            sug.Remove("offset");
+            info["suggestedAnchor"] = sug;
+        }
         if (element is RectangleF el) info["elementBounds"] = J.RectJson(el);
         if (found.Count == 0)
-            info["near"] = new JsonArray(lines.Take(40).Select(l => (JsonNode)new JsonObject { ["text"] = l.Text, ["rect"] = J.RectJson(Screen(l.Bounds)) }).ToArray());
-        info["note"] = found.Count == 0 ? "not found; 'near' lists what the OCR read in this area"
-            : "suggestedAnchor marks the text's centre and follows it; add offset:[dx,dy] to point beside it";
+        {
+            info["near"] = new JsonArray(lines.Take(25).Select(l => (JsonNode)new JsonObject { ["text"] = l.Text, ["rect"] = J.RectJson(Screen(l.Bounds)) }).ToArray());
+            info["note"] = "not found; 'near' is what the OCR read here";
+        }
+        else info["note"] = "suggestedAnchor = match 0 (add find.index for others); point = text centre, offset moves it";
         return Text(info);
     }
 
@@ -393,7 +400,7 @@ internal static class Tools
         try { bmp = winShot ?? ScreenCapture.Capture(rect); }
         finally { if (flip) Program.SetCapturable(!withOverlay); }
         using var _bmp = bmp;
-        int maxEdge = J.Int(args, "maxEdge") ?? 1568;
+        int maxEdge = J.Int(args, "maxEdge") ?? DefaultMaxEdge;
         var png = ScreenCapture.Png(bmp, maxEdge, out float scale);
         var info = new JsonObject
         {
@@ -403,6 +410,10 @@ internal static class Tools
             ["imageScale"] = Math.Round(scale, 4),
             ["mapping"] = $"screenX = {rect.X} + imgX / {scale:0.####}; screenY = {rect.Y} + imgY / {scale:0.####}",
         };
+        // a strongly reduced image is fine for an overview, not for measuring or reading small text
+        if (scale < 0.6f)
+            info["precision"] = $"reduced ×{scale:0.##}: 1 image px = {1 / scale:0.#} screen px, small text may be unreadable. " +
+                                "For exact positions use find_text / pick / an element anchor; to read details screenshot a smaller anchor or maxEdge:0.";
         if (anchorPoint is PointF ap)
         {
             info["anchorPoint"] = J.PtJson(ap);
@@ -413,7 +424,7 @@ internal static class Tools
         return new JsonObject
         {
             ["content"] = new JsonArray(
-                new JsonObject { ["type"] = "text", ["text"] = info.ToJsonString(J.Pretty) },
+                new JsonObject { ["type"] = "text", ["text"] = Json(info) },
                 // the image itself follows
                 new JsonObject { ["type"] = "image", ["data"] = Convert.ToBase64String(png), ["mimeType"] = "image/png" }),
         };

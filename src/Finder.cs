@@ -12,9 +12,35 @@ namespace TutorialOverlay;
 internal sealed class Template
 {
     public int W, H;
-    public byte[] Px = Array.Empty<byte>();   // grayscale, row-major, 2x downscaled
+    public byte[] Px = Array.Empty<byte>();   // grayscale, row-major, 2x downscaled — for the fast coarse pass
+    public int FW, FH;
+    public byte[] Full = Array.Empty<byte>(); // grayscale at full size — to pick between look-alike candidates
 
-    public static Template From(Bitmap b) => new() { W = b.Width / 2, H = b.Height / 2, Px = Gray(b, out _, out _) };
+    public static Template From(Bitmap b) => new()
+    {
+        W = b.Width / 2, H = b.Height / 2, Px = Gray(b, out _, out _),
+        FW = b.Width, FH = b.Height, Full = GrayFull(b),
+    };
+
+    public static byte[] GrayFull(Bitmap b)
+    {
+        int w = b.Width, h = b.Height;
+        var res = new byte[w * h];
+        var data = b.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            unsafe
+            {
+                for (int y = 0; y < h; y++)
+                {
+                    byte* row = (byte*)data.Scan0 + y * data.Stride;
+                    for (int x = 0; x < w; x++, row += 4) res[y * w + x] = (byte)((row[2] * 77 + row[1] * 150 + row[0] * 29) >> 8);
+                }
+            }
+        }
+        finally { b.UnlockBits(data); }
+        return res;
+    }
 
     /// <summary>2x2-averaged grayscale (halves the work, smooths anti-aliasing differences).</summary>
     public static byte[] Gray(Bitmap b, out int w, out int h)
@@ -123,7 +149,7 @@ internal static class Finder
         if (tpl == null)
         {
             // text: the centre of the n-th occurrence, reading order
-            var found = Ocr.Find(Ocr.Read(shot, f.Lang), f.Text!, f.TextMatch)
+            var found = Ocr.Find(Ocr.Read(shot, f.Lang, f.Text), f.Text!, f.TextMatch)
                 .OrderBy(m => Math.Round(m.Rect.Y / 8)).ThenBy(m => m.Rect.X).ToList();
             if (found.Count <= f.Nth) return Miss();
             var m = found[f.Nth].Rect;
@@ -131,30 +157,70 @@ internal static class Finder
             return new FindResult(true, new PointF(c.X - frame.X, c.Y - frame.Y), found[f.Nth].Score, last, DateTime.UtcNow);
         }
         var img = Template.Gray(shot, out int iw, out int ih);
-        var (bx, by, score) = Match(img, iw, ih, tpl);
+        var (bx, by, score) = Match(img, iw, ih, tpl, Template.GrayFull(shot), shot.Width, shot.Height);
         if (score > f.MaxScore) return Miss();
-        // top-left of the match, back in screen space, then relative to the window frame
-        var hit = new PointF(area.X + bx * 2, area.Y + by * 2);
+        // top-left of the match (full-size pixels), back in screen space, then relative to the window frame
+        var hit = new PointF(area.X + bx, area.Y + by);
         return new FindResult(true, new PointF(hit.X - frame.X, hit.Y - frame.Y), score, last, DateTime.UtcNow);
     }
 
-    /// <summary>Best position by mean absolute difference (0 = identical … 1 = opposite).</summary>
-    private static (int x, int y, float score) Match(byte[] img, int iw, int ih, Template t)
+    private const int Candidates = 8, Refine = 3;
+
+    /// <summary>
+    /// Best position (full-size pixels) by mean absolute difference (0 = identical … 1 = opposite).
+    /// The half-size pass is fast but blurs small differences — "808 Kick" and "808 Snare" buttons score
+    /// almost alike, and the 2×2 grid may not line up with the template — so the best few half-size
+    /// candidates are compared again at full size, ±3 px around each.
+    /// </summary>
+    private static (int x, int y, float score) Match(byte[] img, int iw, int ih, Template t, byte[] full, int fw, int fh)
     {
-        long best = long.MaxValue;
-        int bx = 0, by = 0;
-        long n = (long)t.W * t.H;
-        for (int y = 0; y + t.H <= ih; y++)
-            for (int x = 0; x + t.W <= iw; x++)
+        int mw = iw - t.W + 1, mh = ih - t.H + 1;
+        if (mw <= 0 || mh <= 0) return (0, 0, 1f);
+        var map = new long[mw * mh];
+        for (int y = 0; y < mh; y++)
+            for (int x = 0; x < mw; x++)
             {
                 long sad = 0;
-                for (int ty = 0; ty < t.H && sad < best; ty++)
+                for (int ty = 0; ty < t.H; ty++)
                 {
                     int io = (y + ty) * iw + x, to = ty * t.W;
                     for (int tx = 0; tx < t.W; tx++) sad += Math.Abs(img[io + tx] - t.Px[to + tx]);
                 }
-                if (sad < best) { best = sad; bx = x; by = y; }
+                map[y * mw + x] = sad;
             }
+
+        // the best few half-size positions, at least half a template apart
+        var picked = new List<(int x, int y)>();
+        var taken = new bool[map.Length];
+        int rx = Math.Max(1, t.W / 2), ry = Math.Max(1, t.H / 2);
+        for (int k = 0; k < Candidates; k++)
+        {
+            int bi = -1;
+            for (int i = 0; i < map.Length; i++)
+                if (!taken[i] && (bi < 0 || map[i] < map[bi])) bi = i;
+            if (bi < 0) break;
+            int cx = bi % mw, cy = bi / mw;
+            picked.Add((cx, cy));
+            for (int y = Math.Max(0, cy - ry); y <= Math.Min(mh - 1, cy + ry); y++)
+                for (int x = Math.Max(0, cx - rx); x <= Math.Min(mw - 1, cx + rx); x++) taken[y * mw + x] = true;
+        }
+
+        // full-size comparison around each candidate
+        long best = long.MaxValue;
+        int bx = 0, by = 0;
+        foreach (var (cx, cy) in picked)
+            for (int y = Math.Max(0, cy * 2 - Refine); y <= Math.Min(fh - t.FH, cy * 2 + Refine); y++)
+                for (int x = Math.Max(0, cx * 2 - Refine); x <= Math.Min(fw - t.FW, cx * 2 + Refine); x++)
+                {
+                    long sad = 0;
+                    for (int ty = 0; ty < t.FH && sad < best; ty++)
+                    {
+                        int io = (y + ty) * fw + x, to = ty * t.FW;
+                        for (int tx = 0; tx < t.FW; tx++) sad += Math.Abs(full[io + tx] - t.Full[to + tx]);
+                    }
+                    if (sad < best) { best = sad; bx = x; by = y; }
+                }
+        long n = (long)t.FW * t.FH;
         return (bx, by, best == long.MaxValue ? 1f : (float)(best / (double)(n * 255)));
     }
 }
