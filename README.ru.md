@@ -70,3 +70,7 @@ claude mcp add --transport http tutorial-overlay http://127.0.0.1:7788/mcp --hea
 - [Инструменты MCP и события](docs/tools.md) — что может вызывать агент и что он получает в ответ.
 - [Туториалы: формат spec](docs/tutorials.md) — фигуры, якоря, шаги и условия, маскот, библиотека, помощь.
 - [Разработка](docs/development.md) — устройство программы и тесты.
+
+## Лицензия
+
+[MIT](LICENSE)

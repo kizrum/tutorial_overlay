@@ -73,3 +73,7 @@ To stop the server: **"Quit TutorialOverlay"** in the tray icon's menu, or `Tuto
 - [Tutorials: the spec format](docs/tutorials.md) — shapes, anchors, steps and conditions, the mascot, the
   library, help.
 - [Development](docs/development.md) — how the program is built inside, and the tests.
+
+## License
+
+[MIT](LICENSE)
