@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Linq;
 
 namespace TutorialOverlay;
 
@@ -60,6 +61,8 @@ internal static class Renderer
                 case PrimKind.Check: Check(g, p, a); break;
                 case PrimKind.Checkbox: Checkbox(g, p, a, sc.Pulse); break;
                 case PrimKind.Stroke: SketchPad.DrawStroke(g, p.Points!, Palette.WithAlpha(p.Color, a), p.Scale); break;
+                case PrimKind.Path: PathPrim(g, p, a); break;
+                case PrimKind.Wheel: WheelPrim(g, p, a); break;
             }
         }
         var now = DateTime.UtcNow;
@@ -86,6 +89,103 @@ internal static class Renderer
             g.CompositingMode = mode;
             g.SmoothingMode = smooth;
         }
+    }
+
+    /// <summary>
+    /// A trajectory: dashed with chevrons showing the direction, a dot at the start, an arrowhead at the end, the
+    /// part already traced solid, and a light running along it to show the motion.
+    /// </summary>
+    private static void PathPrim(Graphics g, Prim p, float a)
+    {
+        var pts = p.Points!;
+        if (pts.Length < 2) return;
+        float s = p.Scale, w = p.Width;
+        var lens = new float[pts.Length];
+        for (int i = 1; i < pts.Length; i++)
+            lens[i] = lens[i - 1] + MathF.Sqrt((pts[i].X - pts[i - 1].X) * (pts[i].X - pts[i - 1].X) + (pts[i].Y - pts[i - 1].Y) * (pts[i].Y - pts[i - 1].Y));
+        float total = Math.Max(1, lens[^1]);
+        PointF At(float d, out PointF dir)
+        {
+            int i = Array.FindIndex(lens, x => x >= d);
+            if (i <= 0) i = 1;
+            float seg = Math.Max(0.001f, lens[i] - lens[i - 1]), t = Math.Clamp((d - lens[i - 1]) / seg, 0, 1);
+            dir = new PointF((pts[i].X - pts[i - 1].X) / seg, (pts[i].Y - pts[i - 1].Y) / seg);
+            return new PointF(pts[i - 1].X + (pts[i].X - pts[i - 1].X) * t, pts[i - 1].Y + (pts[i].Y - pts[i - 1].Y) * t);
+        }
+
+        using (var shadow = new Pen(Color.FromArgb((int)(130 * a), 0, 0, 0), w + 3 * s) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round })
+            g.DrawLines(shadow, pts);
+        using (var dash = new Pen(Palette.WithAlpha(p.Color, a * 0.75f), w) { DashPattern = new[] { 2.2f, 1.6f }, LineJoin = LineJoin.Round })
+            g.DrawLines(dash, pts);
+        // the part done so far
+        if (p.Progress > 0.01f)
+        {
+            int n = Math.Max(2, (int)(pts.Length * p.Progress));
+            using var done = new Pen(Palette.WithAlpha(Palette.Success, a), w * 1.25f) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round };
+            g.DrawLines(done, pts.Take(n).ToArray());
+        }
+        // direction chevrons
+        using (var chev = new Pen(Palette.WithAlpha(p.Color, a), w * 0.8f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+            for (float d = 70 * s; d < total - 30 * s; d += 90 * s)
+            {
+                var c = At(d, out var u);
+                var n1 = new PointF(-u.Y, u.X);
+                float h = 7 * s;
+                g.DrawLines(chev, new[]
+                {
+                    new PointF(c.X - u.X * h + n1.X * h, c.Y - u.Y * h + n1.Y * h), c,
+                    new PointF(c.X - u.X * h - n1.X * h, c.Y - u.Y * h - n1.Y * h),
+                });
+            }
+        // start dot and end arrowhead
+        float r0 = 7 * s;
+        using (var b = new SolidBrush(Palette.WithAlpha(p.Color, a))) g.FillEllipse(b, pts[0].X - r0, pts[0].Y - r0, 2 * r0, 2 * r0);
+        using (var wb = new SolidBrush(Color.FromArgb((int)(255 * a), 255, 255, 255))) g.FillEllipse(wb, pts[0].X - r0 * 0.45f, pts[0].Y - r0 * 0.45f, r0 * 0.9f, r0 * 0.9f);
+        var end = At(total, out var ue);
+        var ne = new PointF(-ue.Y, ue.X);
+        float ah = 14 * s;
+        using (var hb = new SolidBrush(Palette.WithAlpha(p.Color, a)))
+            g.FillPolygon(hb, new[] { new PointF(end.X + ue.X * ah * 0.4f, end.Y + ue.Y * ah * 0.4f), new PointF(end.X - ue.X * ah + ne.X * ah * 0.6f, end.Y - ue.Y * ah + ne.Y * ah * 0.6f), new PointF(end.X - ue.X * ah - ne.X * ah * 0.6f, end.Y - ue.Y * ah - ne.Y * ah * 0.6f) });
+        // a light running from start to end, every 2.4 s
+        float phase = (float)(DateTime.UtcNow.TimeOfDay.TotalSeconds % 2.4 / 2.4);
+        var dot = At(total * phase, out _);
+        float fade = phase < 0.1f ? phase / 0.1f : phase > 0.9f ? (1 - phase) / 0.1f : 1;
+        using (var glow = new SolidBrush(Palette.WithAlpha(p.Color, a * 0.35f * fade))) g.FillEllipse(glow, dot.X - 12 * s, dot.Y - 12 * s, 24 * s, 24 * s);
+        using (var core = new SolidBrush(Color.FromArgb((int)(255 * a * fade), 255, 255, 255))) g.FillEllipse(core, dot.X - 5 * s, dot.Y - 5 * s, 10 * s, 10 * s);
+    }
+
+    /// <summary>"Scroll here": a mouse with its wheel, arrows running the way to scroll, and the count so far.</summary>
+    private static void WheelPrim(Graphics g, Prim p, float a)
+    {
+        float s = p.Scale;
+        var parts = (p.Text ?? "down|").Split('|');
+        string dir = parts[0], count = parts.Length > 1 ? parts[1] : "";
+        var c = p.A;
+        var body = new RectangleF(c.X - 13 * s, c.Y - 20 * s, 26 * s, 40 * s);
+        using (var path = Theme.Rounded(body, 13 * s))
+        {
+            using (var bg = new SolidBrush(Color.FromArgb((int)(230 * a), Palette.Ink))) g.FillPath(bg, path);
+            using var pen = new Pen(Palette.WithAlpha(Palette.Text, a), 2 * s);
+            g.DrawPath(pen, path);
+        }
+        using (var wheel = new SolidBrush(Palette.WithAlpha(p.Color, a))) g.FillRectangle(wheel, c.X - 2 * s, c.Y - 13 * s, 4 * s, 9 * s);
+        float phase = (float)(DateTime.UtcNow.TimeOfDay.TotalSeconds % 0.9 / 0.9);
+        bool vertical = dir is "up" or "down";
+        float sign = dir is "down" or "right" ? 1 : -1;
+        using var chev = new Pen(Palette.WithAlpha(p.Color, a), 3 * s) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+        for (int i = 0; i < 2; i++)
+        {
+            float off = (26 + 9 * i + 8 * phase) * s * sign, h = 6 * s;
+            int alpha = (int)(255 * a * (1 - phase * 0.6f) * (i == 0 ? 1 : 0.6f));
+            chev.Color = Color.FromArgb(alpha, p.Color);
+            if (vertical)
+                g.DrawLines(chev, new[] { new PointF(c.X - h, c.Y + off - h * sign), new PointF(c.X, c.Y + off), new PointF(c.X + h, c.Y + off - h * sign) });
+            else
+                g.DrawLines(chev, new[] { new PointF(c.X + off - h * sign, c.Y - h), new PointF(c.X + off, c.Y), new PointF(c.X + off - h * sign, c.Y + h) });
+        }
+        if (count.Length > 0)
+            using (var tb = new SolidBrush(Palette.WithAlpha(Palette.Text, a)))
+                g.DrawString(count, Theme.Font(11 * s, true), tb, new RectangleF(c.X - 30 * s, c.Y - 2 * s, 60 * s, 16 * s), new StringFormat(Theme.Center) { LineAlignment = StringAlignment.Near });
     }
 
     private static void DrawDim(Graphics g, Scene sc, RectangleF screen)

@@ -5,9 +5,9 @@ using System.Threading;
 
 namespace TutorialOverlay;
 
-internal enum InputKind { MouseDown, MouseUp, KeyDown }
+internal enum InputKind { MouseDown, MouseUp, KeyDown, Move, Wheel }
 
-internal readonly record struct InputEvent(InputKind Kind, int X, int Y, string Button, uint Vk, uint Mods, bool Injected, bool Swallowed, long Ticks);
+internal readonly record struct InputEvent(InputKind Kind, int X, int Y, string Button, uint Vk, uint Mods, bool Injected, bool Swallowed, long Ticks, int Delta = 0);
 
 /// <summary>
 /// WH_MOUSE_LL + WH_KEYBOARD_LL on a dedicated thread with its own message loop. Callbacks only enqueue:
@@ -21,12 +21,20 @@ internal static class InputHook
 
     /// <summary>Key presses are queued only while something needs them (a "key" condition or a pick). Never logged.</summary>
     public static volatile bool KeysWanted;
+    /// <summary>
+    /// Mouse moves (only while a button is held) and wheel turns are queued only while a step needs them (trace,
+    /// scroll, a drag with held keys); otherwise the hook passes them on untouched. Never logged.
+    /// </summary>
+    public static volatile bool MotionWanted;
     /// <summary>Swallow the next mouse click (down + its up) instead of passing it to the app.</summary>
     public static volatile bool SwallowNextClick;
 
     private const int WH_KEYBOARD_LL = 13;
     private const int WM_KEYDOWN = 0x0100, WM_SYSKEYDOWN = 0x0104;
     private const int WM_LBUTTONUP = 0x0202, WM_RBUTTONUP = 0x0205, WM_MBUTTONUP = 0x0208;
+    private const int WM_MOUSEMOVE = 0x0200, WM_MOUSEWHEEL = 0x020A, WM_MOUSEHWHEEL = 0x020E;
+    private static volatile int _buttonsHeld;
+    private static int _lastMoveTick;
     private const uint WM_APP_REINSTALL = 0x8000 + 17;
 
     private static Native.LowLevelProc? _mouseProc, _keyProc;   // keep the delegates alive
@@ -141,6 +149,7 @@ internal static class InputHook
                 {
                     var button = msg == Native.WM_LBUTTONDOWN ? "left" : msg == Native.WM_RBUTTONDOWN ? "right" : "middle";
                     bool swallow = SwallowNextClick && !injected;
+                    if (!swallow) _buttonsHeld++;
                     Queue.TryAdd(new InputEvent(InputKind.MouseDown, info->pt.X, info->pt.Y, button, 0, 0, injected, swallow, DateTime.UtcNow.Ticks));
                     if (swallow)
                     {
@@ -154,17 +163,71 @@ internal static class InputHook
                 {
                     var button = msg == WM_LBUTTONUP ? "left" : msg == WM_RBUTTONUP ? "right" : "middle";
                     if (_swallowingButtonUp == msg) { _swallowingButtonUp = 0; return (IntPtr)1; }
+                    _buttonsHeld = Math.Max(0, _buttonsHeld - 1);
                     Queue.TryAdd(new InputEvent(InputKind.MouseUp, info->pt.X, info->pt.Y, button, 0, 0, injected, false, DateTime.UtcNow.Ticks));
                     break;
                 }
+                case WM_MOUSEMOVE when MotionWanted && _buttonsHeld > 0:
+                {
+                    // ~120 samples a second is plenty to follow a stroke
+                    int now = Environment.TickCount;
+                    if (now - _lastMoveTick >= 8)
+                    {
+                        _lastMoveTick = now;
+                        Queue.TryAdd(new InputEvent(InputKind.Move, info->pt.X, info->pt.Y, "", 0, 0, injected, false, DateTime.UtcNow.Ticks));
+                    }
+                    break;
+                }
+                case WM_MOUSEWHEEL or WM_MOUSEHWHEEL when MotionWanted:
+                    Queue.TryAdd(new InputEvent(InputKind.Wheel, info->pt.X, info->pt.Y, msg == WM_MOUSEWHEEL ? "v" : "h", 0, 0, injected, false,
+                                                DateTime.UtcNow.Ticks, (short)(info->mouseData >> 16)));
+                    break;
             }
         }
         return Native.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
     }
 
+    /// <summary>
+    /// Keys a step needs held ("hold"): their up/down state as the hook sees it. GetAsyncKeyState from this
+    /// background process proved unreliable for that; the hook always sees the real presses. Only these keys
+    /// are tracked, only while such a step is current, and nothing about them is queued or logged.
+    /// </summary>
+    public static volatile uint[] HoldWatched = Array.Empty<uint>();
+    private static readonly bool[] _down = new bool[256];
+
+    /// <summary>Is this key down? Generic Shift/Ctrl/Alt/Win also count their left and right keys.</summary>
+    public static bool IsHeld(uint vk) => vk switch
+    {
+        0x10 => _down[0x10] || _down[0xA0] || _down[0xA1],
+        0x11 => _down[0x11] || _down[0xA2] || _down[0xA3],
+        0x12 => _down[0x12] || _down[0xA4] || _down[0xA5],
+        0x5B => _down[0x5B] || _down[0x5C],
+        _ => vk < 256 && _down[vk],
+    };
+
+    private static bool Watched(uint vk)
+    {
+        foreach (var w in HoldWatched)
+        {
+            if (w == vk) return true;
+            if (w == 0x10 && vk is 0xA0 or 0xA1) return true;
+            if (w == 0x11 && vk is 0xA2 or 0xA3) return true;
+            if (w == 0x12 && vk is 0xA4 or 0xA5) return true;
+            if (w == 0x5B && vk == 0x5C) return true;
+        }
+        return false;
+    }
+
     private static unsafe IntPtr KeyCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
         _lastCallbackTick = Environment.TickCount;
+        if (nCode >= 0 && HoldWatched.Length > 0)
+        {
+            int m = (int)wParam;
+            uint hv = ((KBDLLHOOKSTRUCT*)lParam)->vkCode;
+            if (hv < 256 && Watched(hv)) _down[hv] = m is WM_KEYDOWN or WM_SYSKEYDOWN;
+        }
+        else if (HoldWatched.Length == 0) Array.Clear(_down);
         if (nCode >= 0 && KeysWanted)
         {
             int msg = (int)wParam;

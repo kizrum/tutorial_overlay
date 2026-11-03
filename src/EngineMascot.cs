@@ -52,8 +52,17 @@ internal static partial class Engine
         var target = step.Targets.FirstOrDefault(x => !x.Satisfied && !x.Optional && x.Geo != null)
                   ?? step.Targets.FirstOrDefault(x => !x.Satisfied && x.Geo != null);
         if (target == null)
+        {
+            // a stroke or scroll step: point at where the path starts / where to scroll
+            if (MotionFocus(step) is PointF mf)
+            {
+                m.Target = mf;
+                m.TargetBounds = new RectangleF(mf.X - 14, mf.Y - 14, 28, 28);
+                return m;
+            }
             // targets that are all off screen right now: hide with them; a step without targets: stay put
             return step.Targets.Any(x => !x.Satisfied && !x.Optional) ? null : m;
+        }
 
         var g = target.Geo!;
         var h = g.Hits.FirstOrDefault();

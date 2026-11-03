@@ -24,7 +24,7 @@ internal static partial class Engine
             case InputKind.MouseDown:
                 if (_pick != null && TryPick(e)) return;
                 _down = (new PointF(e.X, e.Y), e.Button);
-                if (!e.Swallowed) HandleClick(e);
+                if (!e.Swallowed) { MotionDown(new PointF(e.X, e.Y), e.Button); HandleClick(e); }
                 break;
             case InputKind.MouseUp:
                 if (_down is { } d && d.button == e.Button)
@@ -32,8 +32,15 @@ internal static partial class Engine
                     var end = new PointF(e.X, e.Y);
                     float dist = (float)Math.Sqrt((end.X - d.pt.X) * (end.X - d.pt.X) + (end.Y - d.pt.Y) * (end.Y - d.pt.Y));
                     if (dist >= 10 * Native.ScaleAt(end)) HandleDrag(d.pt, end, e.Button);
+                    MotionUp(end, e.Button);
                 }
                 _down = null;
+                break;
+            case InputKind.Move:
+                MotionMove(new PointF(e.X, e.Y));
+                break;
+            case InputKind.Wheel:
+                MotionWheel(e);
                 break;
             case InputKind.KeyDown:
                 HandleKey(e);
@@ -269,6 +276,11 @@ internal static partial class Engine
                 if (c.Met || (c.Button != "any" && c.Button != button)) continue;
                 if (InRegion(c.From!, from) && InRegion(c.To!, to))
                 {
+                    if (!DragHoldOk(c))
+                    {
+                        Events.Emit("drag", new() { ["step"] = t!.Index, ["matched"] = false, ["reason"] = "released_key", ["hold"] = string.Join("+", c.HoldNames) });
+                        continue;
+                    }
                     c.Met = true;
                     any = true;
                     Events.Emit("drag", new() { ["step"] = t!.Index, ["matched"] = true, ["from"] = J.PtJson(from), ["to"] = J.PtJson(to), ["button"] = button });

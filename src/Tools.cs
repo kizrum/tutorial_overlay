@@ -47,7 +47,7 @@ internal static class Tools
         "coords rel. to anchor point, physical px: circle{x,y,r} (no x/y: ring around element), rect{x,y,w,h,pad,radius} (no w/h: frame element), " +
         "arrow{from:[x,y]|'nw'|'n'…, to, length}, badge{text}, label{text} (auto-placed), info{title,text}, check{}, " +
         "checkbox{x,y,w,h} (✓ when target done), button{text,id,action:'done'|'next'|'back'|'skip'|'stop'|'undo'|'dismiss',style} (real clickable window → 'button' event), " +
-        "dim{opacity}. Common: color ('#RRGGBB'|accent|red|orange|yellow|green|teal|blue|purple|white), thickness, size, target:false.";
+        "path{points:[[x,y],…], smooth} (trajectory to follow: dashed, direction arrows, a running light), dim{opacity}. Common: color ('#RRGGBB'|accent|red|orange|yellow|green|teal|blue|purple|white), thickness, size, target:false.";
 
     public static JsonArray List() => new()
     {
@@ -67,7 +67,9 @@ internal static class Tools
             "opens:{title|window|process|element, timeoutMs} (counts only if this NEW window appears, else event no_effect), " +
             "grid:{from:[x,y] first cell centre, step:[dx,dy], rows, cols, cells:[[r,c]…]|[c…], w, h} (target per cell; name may use {row} {col} {n})}], " +
             "until:['all_clicked' | {type:'appear'|'disappear', title|window|element|anchor} | {type:'pixel', anchor, at, expr} | {type:'count', count} | " +
-            "{type:'key', keys:'Ctrl+S'|[…]} | {type:'drag', from:{anchor|element|title, rect, radius}, to, button} | " +
+            "{type:'key', keys:'Ctrl+S'|[…]} | {type:'drag', from:{anchor|element|title, rect, radius}, to, button, hold:['Shift']} | " +
+            "{type:'trace', anchor, path:[[x,y],…] rel. to anchor point, smooth, tolerance (px, 24), coverage (0.85), ordered, button, hold:['Alt']} (drag along the path, keys held throughout; events trace_done / trace_off{reason}) | " +
+            "{type:'scroll', in:{anchor|element, rect}, direction:'down'|'up'|'left'|'right', notches (3) | until:'visible'} | " +
             "{type:'uia', anchor|element|title, property:'exists'|'name'|'value'|'toggle'|'selected'|'expanded'|'enabled'|'focused'|'text', equals|contains|matches, not}], " +
             "untilMode:'any'|'all', numbered, checklist, sequence (targets one by one, e.g. right-click → popup item; chain restarts if the popup closes), " +
             "buttons:[{id,text,action,style}], controls:['back','undo','skip','done','stop']}]} " +

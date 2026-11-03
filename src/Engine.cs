@@ -512,6 +512,9 @@ internal static partial class Engine
                 t is { Active: true } && t.Defaults.Process != null ? new[] { t.Defaults.Process } : Array.Empty<string>());
 
             InputHook.KeysWanted = WantsKeys(step);
+            InputHook.MotionWanted = WantsMotion(step);
+            var hold = HoldKeys(step);
+            if (!hold.SequenceEqual(InputHook.HoldWatched)) InputHook.HoldWatched = hold;
             int fgPid = ForegroundPid();
             foreach (var m in marks) ComputeMark(m, step != null && step.Targets.Contains(m) ? t : null, fgPid, now);
             if (step is { Sequence: true }) ApplySequence(step, now);
@@ -564,6 +567,7 @@ internal static partial class Engine
             }
             foreach (var m in marks.Where(m => m.Geo == null)) m.ShownAt = null;
             if (step != null) AddDragVisuals(step, sc, f.Card.Avoid, fgPid);
+            if (step != null && t!.AdvanceAt == null) AddMotionVisuals(step, sc, f.Card.Avoid, fgPid);
             if (step != null && t!.AdvanceAt == null) AddDialogVisuals(step, sc, f.Card.Avoid);
             CheckOpens(marks, step, now);
             AddPickVisuals(sc, f.Card.Avoid);
@@ -612,6 +616,8 @@ internal static partial class Engine
     {
         var sb = new System.Text.StringBuilder();
         sb.Append((int)(sc.Dim * 100)).Append('|').Append((int)(sc.Pulse * 24)).Append('|');
+        // moving parts (the dot running along a path, the wheel's arrows) need every frame
+        if (sc.Prims.Any(x => x.prim.Kind is PrimKind.Path or PrimKind.Wheel)) sb.Append(DateTime.UtcNow.Ticks / (TimeSpan.TicksPerMillisecond * 33)).Append('|');
         foreach (var (p, a) in sc.Prims)
             sb.Append((int)p.Kind).Append(',').Append((int)p.A.X).Append(',').Append((int)p.A.Y).Append(',').Append((int)p.B.X).Append(',').Append((int)p.B.Y)
               .Append(',').Append((int)p.R).Append(',').Append((int)p.Rect.X).Append(',').Append((int)p.Rect.Y).Append(',').Append((int)p.Rect.Width)

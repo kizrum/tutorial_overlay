@@ -307,6 +307,8 @@ internal sealed class ShapeSpec
     public float Radius = 8;
     public bool? Target;
     public float Opacity = 0.5f;
+    public List<PointF>? Points;     // path: points relative to the anchor point
+    public bool Smooth = true;       // path: a curve through the points (false: straight segments)
 
     public bool IsTargetDefault => Type is "circle" or "rect" or "checkbox";
     public bool IsTarget => Target ?? IsTargetDefault;
@@ -325,6 +327,7 @@ internal sealed class ShapeSpec
             "toggle" or "cell" => "checkbox",
             "btn" => "button",
             "ring" or "ellipse" => "circle",
+            "trajectory" or "curve" or "polyline" or "route" => "path",
             _ => t
         };
         var s = new ShapeSpec
@@ -349,6 +352,11 @@ internal sealed class ShapeSpec
         if (J.Num(n, "w") == null && J.Num(n, "width") is double wd && t == "rect") s.W = (float)wd;
         else if (J.Num(n, "width") is double lw && s.Width == null) s.Width = (float)lw;
         if (J.Num(n, "pad") is double pad) s.Pad = (float)pad;
+        if (t == "path")
+        {
+            s.Points = Condition.ParsePoints(J.Get(n, "points") ?? J.Get(n, "path"));
+            s.Smooth = J.Bool(n, "smooth") ?? true;
+        }
         if (J.Num(n, "radius") is double rad) { if (t == "circle" || t == "badge") s.R = (float)rad; else s.Radius = (float)rad; }
         if (J.Num(n, "opacity") is double op) s.Opacity = (float)Math.Clamp(op, 0, 1);
         var from = J.Get(n, "from");
@@ -463,7 +471,7 @@ internal sealed class ScreenRegion
 
 internal sealed class Condition
 {
-    public string Type = "all_clicked";  // all_clicked | appear | disappear | pixel | count | key | drag | uia
+    public string Type = "all_clicked";  // all_clicked | appear | disappear | pixel | count | key | drag | uia | trace | scroll
     public AnchorSpec? Anchor;
     public PixelCheck? Pixel;
     public int Count;
@@ -475,10 +483,34 @@ internal sealed class Condition
     public string? EqualsText, ContainsText, Matches;
     public bool Not;
 
+    // trace: drag along a path; drag/trace: keys held the whole time
+    public List<PointF> Path = new();     // relative to the anchor point, physical px
+    public bool Smooth = true, Ordered = true;
+    public float Tolerance = 24, Coverage = 0.85f;
+    public List<uint> Hold = new();
+    public List<string> HoldNames = new();
+    // scroll: wheel notches over an area (or until the step's targets come into view)
+    public ScreenRegion? Area;
+    public string Direction = "down";
+    public int Notches = 3;
+    public bool UntilVisible;
+
     // runtime
     public bool SeenPresent;
     public bool Met;
     public bool SeenUnmet;          // was false at least once during this visit of the step
+    public bool TraceActive, TraceFailed, HoldBroken;
+    public int TraceFrom, TraceMax;
+    public string? FailReason;
+    public DateTime FailedAt;
+    public int ScrollCount;
+    public int ScrollAccum;          // wheel delta so far: a notch is 120, a touchpad sends many small parts
+    public bool SeenHidden;          // scroll until visible: the targets were off screen at some point
+    public float ScrollPx;           // how far the area's content moved the asked way (seen in its pixels)
+    public byte[]? ScrollPrev;       // the area's last look (half size, grey)
+    public Size ScrollPrevSize;
+    public DateTime ScrollSampledAt;
+    public bool ScrollSampling;
 
     public static Condition Parse(JsonNode n, AnchorSpec? defaults)
     {
@@ -509,6 +541,29 @@ internal sealed class Condition
             c.To = ScreenRegion.Parse(J.Get(n, "to"), defaults);
             c.Button = (J.Str(n, "button") ?? "left").ToLowerInvariant();
             c.Show = J.Bool(n, "show") ?? true;
+            c.ParseHold(n);
+        }
+        else if (c.Type == "trace")
+        {
+            c.Anchor = AnchorSpec.Parse(J.Get(n, "anchor") ?? n, defaults);
+            c.Path = ParsePoints(J.Get(n, "path") ?? J.Get(n, "points"));
+            if (c.Path.Count < 2) throw new ArgumentException("trace condition needs a path of at least 2 points [[x,y],…] relative to the anchor point");
+            c.Smooth = J.Bool(n, "smooth") ?? true;
+            c.Ordered = J.Bool(n, "ordered") ?? J.Bool(n, "direction") ?? true;
+            c.Tolerance = (float)(J.Num(n, "tolerance") ?? 24);
+            c.Coverage = (float)Math.Clamp(J.Num(n, "coverage") ?? 0.85, 0.1, 1);
+            c.Button = (J.Str(n, "button") ?? "left").ToLowerInvariant();
+            c.Show = J.Bool(n, "show") ?? true;
+            c.ParseHold(n);
+        }
+        else if (c.Type == "scroll")
+        {
+            if ((J.Get(n, "in") ?? J.Get(n, "area") ?? J.Get(n, "over")) is JsonNode area) c.Area = ScreenRegion.Parse(area, defaults);
+            else if (J.Get(n, "anchor") is JsonNode an) c.Area = ScreenRegion.Parse(new JsonObject { ["anchor"] = an.DeepClone() }, defaults);
+            c.Direction = (J.Str(n, "direction") ?? J.Str(n, "dir") ?? "down").ToLowerInvariant();
+            c.Notches = Math.Max(1, J.Int(n, "notches") ?? J.Int(n, "count") ?? 3);
+            c.UntilVisible = (J.Str(n, "until") ?? "").Equals("visible", StringComparison.OrdinalIgnoreCase) || J.Bool(n, "untilVisible") == true;
+            c.Show = J.Bool(n, "show") ?? true;
         }
         else if (c.Type == "uia")
         {
@@ -532,11 +587,42 @@ internal sealed class Condition
         "manual" or "button" or "none" => "manual",
         "key" or "keys" or "hotkey" or "shortcut" or "press" => "key",
         "drag" or "drop" or "dragdrop" or "drag_drop" => "drag",
+        "trace" or "path" or "trajectory" or "stroke" or "draw" => "trace",
+        "scroll" or "wheel" => "scroll",
         "uia" or "property" or "element" or "state" => "uia",
         var x => x,
     };
 
-    public void Reset() { SeenPresent = false; Met = false; SeenUnmet = false; }
+    public void Reset()
+    {
+        SeenPresent = false; Met = false; SeenUnmet = false;
+        TraceActive = TraceFailed = HoldBroken = false; FailReason = null; ScrollCount = 0; ScrollAccum = 0; SeenHidden = false; ScrollPx = 0; ScrollPrev = null;
+    }
+
+    public static List<PointF> ParsePoints(JsonNode? n)
+    {
+        var res = new List<PointF>();
+        foreach (var p in J.Items(n))
+            if (p is JsonArray a && a.Count >= 2) res.Add(new PointF((float)(J.AsNum(a[0]) ?? 0), (float)(J.AsNum(a[1]) ?? 0)));
+            else if (J.Num(p, "x") is double x) res.Add(new PointF((float)x, (float)(J.Num(p, "y") ?? 0)));
+        return res;
+    }
+
+    /// <summary>"hold": ["Shift"] / "Ctrl+Alt" — keys that must stay down for the whole drag.</summary>
+    private void ParseHold(JsonNode n)
+    {
+        foreach (var k in J.Items(J.Get(n, "hold") ?? J.Get(n, "holding")))
+            foreach (var part in (J.AsStr(k) ?? "").Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                uint vk = part.ToLowerInvariant() switch
+                {
+                    "shift" => 0x10, "ctrl" or "control" => 0x11, "alt" => 0x12, "win" => 0x5B, "space" => 0x20,
+                    _ => TutorialOverlay.Keys.Parse(part)?.Vk ?? 0,
+                };
+                if (vk == 0) throw new ArgumentException($"hold: cannot parse key '{part}'");
+                if (!Hold.Contains(vk)) { Hold.Add(vk); HoldNames.Add(part.Length == 1 ? part.ToUpperInvariant() : char.ToUpperInvariant(part[0]) + part[1..]); }
+            }
+    }
 
     public JsonObject ToJson() => new()
     {
@@ -544,6 +630,7 @@ internal sealed class Condition
         ["anchor"] = Anchor?.Describe() ?? Pixel?.Anchor?.Describe() ?? From?.Anchor.Describe(),
         ["keys"] = Keys.Count > 0 ? string.Join(" | ", Keys) : null,
         ["property"] = Type == "uia" ? Property : null,
+        ["scrolled"] = Type == "scroll" ? ScrollCount : null,
     };
 }
 

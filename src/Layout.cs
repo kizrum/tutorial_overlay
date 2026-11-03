@@ -17,7 +17,7 @@ internal sealed class AnchorGeo
     public bool FromLastKnown;        // the visual anchor is out of view; P is where it was last seen
 }
 
-internal enum PrimKind { Circle, Rect, Arrow, Badge, Label, Info, Check, Checkbox, Stroke }
+internal enum PrimKind { Circle, Rect, Arrow, Badge, Label, Info, Check, Checkbox, Stroke, Path, Wheel }
 
 internal sealed class Prim
 {
@@ -25,7 +25,8 @@ internal sealed class Prim
     public PointF A, B;          // circle/badge/check centre = A; arrow tail = A, tip = B
     public float R;
     public RectangleF Rect;      // rect/label/info/checkbox box; stroke bounds
-    public PointF[]? Points;     // stroke polyline
+    public PointF[]? Points;     // stroke / path polyline
+    public float Progress;       // path: share already traced (drawn solid)
     public string? Text, Title;
     public Color Color;
     public float Width;          // stroke
@@ -227,6 +228,19 @@ internal static class Layout
                     };
                     geo.Prims.Add(p);
                     if (sp.IsTarget && firstTarget == null) { geo.Hits.Add(new HitArea { Circle = true, C = c, R = r }); AddTargetBounds(p.Extent()); }
+                    break;
+                }
+                case "path":
+                {
+                    // a trajectory to follow: points relative to the anchor point, a curve through them
+                    if (sp.Points is not { Count: >= 2 } pts) break;
+                    var line = Engine.Densify(pts.Select(q => Rel(q.X, q.Y)).ToList(), sp.Smooth, 4);
+                    float l = line.Min(q => q.X), tp = line.Min(q => q.Y), rr = line.Max(q => q.X), bt = line.Max(q => q.Y);
+                    geo.Prims.Add(new Prim
+                    {
+                        Kind = PrimKind.Path, Points = line.ToArray(), Rect = RectangleF.FromLTRB(l - 14 * s, tp - 14 * s, rr + 14 * s, bt + 14 * s),
+                        Color = ColorOf(sp, Palette.Accent), Width = Stroke(sp), Scale = s,
+                    });
                     break;
                 }
                 case "check":
