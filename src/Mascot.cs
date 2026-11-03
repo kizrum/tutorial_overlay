@@ -64,6 +64,10 @@ internal sealed class MascotWindow : Form
     private PointF _spotTarget;
     private DateTime _targetMovedAt;
     private bool _respot;               // the glued spot went bad while the target moved: choose again once it rests
+    // No clean spot existed when this one was chosen: keep it until the target or the card moves. Without this the
+    // figure re-chose every 0.7 s, hopping (vanish, appear) between equally bad spots by a crowded row of cells.
+    private bool _acceptBad;
+    private Rectangle _cardAtChoice;
 
     private Mood _mood;
     private float _moodLeft;
@@ -195,14 +199,17 @@ internal sealed class MascotWindow : Form
             // no walking while it moves: ride along where that is fine, otherwise stand still and only choose a
             // new spot once the content has rested a moment
             var glued = new PointF(t.X + _offset.X, t.Y + _offset.Y);
+            var cardNow = Engine.CardRect is Rectangle crNow ? crNow : Rectangle.Empty;
+            if (_acceptBad && cardNow != _cardAtChoice) _acceptBad = false;   // the card moved: maybe there is room now
             if (Dist(t, _spotTarget) > 0.5f)
             {
                 _spotTarget = t;
                 _targetMovedAt = DateTime.UtcNow;
+                _acceptBad = false;
                 if (SpotOk(inp, glued, size, s)) { _pos = glued; _respot = false; }
                 else _respot = true;
             }
-            else if (!_respot && !SpotOk(inp, _pos, size, s))
+            else if (!_respot && !_acceptBad && !SpotOk(inp, _pos, size, s))
             {
                 // the target did not move but grew over us (or something else now covers the spot): step aside
                 _respot = true;
@@ -224,6 +231,8 @@ internal sealed class MascotWindow : Form
             return;
         }
         var dest = ChooseSpot(inp, t, size, s);
+        _acceptBad = !SpotOk(inp, dest, size, s);
+        _cardAtChoice = Engine.CardRect is Rectangle crc ? crc : Rectangle.Empty;
         _offset = new PointF(dest.X - t.X, dest.Y - t.Y);
         if (Dist(_pos, dest) < size.Width * 0.3f) return;     // the best there is is about here: no shuffling on the spot
         if (Dist(_pos, dest) <= size.Width * WalkFigures) StartWalk(dest, s);
@@ -317,7 +326,7 @@ internal sealed class MascotWindow : Form
     }
 
     /// <summary>
-    /// The least disturbing spot near the target, out of 16 candidates (8 directions × 2 distances):
+    /// The least disturbing spot near the target, out of 24 candidates (8 directions × 3 distances):
     /// on screen; off the target, the marks, captions and the card; off the line from the mouse to the target
     /// (the user's hand travels there); over plain background rather than busy UI (judged from the window's own
     /// pixels); and, other things equal, close to where it stands now — less to move.
@@ -328,7 +337,7 @@ internal sealed class MascotWindow : Form
         var work = Native.WorkAreaAt(t);
         var avoid = inp.Avoid.ToList();
         avoid.Add(RectangleF.Inflate(tb, 6 * s, 6 * s));
-        if (Engine.CardRect is Rectangle cr && cr.Width > 0) avoid.Add(cr);
+        RectangleF card = Engine.CardRect is Rectangle cr && cr.Width > 0 ? cr : RectangleF.Empty;
         Native.GetCursorPos(out var cp);
         var cursor = new PointF(cp.X, cp.Y);
 
@@ -337,13 +346,14 @@ internal sealed class MascotWindow : Form
         {
             float a = i * MathF.PI / 4;
             var dir = new PointF(MathF.Cos(a), MathF.Sin(a));
-            for (int d = 0; d < 2; d++)
+            for (int d = 0; d < 3; d++)
             {
                 // out from the target's own edge (a dialog-sized target is far wider than the figure), then the
-                // figure's half-size that way plus a gap; the second ring a little farther out
+                // figure's half-size that way plus a gap; the second and third rings farther out, for when a row of
+                // marks and the card leave no room close by
                 float edge = EdgeDistance(tb, t, dir) + 6 * s;
                 float half = MathF.Abs(dir.X) * size.Width / 2 + MathF.Abs(dir.Y) * size.Height / 2;
-                float reach = edge + (half + 8 * s) * (d == 0 ? 1 : 1.55f);
+                float reach = edge + (half + 8 * s) * (d == 0 ? 1 : d == 1 ? 1.55f : 2.3f);
                 // below and beside reads naturally (the hand points up and across); right above is last
                 float pref = (dir.Y < -0.5f ? 6 : dir.Y < 0 ? 3 : 0) + d * 5;
                 cands.Add((new PointF(t.X + dir.X * reach, t.Y + dir.Y * reach), pref));
@@ -363,6 +373,12 @@ internal sealed class MascotWindow : Form
             {
                 var x = RectangleF.Intersect(a, box);
                 if (!x.IsEmpty) score += 40 + 300 * x.Width * x.Height / (box.Width * box.Height);
+            }
+            // the card is what the user reads and presses: standing on it is worse than on a few marks
+            if (!card.IsEmpty && card.IntersectsWith(box))
+            {
+                var x = RectangleF.Intersect(card, box);
+                score += 400 + 600 * x.Width * x.Height / (box.Width * box.Height);
             }
             if (SegmentHitsBox(cursor, t, RectangleF.Inflate(box, 12 * s, 12 * s))) score += 25;
             score += busy[i] * 30;
