@@ -72,7 +72,10 @@ internal static class Ports
         finally { Marshal.FreeHGlobal(buf); }
     }
 
-    /// <summary>What to give the agent: the command that registers this server in Claude Code.</summary>
-    public static string ConnectCommand(int port, string key) =>
-        $"claude mcp add --transport http tutorial-overlay http://127.0.0.1:{port}/mcp --header \"Authorization: Bearer {key}\"";
+    /// <summary>
+    /// What to give the agent: the command that registers this server in Claude Code, for all projects. It runs this
+    /// exe with --stdio, which finds the port and the key itself — so the line stays right after a port change.
+    /// </summary>
+    public static string ConnectCommand() =>
+        $"claude mcp add --scope user tutorial-overlay -- \"{Environment.ProcessPath}\" --stdio";
 }

@@ -24,6 +24,7 @@ internal static class Program
     public static string Key { get; private set; } = "";
     public static string KeyFrom { get; private set; } = "";
     public static DateTime StartedAt { get; } = DateTime.Now;
+    private static bool Background;
     private static string[] _args = Array.Empty<string>();
 
     /// <summary>Run on the UI thread (windows are created and closed there).</summary>
@@ -145,7 +146,7 @@ internal static class Program
                          "If a tool answers 'busy', another agent is using it: call wait_for_turn.",
         });
         // started by hand (no one reads stdout): tell the person
-        if (!Console.IsOutputRedirected)
+        if (!Console.IsOutputRedirected && !Background)
             MessageBox.Show(string.Format(Settings.Global.Text.AlreadyRunning, port?.ToString() ?? "?", pid?.ToString() ?? "?"),
                             "TutorialOverlay", MessageBoxButtons.OK, MessageBoxIcon.Information);
         return 2;
@@ -175,6 +176,9 @@ internal static class Program
             if (args[0] == "--tray-guard-spawn") return Instances.GuardSpawn(guarded);
             if (args[0] == "--tray-guard") return Instances.Guard(guarded);
         }
+        // MCP over stdin/stdout for clients that start their servers themselves: a bridge to the one real server
+        if (args.Length == 1 && args[0] == "--stdio") return StdioBridge.Run();
+        if (args.Length == 1 && args[0] == "--launch") return StdioBridge.Launch();
         Native.SetProcessDpiAwarenessContext(Native.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
@@ -208,6 +212,8 @@ internal static class Program
                 case "--show-inactive": Engine.HideWhenInactiveDefault = false; break;
                 case "--hide-from-capture": Settings.Global.HideFromCapture = true; break;
                 case "--verbose": Log.Verbose = true; break;
+                // started by --stdio: nobody sits in front of it to read an "already running" message box
+                case "--background": Background = true; break;
                 case "--instance":
                     // a second server beside the first meant a second tray icon and two overlays fighting over the screen
                     Console.Error.WriteLine("--instance was removed: there is exactly one TutorialOverlay per user. " +
@@ -222,6 +228,7 @@ internal static class Program
                 case "--settings": openSettings = i + 1 < args.Length && !args[i + 1].StartsWith("--") ? args[++i] : "server"; break;
                 case "--help" or "-h" or "/?":
                     Console.Error.WriteLine("TutorialOverlay [--port 7788] [--key KEY] [--no-anim] [--show-inactive] [--verbose] [--settings [server|look|keys]] [--stop] [--version]\n" +
+                                            "TutorialOverlay --stdio: MCP over stdin/stdout (starts the server if needed; port and key found by itself)\n" +
                                             "  --settings: open the settings window right away (on that tab)\n" +
                                             "  one server per user (a second launch only reports where it runs) and one agent at a time\n" +
                                             "  --stop: ask the running server to quit, as its tray menu would\n" +

@@ -69,8 +69,8 @@ closed for nothing. The new port works after a restart; the window offers to res
 `.mcp.json` has to be changed by hand.
 
 "For the agent → Copy the connect command" (and the same item in the tray menu) puts a ready line on the clipboard:
-`claude mcp add --transport http tutorial-overlay http://127.0.0.1:<port>/mcp --header "Authorization: Bearer <key>"`
-with the port from the field. Give it to the agent in chat or run it in a terminal.
+`claude mcp add --scope user tutorial-overlay -- "<this exe>" --stdio`. It holds neither the port nor the key
+(`--stdio` finds both), so it stays right after a port change. Run it in a terminal or give it to the agent in chat.
 While a tutorial runs, the language, colour and hotkeys from its spec apply until it ends.
 
 The server listens on `127.0.0.1` only. The key is taken from a header only: `Authorization: Bearer` or
@@ -85,14 +85,36 @@ does not freeze and old lines are dropped from the queue (the `events` tool stil
 over, 3 previous files are kept). It is useful when the exe runs without a console and nobody sees stderr.
 `--verbose` adds debug lines, for example why scrolling was not counted.
 
-## Connecting Claude Code
+## Connecting an MCP client
 
-The repository root has a `.mcp.json` (server `tutorial-overlay`, the key comes from `${TUTORIAL_OVERLAY_KEY}`).
-For another project:
+**stdio (the usual way).** `TutorialOverlay.exe --stdio` is what MCP clients start:
+
+```
+claude mcp add --scope user tutorial-overlay -- "C:\path\to\TutorialOverlay.exe" --stdio
+```
+
+It is a thin bridge to the one server of this user, not a second overlay:
+
+- the server is not running → it starts it on its own (two hops, as for the tray guard), so the overlay stays in the
+  tray after the agent exits and a client that kills its server's process tree does not take it along;
+- the port comes from `%LOCALAPPDATA%\TutorialOverlay\server.json`, the key from `TUTORIAL_OVERLAY_KEY` or `key.txt`;
+- every stdin line goes to the server as a POST, answers and server-sent events come back as stdout lines, and the
+  bridge keeps the event stream (GET) open, which is how the server knows the agent is still there;
+- stdin closed (the client exits) → DELETE: the server is free for the next agent at once;
+- the server went away (quit, restarted on another port) → the bridge finds or starts it again and keeps the
+  session id, so the agent keeps its turn;
+- a server started with another key (`--key`) answers 401: the bridge says so in the error the agent gets.
+
+stdout carries JSON-RPC only; the bridge's diagnostics go to stderr.
+
+**Streamable HTTP.** Clients that speak it may connect to the running overlay directly:
 
 ```
 claude mcp add --transport http tutorial-overlay http://127.0.0.1:7788/mcp --header "Authorization: Bearer <key>"
 ```
+
+with the port and the key of this computer. The repository root has a `.mcp.json` of this kind (the key comes from
+`${TUTORIAL_OVERLAY_KEY}`).
 
 ## Settings
 

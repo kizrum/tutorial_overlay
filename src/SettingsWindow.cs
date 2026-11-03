@@ -197,7 +197,7 @@ internal sealed class SettingsWindow : Form
         DarkButton? forAgent = null;
         forAgent = Button(_t.SetForAgentBtn, () =>
         {
-            Copy(Ports.ConnectCommand(PortValue ?? Program.Port, Program.Key));
+            Copy(Ports.ConnectCommand());
             Flash(forAgent!, _t.Copied);
         });
         add(_t.SetForAgent, forAgent);

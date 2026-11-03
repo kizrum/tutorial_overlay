@@ -43,7 +43,7 @@ internal sealed class TrayIcon : IDisposable
         _settings = new ToolStripMenuItem("", null, (_, _) => SettingsWindow.Open()) { Font = new Font(_menu.Font, FontStyle.Bold) };
         _copyKey = new ToolStripMenuItem("", null, (_, _) => Copy(Program.Key));
         _copyUrl = new ToolStripMenuItem("", null, (_, _) => Copy($"http://127.0.0.1:{Program.Port}/mcp"));
-        _copyCommand = new ToolStripMenuItem("", null, (_, _) => Copy(Ports.ConnectCommand(Program.Port, Program.Key)));
+        _copyCommand = new ToolStripMenuItem("", null, (_, _) => Copy(Ports.ConnectCommand()));
         _folder = new ToolStripMenuItem("", null, (_, _) => OpenFolder(Path.GetDirectoryName(Settings.FilePath)!));
         _stop = new ToolStripMenuItem("", null, (_, _) => Engine.UserAction("stop", "tray"));
         _exit = new ToolStripMenuItem("", null, (_, _) => Quit());
