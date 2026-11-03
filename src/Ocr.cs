@@ -420,7 +420,7 @@ internal static unsafe class Ocr
             int tol = q.Length / 6;
             if (match == "exact")
             {
-                int d = Distance(text, q);
+                int d = Distance(text, q, tol + 1);
                 if (d <= tol) res.Add(new TextMatch(line.Text, line.Bounds, d / (float)q.Length));
                 continue;
             }
@@ -443,7 +443,8 @@ internal static unsafe class Ocr
                 int e = s + q.Length;
                 if ((s > 0 && text[s - 1] != ' ') || (e < text.Length && text[e] != ' ')) continue;
                 int d = 0;
-                for (int k = 0; k < q.Length && d <= tol; k++) if (text[s + k] != q[k]) d++;
+                for (int k = 0; k < q.Length && d <= tol; k++)
+                    if (text[s + k] != q[k]) d += LookAlike(text[s + k], q[k]) ? 1 : tol + 1;
                 if (d < best) { best = d; bestAt = s; }
             }
             if (bestAt >= 0 && best <= tol) res.Add(new TextMatch(Original(bestAt, q.Length), Span(bestAt, q.Length), best / (float)q.Length));
@@ -451,16 +452,36 @@ internal static unsafe class Ocr
         return res.OrderBy(m => m.Score).ToList();
     }
 
-    private static int Distance(string a, string b)
+    // Groups of characters OCR mistakes for each other (lower case, after Norm). Anything else is a real
+    // difference: "Fill each 8 steps" must not pass for "Fill each 2 steps", nor "Pattern 12" for "Pattern 1".
+    private static readonly string[] LookAlikeGroups =
     {
+        "l1i|!íì", "0oо°", "5s", "8bв", "2z", "6б", "9g",
+        "aа", "eеё", "pр", "cс", "yу", "xх", "kк", "mм", "tт", "hн", "nп", "uи", "rг",
+    };
+
+    private static bool LookAlike(char a, char b)
+    {
+        foreach (var g in LookAlikeGroups) if (g.IndexOf(a) >= 0 && g.IndexOf(b) >= 0) return true;
+        return false;
+    }
+
+    // Edit distance where swapping look-alikes costs 1, and swapping other characters or dropping/adding a digit
+    // costs `hard` (more than the tolerance, so such a line never matches). Dropping/adding a letter costs 1.
+    private static int Distance(string a, string b, int hard)
+    {
+        int Indel(char c) => char.IsDigit(c) ? hard : 1;
         var prev = new int[b.Length + 1];
         var cur = new int[b.Length + 1];
-        for (int j = 0; j <= b.Length; j++) prev[j] = j;
+        for (int j = 1; j <= b.Length; j++) prev[j] = prev[j - 1] + Indel(b[j - 1]);
         for (int i = 1; i <= a.Length; i++)
         {
-            cur[0] = i;
+            cur[0] = prev[0] + Indel(a[i - 1]);
             for (int j = 1; j <= b.Length; j++)
-                cur[j] = Math.Min(Math.Min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
+            {
+                int sub = a[i - 1] == b[j - 1] ? 0 : LookAlike(a[i - 1], b[j - 1]) ? 1 : hard;
+                cur[j] = Math.Min(Math.Min(cur[j - 1] + Indel(b[j - 1]), prev[j] + Indel(a[i - 1])), prev[j - 1] + sub);
+            }
             (prev, cur) = (cur, prev);
         }
         return prev[b.Length];

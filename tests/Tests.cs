@@ -349,6 +349,18 @@ public static class OcrTests
         A.Eq(0, Ocr.Find(lines, "Sample").Count(m => m.Score > 0), "no fuzzy match inside a longer word");
     }
 
+    public static void TestOtherCharactersAreNotForgiven()
+    {
+        // FL's channel menu: while "Fill each 2 steps" is hovered OCR may not read it, and the mark must not jump to 8.
+        var menu = Lines("Fill each 4 steps", "Fill each 8 steps");
+        A.Eq(0, Ocr.Find(menu, "Fill each 2 steps").Count, "8 is not a look-alike of 2");
+        A.Eq(0, Ocr.Find(menu, "Fill each 2 steps", "exact").Count, "exact: 8 is not a look-alike of 2");
+        A.Eq(1, Ocr.Find(Lines("Fill each Z steps"), "Fill each 2 steps").Count, "Z read for 2 is forgiven");
+        A.Eq(0, Ocr.Find(Lines("Pattern 12"), "Pattern 1", "exact").Count, "an extra digit is a different line");
+        A.Eq(1, Ocr.Find(Lines("Pattern 1"), "Pattern l", "exact").Count, "l read for 1");
+        A.Eq(1, Ocr.Find(Lines("Мaстер"), "Мастер").Count, "Latin a read for Cyrillic а");
+    }
+
     public static void TestYoAndRegex()
     {
         A.Eq(1, Ocr.Find(Lines("Ещё раз"), "еще").Count, "ё = е");

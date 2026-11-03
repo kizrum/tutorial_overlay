@@ -55,8 +55,11 @@ The caption is found by the text recognition built into Windows (`Windows.Media.
 WinRT, no extra libraries) in the window's own pixels, so it works under other windows too. The anchor point is the
 centre of the found text; `offset` counts from it. The mark follows the caption while it scrolls (a search every
 0.7 s). `match`: `contains` (default), `exact` (the whole line), `regex`. Recognition slips of the "a letter for a
-look-alike" kind (l/I, 0/O — up to one in 6 letters) are forgiven, but only within whole words: "Kicks" will not
-match "Kick". `index` is the occurrence's number top to bottom and left to right; `within: [x,y,w,h]` is a part of
+look-alike" kind (l/I/1, 0/O, 5/S, 8/B, 2/Z, a Latin letter for the same-looking Cyrillic one — up to one in 6
+letters) are forgiven, but only within whole words: "Kicks" will not match "Kick". Other characters must match:
+"Fill each 8 steps" does not pass for "Fill each 2 steps", nor "Pattern 12" for "Pattern 1". In a menu, anchor an
+item to the menu window (`windowClass` + `offset`) rather than to its text: the hovered item is repainted and may
+not be read. `index` is the occurrence's number top to bottom and left to right; `within: [x,y,w,h]` is a part of
 the element.
 
 The recogniser follows the query's alphabet: Cyrillic gets the Russian recogniser, Latin the English one (the
