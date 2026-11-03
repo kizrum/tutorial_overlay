@@ -698,3 +698,32 @@ public static class LayoutTests
         A.Eq(PrimKind.Circle, p.Kind, "default shape of a point");
     }
 }
+
+public static class ToolAnnotationTests
+{
+    /// <summary>Plugin directories flag tools without a title and a read-only or destructive hint.</summary>
+    public static void TestEveryToolIsAnnotated()
+    {
+        var tools = TutorialOverlay.Tools.List();
+        A.Check(tools.Count > 0, "tools listed");
+        foreach (var t in tools)
+        {
+            var name = J.Str(t, "name")!;
+            var ann = t!["annotations"];
+            A.Check(!string.IsNullOrWhiteSpace(J.Str(t, "title")), name + ": title");
+            A.Check(ann?["readOnlyHint"] != null, name + ": readOnlyHint");
+            if (ann!["readOnlyHint"]!.GetValue<bool>() == false) A.Check(ann["destructiveHint"] != null, name + ": destructiveHint");
+            A.Eq(false, ann["openWorldHint"]!.GetValue<bool>(), name + ": local only");
+        }
+    }
+
+    public static void TestOnlyLibraryChangesAreDestructive()
+    {
+        var destructive = TutorialOverlay.Tools.List()
+            .Where(t => t!["annotations"]!["destructiveHint"]?.GetValue<bool>() == true)
+            .Select(t => J.Str(t, "name")).OrderBy(n => n).ToArray();
+        A.Eq("delete_tutorial,save_tutorial", string.Join(",", destructive), "destructive tools");
+        foreach (var n in new[] { "status", "describe", "screenshot", "find_text", "events", "list_tutorials" })
+            A.Check(TutorialOverlay.Tools.List().First(t => J.Str(t, "name") == n)!["annotations"]!["readOnlyHint"]!.GetValue<bool>(), n + " read-only");
+    }
+}

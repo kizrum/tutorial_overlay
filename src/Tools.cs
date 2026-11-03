@@ -131,12 +131,55 @@ internal static class Tools
     private const int DefaultMaxEdge = 1024;
     private const int DefaultMaxMatches = 5;
 
-    private static JsonObject Tool(string name, string desc, JsonObject props) => new()
+    /// <summary>
+    /// MCP tool annotations: a human title and what a call does to the user's computer, so clients can decide what to
+    /// ask permission for. ReadOnly = changes nothing (asking the user or reading the screen only). Destructive =
+    /// may lose something the user has: saved tutorials (delete, or a save over the same name). Everything else only
+    /// draws on the overlay or steers the tutorial, which the user can undo. All local: no tool reaches the internet.
+    /// </summary>
+    private static readonly Dictionary<string, (string Title, bool ReadOnly, bool Destructive, bool Idempotent)> Annotations = new()
     {
-        ["name"] = name,
-        ["description"] = desc,
-        ["inputSchema"] = new JsonObject { ["type"] = "object", ["properties"] = props, ["additionalProperties"] = true },
+        ["draw"] = ("Draw marks", false, false, false),
+        ["clear"] = ("Clear marks", false, false, true),
+        ["start_tutorial"] = ("Start a tutorial", false, false, false),
+        ["append_steps"] = ("Add tutorial steps", false, false, false),
+        ["goto_step"] = ("Go to a step", false, false, true),
+        ["complete_step"] = ("Complete the step", false, false, false),
+        ["stop_tutorial"] = ("Stop the tutorial", false, false, true),
+        ["status"] = ("Tutorial status", true, false, true),
+        ["describe"] = ("Describe an app's UI", true, false, true),
+        ["screenshot"] = ("Screenshot", true, false, true),
+        ["template"] = ("Remember a UI picture", false, false, true),
+        ["hint"] = ("Show a hint", false, false, true),
+        ["pick"] = ("Ask the user to click", true, false, false),
+        ["find_text"] = ("Find text on screen", true, false, true),
+        ["validate"] = ("Check a tutorial's anchors", true, false, true),
+        ["ask"] = ("Ask the user", true, false, false),
+        ["ask_area"] = ("Ask the user to circle an area", true, false, false),
+        ["save_tutorial"] = ("Save a tutorial", false, true, true),
+        ["list_tutorials"] = ("List saved tutorials", true, false, true),
+        ["delete_tutorial"] = ("Delete a saved tutorial", false, true, true),
+        ["wait_for_turn"] = ("Wait for the overlay", false, false, true),
+        ["release"] = ("Release the overlay", false, false, true),
+        ["events"] = ("Read events", true, false, true),
     };
+
+    private static JsonObject Tool(string name, string desc, JsonObject props)
+    {
+        var (title, readOnly, destructive, idempotent) = Annotations[name];
+        var annotations = new JsonObject { ["title"] = title, ["readOnlyHint"] = readOnly };
+        // destructiveHint and idempotentHint only mean something for a tool that changes things
+        if (!readOnly) { annotations["destructiveHint"] = destructive; annotations["idempotentHint"] = idempotent; }
+        annotations["openWorldHint"] = false;
+        return new JsonObject
+        {
+            ["name"] = name,
+            ["title"] = title,
+            ["description"] = desc,
+            ["inputSchema"] = new JsonObject { ["type"] = "object", ["properties"] = props, ["additionalProperties"] = true },
+            ["annotations"] = annotations,
+        };
+    }
 
     public static async Task<JsonObject> Call(string name, JsonNode args, CancellationToken ct, string? session = null)
     {
