@@ -49,3 +49,16 @@ Ready tutorials (specs in JSON) are not part of the repository: the `examples/` 
 (`%LOCALAPPDATA%\TutorialOverlay\tutorials\`) stay on your own computer, and `examples/` is in `.gitignore`. If the
 folder exists, the tests check that no tutorial in it has unknown fields and that each gives the scale (`"scale"`)
 its offsets were measured at; without it these tests check nothing.
+
+## Releases
+
+Built on this computer, no hosted CI. Bump `<Version>` in `TutorialOverlay.csproj`, add its section to
+`CHANGELOG.md`, then:
+
+```powershell
+.\release.ps1 -Tag
+```
+
+It runs the tests, publishes a self-contained single-file exe, checks that `--version` reports the new version, and
+writes `dist\TutorialOverlay-<version>-win-x64.zip` and tags `v<version>`. Then: push `main` and the tag, and
+create the GitHub release `v<version>` with the zip.
