@@ -259,7 +259,7 @@ internal static class Tools
         if (rect.Width < 4 || rect.Height < 4) return Fail("area is empty or off screen");
 
         // the window's own pixels when possible (no overlay drawings, works while covered); else the screen without our windows
-        Bitmap? shot = window != IntPtr.Zero ? ScreenCapture.CaptureWindow(window, rect) : null;
+        Bitmap? shot = window != IntPtr.Zero ? ScreenCapture.CaptureWindow(window, rect, maxAgeMs: 0) : null;
         if (shot == null)
         {
             bool flip = !Settings.Global.HideFromCapture;
@@ -327,7 +327,7 @@ internal static class Tools
         var rect = Rectangle.Round(new RectangleF(b.X + (float)(J.AsNum(ra[0]) ?? 0), b.Y + (float)(J.AsNum(ra[1]) ?? 0),
                                                   (float)(J.AsNum(ra[2]) ?? 0), (float)(J.AsNum(ra[3]) ?? 0)));
         if (rect.Width < 6 || rect.Height < 6) return Fail("template too small (at least 6x6 px)");
-        using var shot = ScreenCapture.CaptureWindow(r.Root, rect);
+        using var shot = ScreenCapture.CaptureWindow(r.Root, rect, maxAgeMs: 0);
         if (shot == null) return Fail("could not capture the window (minimized?)");
         var png = ScreenCapture.Png(shot, 0, out _);
         // kept on disk too, and carried inside saved tutorials that use it
@@ -416,7 +416,7 @@ internal static class Tools
         bool withOverlay = J.Bool(args, "includeOverlay") ?? false;
         // the app's own window (works while it is covered) unless the screen is asked for / the overlay must be in it
         string source = (J.Str(args, "source") ?? (window != IntPtr.Zero && !withOverlay ? "window" : "screen")).ToLowerInvariant();
-        Bitmap? winShot = source == "window" && window != IntPtr.Zero ? ScreenCapture.CaptureWindow(window, rect) : null;
+        Bitmap? winShot = source == "window" && window != IntPtr.Zero ? ScreenCapture.CaptureWindow(window, rect, maxAgeMs: 0) : null;
         // flip exclusion only when the wanted result differs from the normal state, then restore it
         bool flip = withOverlay == Settings.Global.HideFromCapture;
         if (winShot != null) flip = false;

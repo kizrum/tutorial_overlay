@@ -90,6 +90,28 @@ internal static class Native
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize,
         IntPtr hdcSrc, ref POINT pptSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
+    [DllImport("user32.dll")] private static extern IntPtr BeginDeferWindowPos(int n);
+    [DllImport("user32.dll")] private static extern IntPtr DeferWindowPos(IntPtr hdwp, IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] private static extern bool EndDeferWindowPos(IntPtr hdwp);
+
+    /// <summary>
+    /// Puts windows on top of the topmost band, the last one highest, as one change: the screen never shows an
+    /// in-between order (raising them one call at a time briefly had the marks' canvas above the step card).
+    /// </summary>
+    public static void RaiseTogether(IReadOnlyList<(IntPtr hwnd, uint flags)> bottomToTop)
+    {
+        const uint f = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+        var hdwp = BeginDeferWindowPos(bottomToTop.Count);
+        foreach (var (h, extra) in bottomToTop)
+        {
+            if (hdwp == IntPtr.Zero) break;
+            hdwp = DeferWindowPos(hdwp, h, HWND_TOPMOST, 0, 0, 0, 0, f | extra);
+        }
+        if (hdwp != IntPtr.Zero && EndDeferWindowPos(hdwp)) return;
+        // the batch failed (a window went meanwhile): one at a time, still bottom to top
+        foreach (var (h, extra) in bottomToTop) SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, f | extra);
+    }
+
     [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hwnd, IntPtr hdc);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int w, int h, uint flags);

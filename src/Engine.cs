@@ -693,7 +693,7 @@ internal static partial class Engine
     private static string Signature(Scene sc)
     {
         var sb = new System.Text.StringBuilder();
-        sb.Append((int)(sc.Dim * 100)).Append('|').Append((int)(sc.Pulse * 24)).Append('|');
+        sb.Append((int)(sc.Dim * 100)).Append('|').Append((int)(sc.Pulse * Renderer.PulseSteps)).Append('|');
         // moving parts (the dot running along a path, the wheel's arrows) need every frame
         if (sc.Prims.Any(x => x.prim.Kind is PrimKind.Path or PrimKind.Wheel)) sb.Append(DateTime.UtcNow.Ticks / (TimeSpan.TicksPerMillisecond * 33)).Append('|');
         foreach (var (p, a) in sc.Prims)
@@ -891,6 +891,8 @@ internal static partial class Engine
         return procs.Contains(fg) || ShellHosts.Contains(fg);
     }
 
+    private const int OpensWindowsMaxAgeMs = 300;
+
     /// <summary>Armed "opens" targets: satisfied by a NEW matching window, or a pane that was absent at click time.</summary>
     private static void CheckOpens(List<Mark> marks, Step? step, DateTime now)
     {
@@ -906,7 +908,8 @@ internal static partial class Engine
             }
             if (!opened && a.Path.Count == 0)
             {
-                var fresh = Resolver.MatchingWindows(a).Where(h => m.OpensBefore == null || !m.OpensBefore.Contains(h)).ToList();
+                // the resolver's window list (a few frames old at most) instead of walking every window each frame
+                var fresh = Resolver.MatchingWindows(a, Resolver.RecentWindows(OpensWindowsMaxAgeMs)).Where(h => m.OpensBefore == null || !m.OpensBefore.Contains(h)).ToList();
                 if (fresh.Count > 0) { opened = true; what = Native.WindowTitle(fresh[0]); }
             }
             if (opened)
@@ -1055,15 +1058,16 @@ internal static partial class Engine
         var tb = geo.TargetBounds;
         var c = new PointF(tb.X + tb.Width / 2, tb.Y + tb.Height / 2);
         float rx = tb.Width / 2 + 10 * geo.A.Scale, ry = tb.Height / 2 + 10 * geo.A.Scale;
-        var samples = new List<Color> { ScreenCapture.Sample(c, 1) };
+        var points = new List<PointF> { c };
         for (int i = 0; i < 8; i++)
         {
             double a = i * Math.PI / 4;
             var p = new PointF(c.X + (float)Math.Cos(a) * rx, c.Y + (float)Math.Sin(a) * ry);
             if (Native.HitWindow(p).rootPid == OwnPid) continue;     // our card is not the app
-            samples.Add(ScreenCapture.Sample(p, 1));
+            points.Add(p);
         }
-        return Contrast.Pick(samples);
+        // one screen read for all nine points
+        return Contrast.Pick(ScreenCapture.SampleMany(points, 1));
     }
 
     /// <summary>
@@ -1220,23 +1224,38 @@ internal static partial class Engine
         }
     }
 
+    /// <summary>
+    /// Reads the screen at the mark's probe off the UI thread and outside <see cref="Sync"/> (a screen read waits
+    /// for the compositor; clicks and tool calls must not wait for it), then judges the colour under the lock.
+    /// </summary>
     private static void RunPixelCheck(Mark m, PointF pt, AnchorGeo ag)
     {
         var chk = m.Check!;
+        if (m.CheckSampling) return;
         if (!m.Anchor.IsScreen && !ShowsAnchorWindow(pt, ag)) return;   // covered: don't conclude anything
         if (Native.HitWindow(pt).rootPid == OwnPid) return; // under our card / a button: can't see the app there
-        var color = ScreenCapture.Sample(pt, chk.Radius);
-        bool ok = chk.Evaluate(color);
-        if (m.CheckOk != ok)
+        m.CheckSampling = true;
+        int epoch = m.Epoch;
+        System.Threading.Tasks.Task.Run(() =>
         {
-            bool first = m.CheckOk == null;
-            m.CheckOk = ok;
-            Events.Emit("check_changed", new()
+            var color = ScreenCapture.Sample(pt, chk.Radius);
+            lock (Sync)
             {
-                ["mark"] = m.Id, ["ok"] = ok, ["initial"] = first, ["color"] = $"#{color.R:X2}{color.G:X2}{color.B:X2}",
-                ["at"] = J.PtJson(pt), ["step"] = _tut?.Index,
-            });
-        }
+                // the step was left or entered again meanwhile: this reading belongs to the old visit
+                if (m.Epoch != epoch) return;
+                m.CheckSampling = false;
+                if (!ReferenceEquals(m.Check, chk)) return;
+                bool ok = chk.Evaluate(color);
+                if (m.CheckOk == ok) return;
+                bool first = m.CheckOk == null;
+                m.CheckOk = ok;
+                Events.Emit("check_changed", new()
+                {
+                    ["mark"] = m.Id, ["ok"] = ok, ["initial"] = first, ["color"] = $"#{color.R:X2}{color.G:X2}{color.B:X2}",
+                    ["at"] = J.PtJson(pt), ["step"] = _tut?.Index,
+                });
+            }
+        });
     }
 
     /// <summary>
@@ -1424,8 +1443,20 @@ internal static partial class Engine
                     var ag = AnchorNow(c.Pixel!.Anchor!, out _);
                     if (ag == null) break;
                     var pt = c.Pixel.At is PointF pa ? new PointF(ag.P.X + pa.X, ag.P.Y + pa.Y) : ag.P;
-                    if (!ShowsAnchorWindow(pt, ag)) break;
-                    c.Met = c.Pixel.Evaluate(ScreenCapture.Sample(pt, c.Pixel.Radius));
+                    if (!ShowsAnchorWindow(pt, ag) || c.PixelSampling) break;
+                    // read off the UI thread and outside the lock; the verdict counts from the next evaluation
+                    c.PixelSampling = true;
+                    var (px, cond, step, entered) = (c.Pixel, c, s, s.EnteredAt);
+                    System.Threading.Tasks.Task.Run(() =>
+                    {
+                        var color = ScreenCapture.Sample(pt, px.Radius);
+                        lock (Sync)
+                        {
+                            cond.PixelSampling = false;
+                            if (!ReferenceEquals(_tut?.Current, step) || step.EnteredAt != entered) return;   // another visit
+                            cond.Met = px.Evaluate(color);
+                        }
+                    });
                     break;
                 }
             }

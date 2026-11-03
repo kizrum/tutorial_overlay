@@ -29,8 +29,140 @@ internal sealed class Scene
     public float HoleScale = 1;
 }
 
+/// <summary>
+/// One thing on the canvas, for working out what changed since the last frame. <see cref="Key"/> is its look apart
+/// from the animation; <see cref="Phase"/> the animation step it is drawn at (0 = not animated); <see cref="Changing"/>
+/// the part an animation step repaints (a frame's border, not its whole inside).
+/// </summary>
+internal readonly record struct DrawItem(string Key, RectangleF Extent, RectangleF[] Changing, int Phase);
+
 internal static class Renderer
 {
+    /// <summary>
+    /// Animation steps of the breathing glow; the frame signature uses the same quantisation, so this is how often a
+    /// pulsing mark is repainted (~10 times a second at 8). The glow's opacity only goes 0.10 → 0.20, so a step is
+    /// 0.0125 — not visible, while every repaint of the glow costs real CPU (24 steps took over half a core).
+    /// </summary>
+    public const int PulseSteps = 8;
+
+    /// <summary>Everything the scene draws, as items whose changes can be tracked between frames.</summary>
+    public static List<DrawItem> Items(Scene sc)
+    {
+        var list = new List<DrawItem>(sc.Prims.Count + sc.Ripples.Count + sc.Probes.Count);
+        int pulse = (int)(sc.Pulse * PulseSteps);
+        int tick = (int)(DateTime.UtcNow.Ticks / (TimeSpan.TicksPerMillisecond * 33));
+        foreach (var (p, a) in sc.Prims)
+        {
+            var ext = p.Extent();
+            int phase = p.Kind switch
+            {
+                PrimKind.Circle or PrimKind.Rect or PrimKind.Checkbox => pulse,
+                PrimKind.Path or PrimKind.Wheel => tick,      // moving parts: every frame
+                _ => 0,
+            };
+            var changing = p.Kind == PrimKind.Rect && phase != 0 ? BorderStrips(p, ext) : new[] { ext };
+            list.Add(new DrawItem(PrimKey(p, a), ext, changing, phase));
+        }
+        foreach (var r in sc.Ripples)
+        {
+            float rr = r.R0 + 34 * r.Scale;
+            var e = new RectangleF(r.C.X - rr - 4, r.C.Y - rr - 4, 2 * rr + 8, 2 * rr + 8);
+            list.Add(new DrawItem($"ripple|{r.T0.Ticks}|{r.C.X:0}|{r.C.Y:0}", e, new[] { e }, tick));
+        }
+        foreach (var (p, r) in sc.Probes)
+        {
+            int half = r + 2;
+            var e = new RectangleF((float)Math.Round(p.X) - half - 1, (float)Math.Round(p.Y) - half - 1, 2 * half + 3, 2 * half + 3);
+            list.Add(new DrawItem($"probe|{e.X}|{e.Y}|{r}", e, new[] { e }, 0));
+        }
+        return list;
+    }
+
+    /// <summary>The glow of a frame breathes along its border only: four strips instead of the whole box.</summary>
+    private static RectangleF[] BorderStrips(Prim p, RectangleF outer)
+    {
+        float m = p.Width * 2 + 10 * p.Scale + p.Radius * 0.3f + 2;
+        var inner = RectangleF.Inflate(p.Rect, -m, -m);
+        if (inner.Width <= 0 || inner.Height <= 0) return new[] { outer };
+        return new[]
+        {
+            RectangleF.FromLTRB(outer.Left, outer.Top, outer.Right, inner.Top),
+            RectangleF.FromLTRB(outer.Left, inner.Bottom, outer.Right, outer.Bottom),
+            RectangleF.FromLTRB(outer.Left, inner.Top, inner.Left, inner.Bottom),
+            RectangleF.FromLTRB(inner.Right, inner.Top, outer.Right, inner.Bottom),
+        };
+    }
+
+    private static string PrimKey(Prim p, float a)
+    {
+        var sb = new System.Text.StringBuilder(96);
+        static int Q(float v) => (int)Math.Round(v * 4);
+        sb.Append((int)p.Kind).Append('|').Append(Q(p.A.X)).Append(',').Append(Q(p.A.Y)).Append('|').Append(Q(p.B.X)).Append(',').Append(Q(p.B.Y))
+          .Append('|').Append(Q(p.R)).Append('|').Append(Q(p.Rect.X)).Append(',').Append(Q(p.Rect.Y)).Append(',').Append(Q(p.Rect.Width)).Append(',').Append(Q(p.Rect.Height))
+          .Append('|').Append(p.Color.ToArgb()).Append('|').Append(Q(p.Width)).Append('|').Append(Q(p.Size)).Append('|').Append(Q(p.Radius)).Append('|').Append(Q(p.Scale))
+          .Append('|').Append(p.On ? 1 : 0).Append(p.Glow ? 1 : 0).Append('|').Append(Q(p.Progress * 100)).Append('|').Append((int)Math.Round(a * 64))
+          .Append('|').Append(p.Text).Append('|').Append(p.Title);
+        if (p.Points is { Length: > 0 } pts)
+            sb.Append('|').Append(pts.Length).Append(',').Append(Q(pts[0].X)).Append(',').Append(Q(pts[0].Y)).Append(',').Append(Q(pts[^1].X)).Append(',').Append(Q(pts[^1].Y));
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// What must be repainted to go from the last frame to this one: items that appeared or went (their whole
+    /// extent) and animated items that moved on a step (the part that animates). Nothing, if the frames look alike.
+    /// </summary>
+    public static List<RectangleF> Dirty(IReadOnlyList<DrawItem> prev, IReadOnlyList<DrawItem> cur)
+    {
+        var dirty = new List<RectangleF>();
+        var old = new Dictionary<string, Queue<DrawItem>>();
+        foreach (var p in prev)
+        {
+            if (!old.TryGetValue(p.Key, out var q)) old[p.Key] = q = new Queue<DrawItem>();
+            q.Enqueue(p);
+        }
+        foreach (var c in cur)
+        {
+            if (old.TryGetValue(c.Key, out var q) && q.Count > 0)
+            {
+                var p = q.Dequeue();
+                if (p.Phase != c.Phase) dirty.AddRange(c.Changing);
+            }
+            else dirty.Add(c.Extent);
+        }
+        foreach (var q in old.Values) foreach (var p in q) dirty.Add(p.Extent);
+        return dirty;
+    }
+
+    private static long Area(Rectangle r) => (long)r.Width * r.Height;
+
+    /// <summary>Whole-pixel rectangles inside <paramref name="bounds"/>, overlapping ones merged where that wastes little.</summary>
+    public static List<Rectangle> Merge(IEnumerable<RectangleF> rects, Rectangle bounds)
+    {
+        var list = new List<Rectangle>();
+        foreach (var rf in rects)
+        {
+            var r = Rectangle.Intersect(Rectangle.FromLTRB((int)Math.Floor(rf.Left) - 1, (int)Math.Floor(rf.Top) - 1,
+                                                           (int)Math.Ceiling(rf.Right) + 1, (int)Math.Ceiling(rf.Bottom) + 1), bounds);
+            if (r.Width > 0 && r.Height > 0) list.Add(r);
+        }
+        for (bool merged = true; merged;)
+        {
+            merged = false;
+            for (int i = 0; i < list.Count && !merged; i++)
+                for (int j = i + 1; j < list.Count; j++)
+                    if (list[i].IntersectsWith(list[j]) && Area(Rectangle.Union(list[i], list[j])) <= (Area(list[i]) + Area(list[j])) * 13 / 10)
+                    {
+                        // only when one box covers both with little extra (a frame's four strips stay four strips;
+                        // overlapping parts that are not merged are simply painted twice)
+                        list[i] = Rectangle.Union(list[i], list[j]);
+                        list.RemoveAt(j);
+                        merged = true;
+                        break;
+                    }
+        }
+        return list;
+    }
+
     public static RectangleF ContentBounds(Scene sc)
     {
         RectangleF? all = null;
@@ -44,12 +176,15 @@ internal static class Renderer
         return all ?? RectangleF.Empty;
     }
 
-    public static void Draw(Graphics g, Scene sc, RectangleF screen)
+    /// <param name="only">repainting just this part: shapes that do not reach it are skipped (clipping alone still
+    /// builds every path and glow of the scene, for each repainted part)</param>
+    public static void Draw(Graphics g, Scene sc, RectangleF screen, RectangleF? only = null)
     {
         Theme.Quality(g);
         if (sc.Dim > 0.01f) DrawDim(g, sc, screen);
         foreach (var (p, a) in sc.Prims)
         {
+            if (only is RectangleF o && !o.IntersectsWith(p.Extent())) continue;
             switch (p.Kind)
             {
                 case PrimKind.Circle: Ring(g, p, a, sc.Pulse); break;

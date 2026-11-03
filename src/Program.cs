@@ -286,6 +286,16 @@ internal static class Program
                 buttons.Update(frame.Buttons);
                 card.UpdateModel(frame.Card);
                 mascot.Update(frame.Mascot);
+                // the canvas goes on top (it appeared, or its once-a-second re-raise) in one batch with our other
+                // windows above it: the marks never cover the card, the buttons or the mascot, not even for a moment
+                if (overlay.RaisePending)
+                {
+                    var order = new System.Collections.Generic.List<(IntPtr, uint)> { (overlay.Handle, overlay.TakeRaise()) };
+                    foreach (var h in buttons.Handles) order.Add((h, 0));
+                    order.Add((mascot.Handle, 0));
+                    order.Add((card.Handle, 0));
+                    Native.RaiseTogether(order);
+                }
             }
             catch (Exception e) { Log.Warn("frame: " + e); }
         };

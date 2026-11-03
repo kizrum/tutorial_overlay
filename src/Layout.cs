@@ -136,8 +136,9 @@ internal static class Layout
         bool hasCheckbox = m.Shapes.Any(x => x.Type == "checkbox");
 
         PointF Rel(float? x, float? y) => new(ag.P.X + (x ?? 0), ag.P.Y + (y ?? 0));
-        // shapes without coordinates wrap the element — unless the anchor points at a spot inside it
-        RectangleF? Wrap() => m.Anchor.HasPoint ? null : ag.Bounds;
+        // shapes without coordinates wrap the element — unless the anchor points at a spot inside it: an offset, or
+        // a text / template found in it (the element is only where it is searched for)
+        RectangleF? Wrap() => m.Anchor.HasPoint || m.Anchor.Find != null ? null : ag.Bounds;
         Color ColorOf(ShapeSpec sp, Color fallback) => sp.Color ?? m.AutoColor ?? fallback;
         bool Thin(ShapeSpec sp) => sp.Style == "thin";
         float Stroke(ShapeSpec sp) => (sp.Width ?? (Thin(sp) ? 2f : 3.5f)) * s;

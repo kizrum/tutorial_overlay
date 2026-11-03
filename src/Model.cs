@@ -391,6 +391,8 @@ internal sealed class Mark
     public int Hits;
     public bool? CheckOk;
     public DateTime CheckAt;
+    public bool CheckSampling;            // a screen read for the check is under way (off the UI thread)
+    public int Epoch;                     // bumped on every reset: a reading that started before it is dropped
     public MarkGeo? Geo;
     public string Visibility = "resolving";
     public DateTime? ShownAt;
@@ -431,7 +433,7 @@ internal sealed class Mark
         if (m.Shapes.Count == 0)
         {
             // sensible default: frame around a UI element, ring around a bare point
-            bool hasBounds = m.Anchor.Path.Count > 0 || (m.Anchor.HasBounds && m.Anchor.Dx == 0 && m.Anchor.Dy == 0 && m.Anchor.Origin == "topleft");
+            bool hasBounds = m.Anchor.Find == null && (m.Anchor.Path.Count > 0 || m.Anchor.HasBounds && m.Anchor.Dx == 0 && m.Anchor.Dy == 0 && m.Anchor.Origin == "topleft");
             m.Shapes.Add(new ShapeSpec { Type = hasBounds ? "rect" : "circle" });
             if (J.Str(n, "number") is string num) m.Shapes.Add(new ShapeSpec { Type = "badge", Text = num });
             if ((J.Str(n, "hint") ?? J.Str(n, "caption")) is string hint) m.Shapes.Add(new ShapeSpec { Type = "label", Text = hint });
@@ -447,6 +449,7 @@ internal sealed class Mark
     public void ResetRuntime()
     {
         Dismissed = false; Hits = 0; CheckOk = null; CheckAt = default; Geo = null; Visibility = "resolving"; ShownAt = null;
+        CheckSampling = false; Epoch++;
         OpensArmedAt = null; OpensBefore = null; OpensPresentBefore = false; AutoColor = null;
     }
 }
@@ -511,6 +514,7 @@ internal sealed class Condition
     public Size ScrollPrevSize;
     public DateTime ScrollSampledAt;
     public bool ScrollSampling;
+    public bool PixelSampling;       // a screen read for a pixel condition is under way (off the UI thread)
 
     public static Condition Parse(JsonNode n, AnchorSpec? defaults)
     {

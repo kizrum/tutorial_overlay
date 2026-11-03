@@ -89,6 +89,7 @@ internal static class Resolver
         var wanted = _wanted;
         var pidCache = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
         var windows = EnumTopWindows();
+        _recent = (windows, Environment.TickCount64);
         var liveKeys = new HashSet<string>();
 
         foreach (var a in wanted)
@@ -201,12 +202,31 @@ internal static class Resolver
         return list;
     }
 
+    private static volatile Tuple<List<TopWindow>, long>? _recentBox;
+    private static (List<TopWindow> list, long at)? _recent
+    {
+        set => _recentBox = value is { } v ? Tuple.Create(v.list, v.at) : null;
+    }
+
+    /// <summary>
+    /// The top-level windows as the resolver last saw them, if that is at most <paramref name="maxAgeMs"/> old
+    /// (it walks them every ~140 ms anyway); otherwise walked again now. Read-only: callers share the list.
+    /// </summary>
+    public static IReadOnlyList<TopWindow> RecentWindows(int maxAgeMs)
+    {
+        long now = Environment.TickCount64;
+        if (_recentBox is { } r && now - r.Item2 <= maxAgeMs) return r.Item1;
+        var list = EnumTopWindows();
+        _recent = (list, now);
+        return list;
+    }
+
     /// <summary>Top-level windows matching an anchor's process / window title / class / top-level title (no UIA).</summary>
-    public static HashSet<IntPtr> MatchingWindows(AnchorSpec a)
+    public static HashSet<IntPtr> MatchingWindows(AnchorSpec a, IReadOnlyList<TopWindow>? windows = null)
     {
         int[]? pids = a.Process != null ? Pids(a.Process) : null;
         var set = new HashSet<IntPtr>();
-        foreach (var w in EnumTopWindows())
+        foreach (var w in windows ?? EnumTopWindows())
         {
             if (pids != null && !pids.Contains(w.Pid)) continue;
             if (a.Hwnd is long h && w.Hwnd != (IntPtr)h) continue;

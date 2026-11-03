@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Linq;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using System.Threading;
 
 namespace TutorialOverlay;
@@ -90,6 +92,10 @@ internal static class Finder
     public static readonly ConcurrentDictionary<string, Template> Templates = new();
     private static readonly ConcurrentDictionary<string, FindResult> Results = new();
     private static readonly ConcurrentDictionary<string, DateTime> TextSearchedAt = new();
+    /// <summary>The app is not in front (its marks are usually hidden): templates are looked for only this often.</summary>
+    private const int TemplateIdleMs = 1000;
+    /// <summary>What the template search last looked at and found: an unchanged picture needs no new search.</summary>
+    private static readonly ConcurrentDictionary<string, (int hash, Template tpl, Rectangle area, FindResult res)> LastLook = new();
     /// <summary>OCR is ~10× the cost of template matching: text anchors are re-read less often.</summary>
     private const int TextIntervalMs = 1200, TextConfirmMs = 1500;
     private static volatile AnchorSpec[] _wanted = Array.Empty<AnchorSpec>();
@@ -132,9 +138,19 @@ internal static class Finder
                     if (!AppInFront(a)) continue;
                     TextSearchedAt[a.Key] = now;
                 }
+                else if (!AppInFront(a))
+                {
+                    // a template: every pass while its app is in front; behind another app only now and then (its
+                    // marks are usually hidden then, but stay shown with hideWhenInactive: false)
+                    var now = DateTime.UtcNow;
+                    if (TextSearchedAt.TryGetValue(a.Key, out var at) && (now - at).TotalMilliseconds < TemplateIdleMs) continue;
+                    TextSearchedAt[a.Key] = now;
+                }
                 try { Results[a.Key] = Search(a, Get(a.Key)); }
                 catch (Exception e) { Log.Debug("finder: " + e.Message); }
             }
+            var keys = _wanted.Select(a => a.Key).ToHashSet();
+            foreach (var k in LastLook.Keys.Where(k => !keys.Contains(k)).ToList()) LastLook.TryRemove(k, out _);
             Wake.WaitOne(_wanted.Length == 0 ? 500 : 180);
         }
     }
@@ -214,11 +230,25 @@ internal static class Finder
             return new FindResult(true, new PointF(c.X - frame.X, c.Y - frame.Y), 0, last, DateTime.UtcNow);
         }
         var img = Template.Gray(shot, out int iw, out int ih);
+        // the same picture of the same place (relative to the window) as last time: the answer is the same too
+        var hc = new HashCode();
+        hc.AddBytes(img);
+        int hash = hc.ToHashCode();
+        var place = new Rectangle((int)Math.Round(area.X - frame.X), (int)Math.Round(area.Y - frame.Y), shot.Width, shot.Height);
+        if (LastLook.TryGetValue(a.Key, out var look) && look.hash == hash && ReferenceEquals(look.tpl, tpl) && look.area == place)
+            return look.res.Found ? look.res with { LastRel = last, At = DateTime.UtcNow } : Miss();
         var (bx, by, score) = Match(img, iw, ih, tpl, Template.GrayFull(shot), shot.Width, shot.Height);
-        if (score > f.MaxScore) return Miss();
-        // top-left of the match (full-size pixels), back in screen space, then relative to the window frame
-        var hit = new PointF(area.X + bx, area.Y + by);
-        return new FindResult(true, new PointF(hit.X - frame.X, hit.Y - frame.Y), score, last, DateTime.UtcNow);
+        FindResult res;
+        if (score > f.MaxScore) res = Miss();
+        else
+        {
+            // the centre of the match (full-size pixels), like a found text's: a ring without coordinates lands on it,
+            // and a piece cut from the very edge of its pane does not count as "scrolled past the edge"
+            var hit = new PointF(area.X + bx + tpl.FW / 2f, area.Y + by + tpl.FH / 2f);
+            res = new FindResult(true, new PointF(hit.X - frame.X, hit.Y - frame.Y), score, last, DateTime.UtcNow);
+        }
+        LastLook[a.Key] = (hash, tpl, place, res);
+        return res;
         }
         finally { shot?.Dispose(); }
     }
@@ -519,17 +549,17 @@ internal static class Finder
         int mw = iw - t.W + 1, mh = ih - t.H + 1;
         if (mw <= 0 || mh <= 0) return (0, 0, 1f);
         var map = new long[mw * mh];
-        for (int y = 0; y < mh; y++)
-            for (int x = 0; x < mw; x++)
-            {
-                long sad = 0;
-                for (int ty = 0; ty < t.H; ty++)
-                {
-                    int io = (y + ty) * iw + x, to = ty * t.W;
-                    for (int tx = 0; tx < t.W; tx++) sad += Math.Abs(img[io + tx] - t.Px[to + tx]);
-                }
-                map[y * mw + x] = sad;
-            }
+        unsafe
+        {
+            fixed (byte* pi = img, pt = t.Px)
+                for (int y = 0; y < mh; y++)
+                    for (int x = 0; x < mw; x++)
+                    {
+                        long sad = 0;
+                        for (int ty = 0; ty < t.H; ty++) sad += Sad(pi + (y + ty) * iw + x, pt + ty * t.W, t.W);
+                        map[y * mw + x] = sad;
+                    }
+        }
 
         // the best few half-size positions, at least half a template apart
         var picked = new List<(int x, int y)>();
@@ -550,19 +580,52 @@ internal static class Finder
         // full-size comparison around each candidate
         long best = long.MaxValue;
         int bx = 0, by = 0;
-        foreach (var (cx, cy) in picked)
-            for (int y = Math.Max(0, cy * 2 - Refine); y <= Math.Min(fh - t.FH, cy * 2 + Refine); y++)
-                for (int x = Math.Max(0, cx * 2 - Refine); x <= Math.Min(fw - t.FW, cx * 2 + Refine); x++)
-                {
-                    long sad = 0;
-                    for (int ty = 0; ty < t.FH && sad < best; ty++)
-                    {
-                        int io = (y + ty) * fw + x, to = ty * t.FW;
-                        for (int tx = 0; tx < t.FW; tx++) sad += Math.Abs(full[io + tx] - t.Full[to + tx]);
-                    }
-                    if (sad < best) { best = sad; bx = x; by = y; }
-                }
+        unsafe
+        {
+            fixed (byte* pf = full, ptf = t.Full)
+                foreach (var (cx, cy) in picked)
+                    for (int y = Math.Max(0, cy * 2 - Refine); y <= Math.Min(fh - t.FH, cy * 2 + Refine); y++)
+                        for (int x = Math.Max(0, cx * 2 - Refine); x <= Math.Min(fw - t.FW, cx * 2 + Refine); x++)
+                        {
+                            long sad = 0;
+                            for (int ty = 0; ty < t.FH && sad < best; ty++) sad += Sad(pf + (y + ty) * fw + x, ptf + ty * t.FW, t.FW);
+                            if (sad < best) { best = sad; bx = x; by = y; }
+                        }
+        }
         long n = (long)t.FW * t.FH;
         return (bx, by, best == long.MaxValue ? 1f : (float)(best / (double)(n * 255)));
+    }
+
+    /// <summary>
+    /// Sum of absolute differences of n bytes. PSADBW sums 16 byte differences in one instruction, which makes the
+    /// template search several times faster than a byte at a time; the result is exactly the same.
+    /// </summary>
+    internal static unsafe long Sad(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)
+    {
+        if (a.Length != b.Length) throw new ArgumentException("lengths differ");
+        fixed (byte* pa = a, pb = b) return Sad(pa, pb, a.Length);
+    }
+
+    internal static unsafe long Sad(byte* a, byte* b, int n)
+    {
+        int i = 0;
+        long s = 0;
+        if (Sse2.IsSupported)
+        {
+            var acc = Vector128<ulong>.Zero;
+            for (; i + 16 <= n; i += 16)
+                acc = Sse2.Add(acc, Sse2.SumAbsoluteDifferences(Sse2.LoadVector128(a + i), Sse2.LoadVector128(b + i)).AsUInt64());
+            if (i + 8 <= n)
+            {
+                // the upper halves load as zero on both sides, so they add nothing
+                var va = Sse2.LoadScalarVector128((ulong*)(a + i)).AsByte();
+                var vb = Sse2.LoadScalarVector128((ulong*)(b + i)).AsByte();
+                acc = Sse2.Add(acc, Sse2.SumAbsoluteDifferences(va, vb).AsUInt64());
+                i += 8;
+            }
+            s = (long)(acc.GetElement(0) + acc.GetElement(1));
+        }
+        for (; i < n; i++) s += Math.Abs(a[i] - b[i]);
+        return s;
     }
 }

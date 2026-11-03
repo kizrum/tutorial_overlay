@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -37,32 +39,126 @@ internal static class ScreenCapture
         }
     }
 
+    /// <summary>
+    /// The averaged colour around each point, from one screen read covering them all (one read of the screen
+    /// costs about as much as a small one, so nine separate reads cost nine times as much).
+    /// </summary>
+    public static Color[] SampleMany(IReadOnlyList<PointF> points, int radius)
+    {
+        var res = new Color[points.Count];
+        if (points.Count == 0) return res;
+        float l = float.MaxValue, t = float.MaxValue, r = float.MinValue, b = float.MinValue;
+        foreach (var p in points) { l = Math.Min(l, p.X); t = Math.Min(t, p.Y); r = Math.Max(r, p.X); b = Math.Max(b, p.Y); }
+        var box = Rectangle.FromLTRB((int)Math.Round(l) - radius, (int)Math.Round(t) - radius, (int)Math.Round(r) + radius + 1, (int)Math.Round(b) + radius + 1);
+        // a huge target: one read the size of a monitor would cost more than separate small ones
+        if ((long)box.Width * box.Height > 4_000_000)
+        {
+            for (int i = 0; i < points.Count; i++) res[i] = Sample(points[i], radius);
+            return res;
+        }
+        try
+        {
+            using var bmp = Capture(box);
+            var data = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                unsafe
+                {
+                    for (int i = 0; i < points.Count; i++)
+                    {
+                        int cx = (int)Math.Round(points[i].X) - box.X, cy = (int)Math.Round(points[i].Y) - box.Y;
+                        long sr = 0, sg = 0, sb = 0, n = 0;
+                        for (int y = cy - radius; y <= cy + radius; y++)
+                            for (int x = cx - radius; x <= cx + radius; x++)
+                            {
+                                if (x < 0 || y < 0 || x >= bmp.Width || y >= bmp.Height) continue;
+                                byte* px = (byte*)data.Scan0 + y * data.Stride + x * 4;
+                                sb += px[0]; sg += px[1]; sr += px[2]; n++;
+                            }
+                        res[i] = n == 0 ? Color.Black : Color.FromArgb(255, (int)(sr / n), (int)(sg / n), (int)(sb / n));
+                    }
+                }
+            }
+            finally { bmp.UnlockBits(data); }
+        }
+        catch (Exception e)
+        {
+            Log.Debug("sample failed: " + e.Message);
+            for (int i = 0; i < res.Length; i++) res[i] = Color.Black;
+        }
+        return res;
+    }
+
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
     private const uint PW_RENDERFULLCONTENT = 2;
 
+    /// <summary>The last whole-window print of one window: shared by everyone who reads that window's pixels.</summary>
+    private sealed class WindowShot
+    {
+        public Bitmap? Bmp;
+        public Rectangle Win;
+        public long At;
+    }
+
+    private static readonly Dictionary<IntPtr, WindowShot> Shots = new();
+    /// <summary>A print younger than this is reused: the finder, OCR, scroll watch and mascot often want the same window together.</summary>
+    public const int ShotTtlMs = 90;
+    /// <summary>Prints unused this long are let go (a full-window print of a 4K window is ~33 MB).</summary>
+    private const int ShotKeepMs = 3000;
+
     /// <summary>
     /// The window's own pixels (PrintWindow), even while other windows cover it, cropped to <paramref name="screenRect"/>.
     /// Null if the window can't render itself this way (minimised, blank result).
+    /// PrintWindow always renders the whole window, so the print is kept for <paramref name="maxAgeMs"/> and other
+    /// reads of the same window crop from it instead of printing it again; <paramref name="maxAgeMs"/> 0 = a new print.
     /// </summary>
-    public static Bitmap? CaptureWindow(IntPtr hwnd, Rectangle screenRect)
+    public static Bitmap? CaptureWindow(IntPtr hwnd, Rectangle screenRect, int maxAgeMs = ShotTtlMs)
     {
         if (!Native.GetWindowRect(hwnd, out var wr)) return null;
         var win = wr.ToRectangle();
         if (win.Width <= 0 || win.Height <= 0) return null;
-        using var full = new Bitmap(win.Width, win.Height, PixelFormat.Format32bppArgb);
-        using (var g = Graphics.FromImage(full))
-        {
-            var hdc = g.GetHdc();
-            bool ok;
-            try { ok = PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT); }
-            finally { g.ReleaseHdc(hdc); }
-            if (!ok) return null;
-        }
         var crop = Rectangle.Intersect(new Rectangle(screenRect.X - win.X, screenRect.Y - win.Y, screenRect.Width, screenRect.Height),
                                        new Rectangle(0, 0, win.Width, win.Height));
         if (crop.Width <= 0 || crop.Height <= 0) return null;
-        var bmp = full.Clone(crop, PixelFormat.Format32bppArgb);
+        long now = Environment.TickCount64;
+        WindowShot e;
+        lock (Shots)
+        {
+            if (!Shots.TryGetValue(hwnd, out e!)) Shots[hwnd] = e = new WindowShot { At = now };
+            // let go of prints nobody has asked for lately (busy ones are skipped, they are in use)
+            foreach (var (h, old) in Shots)
+            {
+                if (ReferenceEquals(old, e) || now - old.At < ShotKeepMs || !System.Threading.Monitor.TryEnter(old)) continue;
+                try { old.Bmp?.Dispose(); old.Bmp = null; }
+                finally { System.Threading.Monitor.Exit(old); }
+            }
+            foreach (var h in Shots.Where(kv => kv.Value.Bmp == null && now - kv.Value.At >= ShotKeepMs && !ReferenceEquals(kv.Value, e)).Select(kv => kv.Key).ToList()) Shots.Remove(h);
+        }
+        Bitmap bmp;
+        lock (e)
+        {
+            if (maxAgeMs <= 0 || e.Bmp == null || e.Win != win || now - e.At > maxAgeMs)
+            {
+                // the same size as last time: print into the same bitmap instead of allocating ~W×H×4 bytes again
+                if (e.Bmp == null || e.Bmp.Width != win.Width || e.Bmp.Height != win.Height)
+                {
+                    e.Bmp?.Dispose();
+                    e.Bmp = new Bitmap(win.Width, win.Height, PixelFormat.Format32bppArgb);
+                }
+                bool ok;
+                using (var g = Graphics.FromImage(e.Bmp))
+                {
+                    var hdc = g.GetHdc();
+                    try { ok = PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT); }
+                    finally { g.ReleaseHdc(hdc); }
+                }
+                if (!ok) { e.Bmp.Dispose(); e.Bmp = null; return null; }
+                e.Win = win;
+                e.At = Environment.TickCount64;
+            }
+            bmp = e.Bmp.Clone(crop, PixelFormat.Format32bppArgb);
+        }
         if (LooksBlank(bmp)) { bmp.Dispose(); return null; }
         return bmp;
     }

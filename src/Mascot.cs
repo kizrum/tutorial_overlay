@@ -386,7 +386,9 @@ internal sealed class MascotWindow : Form
         var res = new float[boxes.Count];
         if (root == IntPtr.Zero || boxes.Count == 0) return res;
         var all = boxes.Aggregate(RectangleF.Union);
-        using var shot = ScreenCapture.CaptureWindow(root, Rectangle.Round(all));
+        // how busy the background is changes slowly: a print up to 2 s old (the finder's, say) will do, so a new
+        // spot rarely costs a whole-window print on the UI thread
+        using var shot = ScreenCapture.CaptureWindow(root, Rectangle.Round(all), maxAgeMs: 2000);
         if (shot == null) return res;
         // CaptureWindow crops to the window; find where the shot sits on screen
         var wr = Native.FrameRect(root);

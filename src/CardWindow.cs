@@ -723,6 +723,9 @@ internal sealed class ButtonHost
 {
     private readonly Dictionary<string, FloatButton> _windows = new();
 
+    /// <summary>The on-screen buttons' windows.</summary>
+    public IEnumerable<IntPtr> Handles => _windows.Values.Select(w => w.Handle);
+
     public void Update(List<ButtonGeo> buttons)
     {
         var keep = new HashSet<string>();

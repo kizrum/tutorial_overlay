@@ -577,3 +577,102 @@ public static class LeaseTests
         A.Eq("a<-:first request|-<a:session ended", string.Join("|", log), "events");
     }
 }
+
+public static class PerfPathTests
+{
+    /// <summary>The PSADBW template comparison gives exactly the byte-by-byte sum, for every length and tail.</summary>
+    public static void TestSadMatchesScalar()
+    {
+        var rnd = new Random(7);
+        for (int n = 0; n <= 70; n++)
+        {
+            var a = new byte[n];
+            var b = new byte[n];
+            rnd.NextBytes(a);
+            rnd.NextBytes(b);
+            long expected = 0;
+            for (int i = 0; i < n; i++) expected += Math.Abs(a[i] - b[i]);
+            A.Eq(expected, Finder.Sad(a, b), $"SAD of {n} bytes");
+        }
+        var hi = Enumerable.Repeat((byte)255, 64).ToArray();
+        A.Eq(64L * 255, Finder.Sad(hi, new byte[64]), "SAD at the extremes");
+    }
+
+}
+
+public static class CanvasTests
+{
+    private static Scene Ring(float pulse, float x = 100)
+    {
+        var sc = new Scene { Pulse = pulse };
+        sc.Prims.Add((new Prim { Kind = PrimKind.Circle, A = new PointF(x, 100), R = 20, Width = 3, Scale = 1, Color = Color.Red }, 1f));
+        sc.Prims.Add((new Prim { Kind = PrimKind.Label, Rect = new RectangleF(400, 400, 120, 30), Text = "hi", Scale = 1, Color = Color.Red }, 1f));
+        return sc;
+    }
+
+    /// <summary>A breathing ring repaints only itself; the still label next to it is left alone.</summary>
+    public static void TestPulseRepaintsOnlyAnimated()
+    {
+        var d = Renderer.Dirty(Renderer.Items(Ring(0.2f)), Renderer.Items(Ring(0.6f)));
+        A.Eq(1, d.Count, "dirty parts");
+        A.Check(d[0].Contains(new PointF(100, 100)) && !d[0].IntersectsWith(new RectangleF(400, 400, 120, 30)), "only the ring");
+        A.Eq(0, Renderer.Dirty(Renderer.Items(Ring(0.6f)), Renderer.Items(Ring(0.6f))).Count, "same frame: nothing");
+    }
+
+    /// <summary>A mark that moves repaints where it was and where it is now.</summary>
+    public static void TestMovedMarkRepaintsBothPlaces()
+    {
+        var d = Renderer.Merge(Renderer.Dirty(Renderer.Items(Ring(0.5f, 100)), Renderer.Items(Ring(0.5f, 300))), new Rectangle(0, 0, 2000, 2000));
+        A.Check(d.Any(r => r.Contains(100, 100)) && d.Any(r => r.Contains(300, 100)), "old and new place");
+        A.Check(!d.Any(r => r.IntersectsWith(new Rectangle(400, 400, 120, 30))), "label untouched");
+    }
+
+    /// <summary>A pulsing frame repaints its border strips, not its whole (possibly panel-sized) inside.</summary>
+    public static void TestFramePulseRepaintsBorderOnly()
+    {
+        Scene F(float pulse)
+        {
+            var sc = new Scene { Pulse = pulse };
+            sc.Prims.Add((new Prim { Kind = PrimKind.Rect, Rect = new RectangleF(100, 100, 1900, 200), Width = 3, Radius = 8, Scale = 1, Color = Color.Red }, 1f));
+            return sc;
+        }
+        var d = Renderer.Merge(Renderer.Dirty(Renderer.Items(F(0.1f)), Renderer.Items(F(0.9f))), new Rectangle(0, 0, 3000, 3000));
+        long area = d.Sum(r => (long)r.Width * r.Height);
+        A.Check(area < 1900L * 200 / 2, $"border only ({area} px)");
+        A.Check(!d.Any(r => r.Contains(1000, 200)), "middle not repainted");
+    }
+
+    public static void TestMergeJoinsOverlapping()
+    {
+        var m = Renderer.Merge(new[] { new RectangleF(0, 0, 10, 10), new RectangleF(5, 5, 10, 10), new RectangleF(100, 100, 5, 5) }, new Rectangle(0, 0, 50, 50));
+        A.Eq(1, m.Count, "far one clipped away, near ones merged");
+    }
+}
+
+public static class LayoutTests
+{
+    private static Prim Shape(string anchorJson)
+    {
+        var m = Mark.Parse(A.Json($$"""{"anchor": {{anchorJson}}}"""), null, "t");
+        // the Mixer panel; the text was found near its top-right corner
+        var ag = new AnchorGeo { Bounds = new RectangleF(439, 730, 1951, 750), P = new PointF(2136, 753), Scale = 1 };
+        return Layout.Build(m, ag, false).Prims[0];
+    }
+
+    /// <summary>A text / template anchor points at what was found: the ring goes there, not round the whole panel.</summary>
+    public static void TestFindAnchorRingsTheFoundSpot()
+    {
+        var p = Shape("""{"process": "FL64", "element": {"name": "Mixer"}, "find": {"text": "Master"}}""");
+        A.Eq(PrimKind.Circle, p.Kind, "default shape of a find anchor");
+        A.Eq(new PointF(2136, 753), p.A, "ring centre");
+        A.Check(p.R < 40, $"small ring (R={p.R})");
+    }
+
+    /// <summary>An element anchor without a point still frames the element.</summary>
+    public static void TestElementAnchorStillWraps()
+    {
+        var p = Shape("""{"process": "FL64", "element": {"name": "Mixer"}}""");
+        A.Eq(PrimKind.Rect, p.Kind, "default shape of an element anchor");
+        A.Check(p.Rect.Contains(new RectangleF(439, 730, 1951, 750)), "frames the panel");
+    }
+}
