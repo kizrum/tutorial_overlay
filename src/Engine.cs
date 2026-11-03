@@ -1096,6 +1096,9 @@ internal static partial class Engine
         {
             if (m.ScrollHint is not { } h || m.Satisfied) continue;
             if (h.dir is not ("up" or "down" or "left" or "right" or "any")) continue;
+            // like the marks: nothing over another app the user switched to
+            if (!m.Anchor.IsScreen && (m.HideInactive ?? _tut?.HideWhenInactive ?? HideWhenInactiveDefault)
+                && !AppActive(m.Geo?.A.Pids ?? Array.Empty<int>(), m.Anchor.Process, fgPid)) continue;
             if (!shown.Add(h.dir + h.view)) continue;        // one hint per pane and direction
             float s = Native.ScaleAt(h.toward);
             var at = ScrollHintPoint(h.dir, h.view, h.toward, s);
