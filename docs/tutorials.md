@@ -226,7 +226,8 @@ its "forehead" is the tutorial's progress bar.
 - Its line is the step's `say` field (short, up to ~60 characters), otherwise the step's title.
 - The overlay works out all the motion itself from the target's coordinates and events: the agent does not drive the
   mascot and spends no tokens on it. A separate small window, ~2% of one core.
-- It is switched off in the settings ("Look → Mascot") or in the spec: `"mascot": false`.
+- It is on by default. It is switched off in the settings ("Look" tab, the "Mascot" toggle; this takes effect at
+  once, even in the middle of a tutorial) or for one tutorial in its spec: `"mascot": false`.
 
 ## End of a tutorial and the library
 

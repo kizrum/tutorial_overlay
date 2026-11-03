@@ -39,6 +39,8 @@ internal static class Program
         Engine.HideWhenInactiveDefault = g.HideWhenInactive ?? true;
         // a running tutorial keeps its own lang/accent/hotkey overrides until it ends
         if (!tutorialRunning) Engine.ApplySettings(g);
+        // but the mascot switch is the user's to flip at any moment: turning it off mid-tutorial takes it away now
+        else Settings.Current.Mascot = g.Mascot;
     }
 
     /// <summary>Start a fresh instance (it reads the port from config.json) and quit this one.</summary>
