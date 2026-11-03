@@ -24,32 +24,40 @@ A single exe in C# / .NET 8, written from scratch: no NuGet packages and no thir
 
 The interface of the overlay itself is in Russian or English (`"lang"` in the settings).
 
-## Requirements
+## Install
 
-- Windows 10 or 11, x64.
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) to build. Running a built exe needs the .NET 8
-  Desktop Runtime and the ASP.NET Core Runtime.
-- [Claude Code](https://claude.com/claude-code) — the agent that writes and runs the tutorials.
+Windows 10 or 11, x64. Nothing else: .NET is inside the exe.
 
-## Build and run
+**Claude Code** — download `TutorialOverlay-<version>-win-x64.zip` from
+[Releases](https://github.com/kizrum/tutorial_overlay/releases/latest), unzip it to a folder of your choice (say
+`C:\Tools\TutorialOverlay`) and register it once, for all projects:
+
+```
+claude mcp add --scope user tutorial-overlay -- "C:\Tools\TutorialOverlay\TutorialOverlay.exe" --stdio
+```
+
+That's all: no key, no port. When the agent needs the overlay, it starts it (an icon appears in the tray) and it
+keeps running there until you quit it from the tray menu. The same command is in the tray menu: **"Copy the
+command for the agent"**.
+
+**Any other MCP client** — a local (stdio) server: the command `TutorialOverlay.exe` with the argument `--stdio`.
+Clients that speak Streamable HTTP can also connect to the running overlay directly: see [Server](docs/server.md).
+
+### Updating
+
+Quit TutorialOverlay from the tray menu, unzip the new version over the old folder. Settings, the key and saved
+tutorials live in `%LOCALAPPDATA%\TutorialOverlay` and stay as they are; the `claude mcp add` line stays right too.
+
+## Build from source
+
+[.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0):
 
 ```powershell
 dotnet publish -c Release -o publish
-publish\TutorialOverlay.exe
+claude mcp add --scope user tutorial-overlay -- "$PWD\publish\TutorialOverlay.exe" --stdio
 ```
 
-An icon appears in the tray: the server is listening on `http://127.0.0.1:7788/mcp`. The first run creates an
-access key (`%LOCALAPPDATA%\TutorialOverlay\key.txt`). The server only listens on this computer.
-
-## Connect Claude Code
-
-Right-click the tray icon → **"Copy the command for the agent"** and run it in a terminal. It looks like this:
-
-```
-claude mcp add --transport http tutorial-overlay http://127.0.0.1:7788/mcp --header "Authorization: Bearer <key>"
-```
-
-This repository already has a `.mcp.json`; it takes the key from the `TUTORIAL_OVERLAY_KEY` environment variable.
+`.\release.ps1` builds the release zip; see [Development](docs/development.md).
 
 ## Try it
 

@@ -22,32 +22,41 @@ MCP: агент видит интерфейс программы, обводит
   отвечает прямо в карточке.
 - **Библиотека**: пройденный туториал сохраняется и запускается снова из меню значка в трее, уже без агента.
 
-## Что нужно
+## Установка
 
-- Windows 10 или 11, x64.
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) для сборки. Для запуска готового exe хватает
-  .NET 8 Desktop Runtime и ASP.NET Core Runtime.
-- [Claude Code](https://claude.com/claude-code) — агент, который составляет и ведёт туториалы.
+Windows 10 или 11, x64. Больше ничего не нужно: .NET уже внутри exe.
 
-## Сборка и запуск
+**Claude Code** — скачайте `TutorialOverlay-<версия>-win-x64.zip` со страницы
+[Releases](https://github.com/kizrum/tutorial_overlay/releases/latest), распакуйте в любую папку (например,
+`C:\Tools\TutorialOverlay`) и один раз подключите для всех проектов:
+
+```
+claude mcp add --scope user tutorial-overlay -- "C:\Tools\TutorialOverlay\TutorialOverlay.exe" --stdio
+```
+
+Это всё: ни ключа, ни порта. Когда оверлей понадобится агенту, тот сам его запустит (в трее появится значок), и
+оверлей останется там, пока вы не закроете его из меню значка. Та же команда есть в меню значка в трее:
+**«Скопировать команду для агента»**.
+
+**Другие MCP-клиенты** — это локальный (stdio) сервер: команда `TutorialOverlay.exe` с аргументом `--stdio`.
+Клиенты со Streamable HTTP могут подключиться и прямо к запущенному оверлею: см. [Server](docs/server.md).
+
+### Обновление
+
+Закройте TutorialOverlay из меню значка в трее и распакуйте новую версию поверх старой папки. Настройки, ключ и
+сохранённые туториалы лежат в `%LOCALAPPDATA%\TutorialOverlay` и не меняются; строка `claude mcp add` тоже
+остаётся верной.
+
+## Сборка из исходников
+
+[.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0):
 
 ```powershell
 dotnet publish -c Release -o publish
-publish\TutorialOverlay.exe
+claude mcp add --scope user tutorial-overlay -- "$PWD\publish\TutorialOverlay.exe" --stdio
 ```
 
-В трее появится значок — сервер работает на `http://127.0.0.1:7788/mcp`. При первом запуске создаётся ключ
-доступа (`%LOCALAPPDATA%\TutorialOverlay\key.txt`). Сервер слушает только этот компьютер.
-
-## Подключение к Claude Code
-
-Правый клик по значку в трее → **«Скопировать команду для агента»** и выполните её в терминале. Команда выглядит так:
-
-```
-claude mcp add --transport http tutorial-overlay http://127.0.0.1:7788/mcp --header "Authorization: Bearer <ключ>"
-```
-
-В этом репозитории уже лежит `.mcp.json`: он берёт ключ из переменной окружения `TUTORIAL_OVERLAY_KEY`.
+`.\release.ps1` собирает zip для релиза; см. [Development](docs/development.md).
 
 ## Попробовать
 
