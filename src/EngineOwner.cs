@@ -19,9 +19,6 @@ internal static partial class Engine
     /// <summary>An owner silent this long has most likely gone away: its tutorial may be taken over.</summary>
     private static readonly TimeSpan OwnerTimeout = TimeSpan.FromMinutes(10);
 
-    /// <summary>Calls without an Mcp-Session-Id header (scripts, curl) share this owner name.</summary>
-    public const string Anonymous = "anonymous";
-
     /// <summary>The running tutorial belongs to another agent who is still around (null = no conflict).</summary>
     private static string? ForeignOwner(Tutorial? t)
     {

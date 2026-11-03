@@ -51,13 +51,26 @@ internal sealed class McpServer
         return l;
     }
 
-    private static string Short(string s) => s.Length > 8 ? s[..8] : s;
+    private static string Short(string? s) => s == null ? "(none)" : s.Length > 8 ? s[..8] : s;
 
-    private static string SessionOf(HttpContext ctx)
+    /// <summary>The caller's MCP session; null when the request carries no Mcp-Session-Id.</summary>
+    private static string? SessionOf(HttpContext ctx)
     {
         var s = ctx.Request.Headers["Mcp-Session-Id"].ToString();
-        return string.IsNullOrWhiteSpace(s) ? Engine.Anonymous : s.Trim();
+        return string.IsNullOrWhiteSpace(s) ? null : s.Trim();
     }
+
+    /// <summary>
+    /// Every request after initialize must name its session: the server serves one agent at a time and tells them
+    /// apart by Mcp-Session-Id, so clients without one (they would all look like the same agent) are turned away.
+    /// </summary>
+    private const string NoSession = "missing Mcp-Session-Id header: call initialize first and send the session id it returns with every later request";
+
+    private static bool IsInitialize(JsonNode? body) => body switch
+    {
+        JsonArray a => a.Any(m => J.Str(m, "method") == "initialize"),
+        _ => J.Str(body, "method") == "initialize",
+    };
 
     public McpServer(int port, string key) { _port = port; _key = key; }
 
@@ -115,8 +128,9 @@ internal sealed class McpServer
             case "GET": await HandleSse(ctx); break;
             case "DELETE":
                 // the client ends its session (MCP clients do on exit): the server is free for the next agent
-                Log.Info($"DELETE /mcp: session {Short(SessionOf(ctx))} ends");
-                Lease.Release(SessionOf(ctx), "session ended");
+                if (SessionOf(ctx) is not string ending) { ctx.Response.StatusCode = 400; await ctx.Response.WriteAsync(NoSession); break; }
+                Log.Info($"DELETE /mcp: session {Short(ending)} ends");
+                Lease.Release(ending, "session ended");
                 ctx.Response.StatusCode = 200;
                 break;
             default: ctx.Response.StatusCode = 405; break;
@@ -134,6 +148,13 @@ internal sealed class McpServer
         catch (Exception e)
         {
             await WriteJson(ctx, Error(null, -32700, "parse error: " + e.Message));
+            return;
+        }
+        if (SessionOf(ctx) == null && !IsInitialize(body))
+        {
+            Log.Info($"POST /mcp refused: no Mcp-Session-Id ({J.Str(body, "method") ?? "batch"})");
+            ctx.Response.StatusCode = 400;
+            await WriteJson(ctx, Error(body is JsonArray ? null : J.Get(body, "id")?.DeepClone(), -32600, NoSession));
             return;
         }
         if (body is JsonArray batch)
@@ -217,6 +238,8 @@ internal sealed class McpServer
         if (method == null) return null;            // a response from the client
         Interlocked.Exchange(ref LastRequestTicks, DateTime.UtcNow.Ticks);
         var session = method == "initialize" ? null : SessionOf(ctx);
+        // a batch that carries initialize got past the session check in HandlePost: its other messages still need one
+        if (session == null && method != "initialize") return id == null ? null : Error(id, -32600, NoSession);
         if (session != null)
         {
             Sessions[session] = DateTime.UtcNow.Ticks;
@@ -339,7 +362,7 @@ internal sealed class McpServer
     private static async Task HandleSse(HttpContext ctx)
     {
         if (!ctx.Request.Headers.Accept.ToString().Contains("text/event-stream")) { ctx.Response.StatusCode = 405; return; }
-        var session = SessionOf(ctx);
+        if (SessionOf(ctx) is not string session) { ctx.Response.StatusCode = 400; await ctx.Response.WriteAsync(NoSession); return; }
         ctx.Response.ContentType = "text/event-stream";
         ctx.Response.Headers.CacheControl = "no-cache";
         var ch = Channel.CreateBounded<JsonObject>(new BoundedChannelOptions(500) { FullMode = BoundedChannelFullMode.DropOldest });
