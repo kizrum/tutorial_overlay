@@ -16,6 +16,7 @@ internal sealed class AnchorGeo
     public RectangleF? View;          // visible area the point must be inside (scrollable panes)
     public bool FromLastKnown;        // the visual anchor is out of view; P is where it was last seen
     public string? GoneDir;           // which edge it most likely went past (up/down/left/right), when out of view
+    public RectangleF? Found;         // a find anchor: the found text / template piece on screen
 }
 
 internal enum PrimKind { Circle, Rect, Arrow, Badge, Label, Info, Check, Checkbox, Stroke, Path, Wheel }
@@ -136,9 +137,9 @@ internal static class Layout
         bool hasCheckbox = m.Shapes.Any(x => x.Type == "checkbox");
 
         PointF Rel(float? x, float? y) => new(ag.P.X + (x ?? 0), ag.P.Y + (y ?? 0));
-        // shapes without coordinates wrap the element — unless the anchor points at a spot inside it: an offset, or
-        // a text / template found in it (the element is only where it is searched for)
-        RectangleF? Wrap() => m.Anchor.HasPoint || m.Anchor.Find != null ? null : ag.Bounds;
+        // shapes without coordinates wrap what the anchor names: the element, or the text / template found in it (the
+        // element is then only where it is searched for) — unless the anchor points at a spot (an offset)
+        RectangleF? Wrap() => m.Anchor.HasPoint ? null : m.Anchor.Find != null ? ag.Found : ag.Bounds;
         Color ColorOf(ShapeSpec sp, Color fallback) => sp.Color ?? m.AutoColor ?? fallback;
         bool Thin(ShapeSpec sp) => sp.Style == "thin";
         float Stroke(ShapeSpec sp) => (sp.Width ?? (Thin(sp) ? 2f : 3.5f)) * s;

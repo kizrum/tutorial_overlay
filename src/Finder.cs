@@ -80,7 +80,8 @@ internal sealed class Template
 
 /// <summary>Where a template was last found, relative to its window's frame (so marks follow window moves).</summary>
 /// <summary>Where a template / text was last found; PrevRel is the sighting before LastRel (which way it was moving).</summary>
-internal sealed record FindResult(bool Found, PointF Rel, float Score, PointF? LastRel, DateTime At, PointF? PrevRel = null, DateTime LastSeenAt = default, bool Moving = false, string? Went = null);
+/// <summary>Size: of the found text / template piece (what a shape without coordinates frames); kept while it is out of view.</summary>
+internal sealed record FindResult(bool Found, PointF Rel, float Score, PointF? LastRel, DateTime At, PointF? PrevRel = null, DateTime LastSeenAt = default, bool Moving = false, string? Went = null, SizeF Size = default);
 
 /// <summary>
 /// Visual anchors: finds templates inside the anchor's element using the window's own pixels (PrintWindow),
@@ -167,7 +168,7 @@ internal static class Finder
         string? went = prev?.Found == true ? pt?.Went() : prev?.Went;
         bool moving = prev?.Found == true ? pt != null && (DateTime.UtcNow - pt.MovedAt).TotalSeconds < 1 || went != null
                                           : prev?.Moving ?? false;
-        FindResult Miss() => new(false, default, 1, last, DateTime.UtcNow, before, seenAt, moving, went);
+        FindResult Miss() => new(false, default, 1, last, DateTime.UtcNow, before, seenAt, moving, went, prev?.Size ?? default);
         Template? tpl = null;
         if (f.Text == null && !TemplateStore.TryGet(f.Template, out tpl)) return Miss();
         var r = Resolver.Get(a.WithoutFind().Key) ?? Resolver.ResolveNow(a.WithoutFind());
@@ -227,7 +228,7 @@ internal static class Finder
             // the tracker moved it since this shot was taken: its position is newer than ours
             if (Tracks.TryGetValue(a.Key, out var live) && live.MovedAt > shotAt && prev is { Found: true }) return prev;
             StartTracking(a.Key, shot, m, readArea, area, r.Root);
-            return new FindResult(true, new PointF(c.X - frame.X, c.Y - frame.Y), 0, last, DateTime.UtcNow);
+            return new FindResult(true, new PointF(c.X - frame.X, c.Y - frame.Y), 0, last, DateTime.UtcNow, Size: m.Size);
         }
         var img = Template.Gray(shot, out int iw, out int ih);
         // the same picture of the same place (relative to the window) as last time: the answer is the same too
@@ -245,7 +246,7 @@ internal static class Finder
             // the centre of the match (full-size pixels), like a found text's: a ring without coordinates lands on it,
             // and a piece cut from the very edge of its pane does not count as "scrolled past the edge"
             var hit = new PointF(area.X + bx + tpl.FW / 2f, area.Y + by + tpl.FH / 2f);
-            res = new FindResult(true, new PointF(hit.X - frame.X, hit.Y - frame.Y), score, last, DateTime.UtcNow);
+            res = new FindResult(true, new PointF(hit.X - frame.X, hit.Y - frame.Y), score, last, DateTime.UtcNow, Size: new SizeF(tpl.FW, tpl.FH));
         }
         LastLook[a.Key] = (hash, tpl, place, res);
         return res;
@@ -420,7 +421,7 @@ internal static class Finder
         tr.MovedAt = DateTime.UtcNow;
         var frame = Native.FrameRect(tr.Root);
         var c = new PointF(moved.X + moved.Width / 2f, moved.Y + moved.Height / 2f);
-        Results[key] = new FindResult(true, new PointF(c.X - frame.X, c.Y - frame.Y), cur.Score, cur.Rel, DateTime.UtcNow);
+        Results[key] = new FindResult(true, new PointF(c.X - frame.X, c.Y - frame.Y), cur.Score, cur.Rel, DateTime.UtcNow, Size: cur.Size);
     }
 
     /// <summary>
@@ -468,7 +469,7 @@ internal static class Finder
         tr.MovedAt = DateTime.UtcNow;
         var frame = Native.FrameRect(tr.Root);
         var c = new PointF(moved.X + moved.Width / 2f, moved.Y + moved.Height / 2f);
-        Results[key] = new FindResult(true, new PointF(c.X - frame.X, c.Y - frame.Y), cur.Score, cur.Rel, DateTime.UtcNow);
+        Results[key] = new FindResult(true, new PointF(c.X - frame.X, c.Y - frame.Y), cur.Score, cur.Rel, DateTime.UtcNow, Size: cur.Size);
     }
 
     /// <summary>
@@ -480,7 +481,7 @@ internal static class Finder
         string? went = tr.Went();
         bool moving = (DateTime.UtcNow - tr.MovedAt).TotalSeconds < 1 || went != null;
         Tracks.TryRemove(key, out _);
-        Results[key] = new FindResult(false, default, 1, cur.Rel, DateTime.UtcNow, cur.LastRel, cur.At, moving, went);
+        Results[key] = new FindResult(false, default, 1, cur.Rel, DateTime.UtcNow, cur.LastRel, cur.At, moving, went, cur.Size);
         TextSearchedAt.TryRemove(key, out _);
         Wake.Set();
     }

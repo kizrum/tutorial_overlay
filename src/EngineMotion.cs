@@ -211,6 +211,7 @@ internal static partial class Engine
             int fgPid = ForegroundPid();
             foreach (var c in step.Until.Where(c => !c.Met && c.Type == "scroll"))
             {
+                ScrollDebug($"wheel {e.Button} {e.Delta} at {e.X},{e.Y}" + (c.Area != null && !InRegion(c.Area, p) ? " (outside the area)" : ""));
                 if (c.Area != null) { if (!InRegion(c.Area, p)) continue; }
                 else if (t!.Defaults.Process != null && !ProcName(fgPid).Equals(t.Defaults.Process, StringComparison.OrdinalIgnoreCase)) continue;
                 // wheel forward (delta > 0) scrolls up; tilt right (delta > 0) scrolls right
@@ -267,7 +268,17 @@ internal static partial class Engine
                 }
                 else continue;
                 var box = new RectangleF(at.X - 20 * s, at.Y - 34 * s, 40 * s, 68 * s);
-                if (RegionGeo(c.Area!) is { } area) WatchScroll(c, area.circle ? new RectangleF(area.c.X - area.r, area.c.Y - area.r, 2 * area.r, 2 * area.r) : area.rect, area.ag, s);
+                if (RegionGeo(c.Area!) is { } area)
+                {
+                    var areaRect = area.circle ? new RectangleF(area.c.X - area.r, area.c.Y - area.r, 2 * area.r, 2 * area.r) : area.rect;
+                    WatchScroll(c, areaRect, area.ag, s);
+                    // where to scroll: a thin frame round the area (the wheel alone, at its edge, is easy to miss)
+                    if (!c.UntilVisible)
+                    {
+                        var frame = RectangleF.Inflate(areaRect, -2 * s, -2 * s);
+                        sc.Prims.Add((new Prim { Kind = PrimKind.Rect, Rect = frame, Color = Palette.Accent, Width = 2 * s, Radius = 6 * s, Scale = s, Glow = false }, 1f));
+                    }
+                }
                 string text = c.UntilVisible ? "" : $"{Math.Min(c.ScrollCount, c.Notches)}/{c.Notches}";
                 sc.Prims.Add((new Prim { Kind = PrimKind.Wheel, A = at, Rect = box, Text = c.Direction + "|" + text, Color = Palette.Accent, Scale = s }, 1f));
                 avoid.Add(box);
@@ -315,18 +326,22 @@ internal static partial class Engine
             {
                 if (root == IntPtr.Zero || rect.Width < 16 || rect.Height < 16) return;
                 using var shot = ScreenCapture.CaptureWindow(root, rect);
-                if (shot == null) return;
+                if (shot == null) { ScrollDebug("no picture of the area (minimised, or the window prints blank)"); return; }
                 var gray = Template.Gray(shot, out int w, out int h);     // half size
                 byte[]? prev;
                 Size prevSize;
                 lock (Sync) { prev = c.ScrollPrev; prevSize = c.ScrollPrevSize; c.ScrollPrev = gray; c.ScrollPrevSize = new Size(w, h); }
                 if (prev == null || prevSize.Width != w || prevSize.Height != h) return;
-                int shift = ContentShift(prev, gray, w, h, vertical);
-                if (shift == 0) return;
+                int shift = ContentShift(prev, gray, w, h, vertical, out double still, out double bestDiff);
+                if (shift == 0) { if (still >= 2) ScrollDebug($"content changed but no clear shift (still {still:0.0}, best {bestDiff:0.0})"); return; }
                 // only the user's own scrolling: the pointer over the area (Windows scrolls what is under it) and
                 // input from them just now — a chat, a log or a video moving by itself has neither
                 Native.GetCursorPos(out var cur);
-                if (!rect.Contains(cur.X, cur.Y) || IdleMs() > 400) return;
+                if (!rect.Contains(cur.X, cur.Y) || IdleMs() > 400)
+                {
+                    ScrollDebug($"shift {shift} not counted: pointer {(rect.Contains(cur.X, cur.Y) ? "over" : "outside")} the area {rect}, last input {IdleMs()} ms ago");
+                    return;
+                }
                 // content moving up (negative) = scrolled down; moving left = scrolled right
                 string dir = vertical ? (shift < 0 ? "down" : "up") : (shift < 0 ? "right" : "left");
                 lock (Sync)
@@ -350,7 +365,17 @@ internal static partial class Engine
     /// How far the picture moved between two looks (half-size px; 0 = not moved or not a scroll). The best shift
     /// must match clearly better than "no shift", or it is something else changing (an animation, a hover).
     /// </summary>
-    private static int ContentShift(byte[] a, byte[] b, int w, int h, bool vertical)
+    private static DateTime _scrollDebugAt;
+
+    /// <summary>Why content scrolling was not counted (--verbose; at most once a second).</summary>
+    private static void ScrollDebug(string why)
+    {
+        if ((DateTime.UtcNow - _scrollDebugAt).TotalSeconds < 1) return;
+        _scrollDebugAt = DateTime.UtcNow;
+        Log.Debug("scroll watch: " + why);
+    }
+
+    private static int ContentShift(byte[] a, byte[] b, int w, int h, bool vertical, out double still, out double bestDiff)
     {
         int len = vertical ? h : w, max = len / 3;
         double Diff(int d)
@@ -364,10 +389,10 @@ internal static partial class Engine
                     for (int x = Math.Max(0, d); x < Math.Min(w, w + d); x += 2) { sum += Math.Abs(a[y * w + x - d] - b[y * w + x]); n++; }
             return n == 0 ? double.MaxValue : sum / (double)n;
         }
-        double still = Diff(0);
+        still = Diff(0);
+        bestDiff = still;
         if (still < 2) return 0;                      // nothing changed
         int best = 0;
-        double bestDiff = still;
         for (int d = -max; d <= max; d++)
         {
             if (d == 0) continue;

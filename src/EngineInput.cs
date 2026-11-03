@@ -384,6 +384,9 @@ internal static partial class Engine
         {
             if (c.From != null) yield return c.From.Anchor;
             if (c.To != null) yield return c.To.Anchor;
+            // a scroll condition's area: without it the area never resolved — no wheel hint, and every wheel turn
+            // counted as "outside the area"
+            if (c.Area != null) yield return c.Area.Anchor;
         }
     }
 }

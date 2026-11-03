@@ -433,7 +433,8 @@ internal sealed class Mark
         if (m.Shapes.Count == 0)
         {
             // sensible default: frame around a UI element, ring around a bare point
-            bool hasBounds = m.Anchor.Find == null && (m.Anchor.Path.Count > 0 || m.Anchor.HasBounds && m.Anchor.Dx == 0 && m.Anchor.Dy == 0 && m.Anchor.Origin == "topleft");
+            // a point (an offset into an element) gets a ring; an element or a found text / template, a frame round it
+            bool hasBounds = !m.Anchor.HasPoint && (m.Anchor.Path.Count > 0 || m.Anchor.HasBounds);
             m.Shapes.Add(new ShapeSpec { Type = hasBounds ? "rect" : "circle" });
             if (J.Str(n, "number") is string num) m.Shapes.Add(new ShapeSpec { Type = "badge", Text = num });
             if ((J.Str(n, "hint") ?? J.Str(n, "caption")) is string hint) m.Shapes.Add(new ShapeSpec { Type = "label", Text = hint });

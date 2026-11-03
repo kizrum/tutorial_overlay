@@ -651,21 +651,24 @@ public static class CanvasTests
 
 public static class LayoutTests
 {
-    private static Prim Shape(string anchorJson)
+    private static Prim Shape(string anchorJson, RectangleF? found = null)
     {
         var m = Mark.Parse(A.Json($$"""{"anchor": {{anchorJson}}}"""), null, "t");
         // the Mixer panel; the text was found near its top-right corner
-        var ag = new AnchorGeo { Bounds = new RectangleF(439, 730, 1951, 750), P = new PointF(2136, 753), Scale = 1 };
+        var ag = new AnchorGeo { Bounds = new RectangleF(439, 730, 1951, 750), P = new PointF(2136, 753), Scale = 1, Found = found };
         return Layout.Build(m, ag, false).Prims[0];
     }
 
-    /// <summary>A text / template anchor points at what was found: the ring goes there, not round the whole panel.</summary>
-    public static void TestFindAnchorRingsTheFoundSpot()
+    /// <summary>A text / template anchor frames what was found, not the whole panel it is searched in.</summary>
+    public static void TestFindAnchorFramesTheFoundPiece()
     {
-        var p = Shape("""{"process": "FL64", "element": {"name": "Mixer"}, "find": {"text": "Master"}}""");
-        A.Eq(PrimKind.Circle, p.Kind, "default shape of a find anchor");
-        A.Eq(new PointF(2136, 753), p.A, "ring centre");
-        A.Check(p.R < 40, $"small ring (R={p.R})");
+        var found = new RectangleF(2106, 743, 60, 20);
+        var p = Shape("""{"process": "FL64", "element": {"name": "Mixer"}, "find": {"text": "Master"}}""", found);
+        A.Eq(PrimKind.Rect, p.Kind, "default shape of a find anchor");
+        A.Check(p.Rect.Contains(found) && p.Rect.Width < 120, $"frames the found text ({p.Rect})");
+        // size unknown: still on the found spot, never round the panel
+        var q = Shape("""{"process": "FL64", "element": {"name": "Mixer"}, "find": {"text": "Master"}}""");
+        A.Check(q.Rect.Contains(new PointF(2136, 753)) && q.Rect.Width < 120, $"at the spot ({q.Rect})");
     }
 
     /// <summary>An element anchor without a point still frames the element.</summary>
@@ -674,5 +677,12 @@ public static class LayoutTests
         var p = Shape("""{"process": "FL64", "element": {"name": "Mixer"}}""");
         A.Eq(PrimKind.Rect, p.Kind, "default shape of an element anchor");
         A.Check(p.Rect.Contains(new RectangleF(439, 730, 1951, 750)), "frames the panel");
+    }
+
+    /// <summary>A point inside an element (an offset) gets a ring, not a 40 px square.</summary>
+    public static void TestPointInElementGetsRing()
+    {
+        var p = Shape("""{"process": "FL64", "element": {"name": "Mixer"}, "offset": [224, 273]}""");
+        A.Eq(PrimKind.Circle, p.Kind, "default shape of a point");
     }
 }

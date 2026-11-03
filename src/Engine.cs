@@ -960,6 +960,9 @@ internal static partial class Engine
             PointF? seen = fr.Found ? fr.Rel : fr.LastRel;
             if (seen is not PointF m) { reason = a.Find.Text != null ? "text not visible" : "template not visible"; return null; }
             var hit = new PointF(frame.X + m.X, frame.Y + m.Y);
+            // the found piece itself (hit is its centre): what a shape without coordinates frames
+            if (fr.Size.Width > 0 && fr.Size.Height > 0)
+                geo.Found = new RectangleF(hit.X - fr.Size.Width / 2, hit.Y - fr.Size.Height / 2, fr.Size.Width, fr.Size.Height);
             float px = a.Find.Axis == "y" ? o.X : hit.X, py = a.Find.Axis == "x" ? o.Y : hit.Y;
             geo.P = new PointF(px + a.Dx, py + a.Dy);
             // the area searched is the area it can scroll out of
