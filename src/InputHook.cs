@@ -40,7 +40,9 @@ internal static class InputHook
     private static Native.LowLevelProc? _mouseProc, _keyProc;   // keep the delegates alive
     private static IntPtr _mouseHook, _keyHook;
     private static uint _threadId;
-    private static int _lastCallbackTick = Environment.TickCount;
+    // when each hook was last called: Windows drops hooks one by one, so each is watched on its own
+    private static int _lastMouseTick = Environment.TickCount, _lastKeyTick = Environment.TickCount;
+    private static int LastCallbackTick => Math.Max(_lastMouseTick, _lastKeyTick);
     private static int _swallowingButtonUp;                    // WM_*BUTTONUP to eat after a swallowed down
     private static volatile bool _stop;
     public static int Reinstalls { get; private set; }
@@ -61,6 +63,8 @@ internal static class InputHook
         new Thread(() =>
         {
             _threadId = Native.GetCurrentThreadId();
+            // Windows must not slow this thread down to save power: a hook that answers late is silently removed
+            Native.NoPowerThrottlingForThisThread();
             _mouseProc = MouseCallback;
             _keyProc = KeyCallback;
             Install();
@@ -72,6 +76,7 @@ internal static class InputHook
                     Uninstall();
                     Install();
                 }
+                else if (msg.hwnd == IntPtr.Zero && msg.message == WM_APP_PING) _pongTick = Environment.TickCount;
             }
             Uninstall();
         }) { IsBackground = true, Name = "input-hook", Priority = ThreadPriority.Highest }.Start();
@@ -92,7 +97,7 @@ internal static class InputHook
         _mouseHook = Native.SetWindowsHookEx(Native.WH_MOUSE_LL, _mouseProc!, mod, 0);
         _keyHook = Native.SetWindowsHookEx(WH_KEYBOARD_LL, _keyProc!, mod, 0);
         if (_mouseHook == IntPtr.Zero || _keyHook == IntPtr.Zero) Log.Warn("SetWindowsHookEx failed: " + Marshal.GetLastWin32Error());
-        _lastCallbackTick = Environment.TickCount;
+        _lastMouseTick = _lastKeyTick = Environment.TickCount;
     }
 
     private static void Uninstall()
@@ -102,9 +107,115 @@ internal static class InputHook
         _mouseHook = _keyHook = IntPtr.Zero;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr dwExtraInfo; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public IntPtr dwExtraInfo; }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct InputUnion { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct INPUT { public uint type; public InputUnion u; }
+
+    [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, INPUT[] inputs, int size);
+
+    private const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1, MOUSEEVENTF_MOVE = 0x0001, KEYEVENTF_KEYUP = 0x0002;
+    /// <summary>A virtual-key code no key has (0x0A is reserved): releasing it types nothing and no app reacts.</summary>
+    private const ushort ProbeVk = 0x0A;
+    private static int _lastFalseAlarmLog, _lastRoutineProbe;
+    /// <summary>While the user is active, both hooks are also probed this often (a silent mouse can't hide a dead keyboard hook).</summary>
+    private const int RoutineProbeMs = 30000;
+
+    // ---- diagnostics for "dropped" hooks: is the hook thread itself stuck, how long do callbacks take, GC pauses
+    private const uint WM_APP_PING = 0x8000 + 18;
+    private static volatile int _pongTick;
+    private static long _slowestCallbackTicks;          // Stopwatch ticks, since the last report
+    private static TimeSpan _gcPauseAtLastReport = GC.GetTotalPauseDuration();
+
+    /// <summary>Does the hook thread answer its message queue? (a stuck thread also makes every hook "time out")</summary>
+    private static int PingHookThread()
+    {
+        int sent = Environment.TickCount;
+        _pongTick = 0;
+        Native.PostThreadMessage(_threadId, WM_APP_PING, IntPtr.Zero, IntPtr.Zero);
+        for (int i = 0; i < 40; i++)
+        {
+            Thread.Sleep(25);
+            if (_pongTick != 0) return _pongTick - sent;
+        }
+        return -1;
+    }
+
+    private static void NoteCallback(long startTimestamp)
+    {
+        long took = System.Diagnostics.Stopwatch.GetTimestamp() - startTimestamp;
+        if (took > Interlocked.Read(ref _slowestCallbackTicks)) Interlocked.Exchange(ref _slowestCallbackTicks, took);
+    }
+
+    private static string Diagnostics()
+    {
+        double slowest = Interlocked.Exchange(ref _slowestCallbackTicks, 0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        var gc = GC.GetTotalPauseDuration();
+        var gcDelta = gc - _gcPauseAtLastReport;
+        _gcPauseAtLastReport = gc;
+        int ping = PingHookThread();
+        return $"hook thread answers: {(ping < 0 ? "NO (stuck > 1 s)" : ping + " ms")}; slowest callback since last report: {slowest:0.0} ms; " +
+               $"GC pauses since last report: {gcDelta.TotalMilliseconds:0} ms; managed heap {GC.GetTotalMemory(false) / 1048576} MB";
+    }
+
     /// <summary>
-    /// The system saw input (GetLastInputInfo moved) but none of it reached our hooks for a while:
-    /// Windows has dropped them. Re-install on the hook thread.
+    /// Are the hooks still installed? Each gets something it must see within a moment, nothing anyone notices:
+    /// the mouse hook a move of 1 px and back (the cursor ends where it was; a move of 0 px is no movement, Windows
+    /// drops it before any hook sees it), the keyboard hook the release of a key code no key has. Injected input
+    /// goes through low-level hooks like real input.
+    /// </summary>
+    private static (bool mouse, bool keys) ProbeAlive()
+    {
+        int mouseBefore = _lastMouseTick, keyBefore = _lastKeyTick;
+        var input = new[]
+        {
+            new INPUT { type = INPUT_MOUSE, u = new InputUnion { mi = new MOUSEINPUT { dx = 1, dwFlags = MOUSEEVENTF_MOVE } } },
+            new INPUT { type = INPUT_MOUSE, u = new InputUnion { mi = new MOUSEINPUT { dx = -1, dwFlags = MOUSEEVENTF_MOVE } } },
+            new INPUT { type = INPUT_KEYBOARD, u = new InputUnion { ki = new KEYBDINPUT { wVk = ProbeVk, dwFlags = KEYEVENTF_KEYUP } } },
+        };
+        uint sent = SendInput((uint)input.Length, input, Marshal.SizeOf<INPUT>());
+        if (sent != input.Length)
+        {
+            // blocked (e.g. the secure desktop is up): nothing can be told — count them as alive rather than churn
+            Log.Debug($"hook probe not sent: SendInput sent {sent} of {input.Length}, error {Marshal.GetLastWin32Error()} (size {Marshal.SizeOf<INPUT>()})");
+            return (true, true);
+        }
+        bool mouse = false, keys = false;
+        int waited = 0;
+        for (int i = 0; i < 6 && !(mouse && keys); i++)
+        {
+            Thread.Sleep(50);
+            waited += 50;
+            mouse |= _lastMouseTick != mouseBefore;
+            keys |= _lastKeyTick != keyBefore;
+        }
+        Log.Debug($"hook probe: mouse {(mouse ? "reached" : "NOT reached")}, keyboard {(keys ? "reached" : "NOT reached")} ({waited} ms)");
+        return (mouse, keys);
+    }
+
+    private static string ForegroundInfo()
+    {
+        var fg = GetForegroundWindow();
+        int pid = fg == IntPtr.Zero ? 0 : Native.ProcessId(fg);
+        if (pid == 0) return "no foreground window";
+        var name = Engine.ProcName(pid);
+        return Native.IsAboveUs(pid) ? $"{name} (run as administrator)" : name;
+    }
+
+    /// <summary>
+    /// The system saw input (GetLastInputInfo moved) that none of our hooks saw. Either Windows dropped the hooks
+    /// (it removes a low-level hook that once answers too slowly, without telling) — then they are re-installed on
+    /// the hook thread — or the input went where hooks do not see it: a window run as administrator, the sign-in or
+    /// UAC screen, and touchpad scrolling / gestures that apps such as browsers and VS Code take straight from the
+    /// touchpad, without mouse messages. A probe tells the two apart, so hooks are only re-installed when they are
+    /// really gone.
     /// </summary>
     private static void Watchdog()
     {
@@ -114,22 +225,32 @@ internal static class InputHook
             var lii = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
             if (!GetLastInputInfo(ref lii)) continue;
             int lastInput = (int)lii.dwTime, now = Environment.TickCount;
-            int silentFor = lastInput - _lastCallbackTick;          // input newer than our last callback
-            if (silentFor > 1500 && now - lastInput < 10000)
+            if (now - lastInput >= 10000) continue;                 // the user is away: nothing to check
+            int silentFor = lastInput - LastCallbackTick;           // input newer than our last callback
+            bool routine = now - _lastRoutineProbe >= RoutineProbeMs;
+            if (silentFor <= 1500 && !routine) continue;
+            _lastRoutineProbe = now;
+            var where = ForegroundInfo();
+            var (mouseOk, keysOk) = ProbeAlive();
+            if (mouseOk && keysOk)
             {
-                // input into a window "run as administrator" never reaches the hooks of a normal process: that is
-                // not a dropped hook, and re-installing would not help
-                if (Native.IsAboveUs(Native.ProcessId(GetForegroundWindow())))
+                if (silentFor <= 1500) continue;                    // a routine check, all fine
+                // alive: that input went somewhere hooks do not see — nothing to repair, nothing for the agent
+                if (now - _lastFalseAlarmLog > 60000)
                 {
-                    _lastCallbackTick = now;
-                    continue;
+                    _lastFalseAlarmLog = now;
+                    Log.Info($"input hooks are alive (a probe reached them): the user's input went where hooks do not see it ({where}; " +
+                             $"the last input the hooks saw was {silentFor / 1000.0:0.#} s before it)");
                 }
-                Reinstalls++;
-                Log.Warn($"input hooks went silent for {silentFor} ms while the user was active: re-installing");
-                Events.Emit("hook_reinstalled", new() { ["silentMs"] = silentFor, ["count"] = Reinstalls });
-                _lastCallbackTick = now;
-                Native.PostThreadMessage(_threadId, WM_APP_REINSTALL, IntPtr.Zero, IntPtr.Zero);
+                continue;
             }
+            Reinstalls++;
+            var dead = !mouseOk && !keysOk ? "mouse and keyboard" : !mouseOk ? "mouse" : "keyboard";
+            Log.Warn($"input hook dropped by Windows: {dead} (a probe did not reach it; the last input the hooks saw was {Math.Max(0, silentFor) / 1000.0:0.#} s before the user's latest; foreground: {where}): re-installing. " +
+                     Diagnostics());
+            Events.Emit("hook_reinstalled", new() { ["hooks"] = dead, ["silentMs"] = Math.Max(0, silentFor), ["count"] = Reinstalls, ["foreground"] = where });
+            _lastMouseTick = _lastKeyTick = Environment.TickCount;
+            Native.PostThreadMessage(_threadId, WM_APP_REINSTALL, IntPtr.Zero, IntPtr.Zero);
         }
     }
 
@@ -145,7 +266,8 @@ internal static class InputHook
 
     private static unsafe IntPtr MouseCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        _lastCallbackTick = Environment.TickCount;
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        _lastMouseTick = Environment.TickCount;
         if (nCode >= 0)
         {
             int msg = (int)wParam;
@@ -192,6 +314,7 @@ internal static class InputHook
                     break;
             }
         }
+        NoteCallback(started);
         return Native.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
     }
 
@@ -228,7 +351,8 @@ internal static class InputHook
 
     private static unsafe IntPtr KeyCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        _lastCallbackTick = Environment.TickCount;
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        _lastKeyTick = Environment.TickCount;
         if (nCode >= 0 && HoldWatched.Length > 0)
         {
             int m = (int)wParam;
@@ -248,6 +372,7 @@ internal static class InputHook
                     Queue.TryAdd(new InputEvent(InputKind.KeyDown, 0, 0, "", vk, Modifiers(), (k->flags & 0x10) != 0, false, DateTime.UtcNow.Ticks));
             }
         }
+        NoteCallback(started);
         return Native.CallNextHookEx(_keyHook, nCode, wParam, lParam);
     }
 }

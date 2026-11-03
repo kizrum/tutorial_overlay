@@ -194,6 +194,26 @@ internal static class Native
         return (root, ProcessId(root), ProcessId(h));
     }
 
+    // ---- power throttling: Windows 11 slows background threads ("efficiency mode", EcoQoS); a low-level hook that
+    // answers late is removed without notice, so the hook thread opts out (it sleeps in GetMessage: it costs nothing).
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POWER_THROTTLING_STATE { public uint Version, ControlMask, StateMask; }
+
+    [DllImport("kernel32.dll")] private static extern bool SetThreadInformation(IntPtr thread, int cls, ref POWER_THROTTLING_STATE info, int size);
+    [DllImport("kernel32.dll")] private static extern IntPtr GetCurrentThread();
+
+    private const int ThreadPowerThrottling = 3;
+    private const uint THROTTLING_EXECUTION_SPEED = 0x1;
+
+    /// <summary>Opts the calling thread out of power throttling.</summary>
+    public static void NoPowerThrottlingForThisThread()
+    {
+        var s = new POWER_THROTTLING_STATE { Version = 1, ControlMask = THROTTLING_EXECUTION_SPEED, StateMask = 0 };
+        if (!SetThreadInformation(GetCurrentThread(), ThreadPowerThrottling, ref s, Marshal.SizeOf<POWER_THROTTLING_STATE>()))
+            Log.Debug("power throttling opt-out (thread) not applied: " + Marshal.GetLastWin32Error());
+    }
+
     // ---- integrity levels: UIPI keeps a process from hooking or automating windows of a higher one
 
     [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
