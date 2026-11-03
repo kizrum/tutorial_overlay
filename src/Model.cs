@@ -394,7 +394,7 @@ internal sealed class Mark
     public MarkGeo? Geo;
     public string Visibility = "resolving";
     public DateTime? ShownAt;
-    public (string dir, RectangleF view, PointF toward)? ScrollHint;   // target is outside the visible part
+    public (string dir, RectangleF view, PointF toward, float beyond)? ScrollHint;   // target outside the visible part; beyond = px past the edge (-1 unknown)
     public Color? AutoColor;              // contrast colour picked against the app's pixels around the target
     public DateTime? OpensArmedAt;        // clicked, waiting for Opens to show up
     public HashSet<IntPtr>? OpensBefore;  // matching top-level windows at click time

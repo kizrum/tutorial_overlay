@@ -62,6 +62,8 @@ internal sealed class MascotWindow : Form
     private float _alpha;
     private string _spotKey = "";                // the step whose spot was chosen
     private PointF _spotTarget;
+    private DateTime _targetMovedAt;
+    private bool _respot;               // the glued spot went bad while the target moved: choose again once it rests
 
     private Mood _mood;
     private float _moodLeft;
@@ -190,17 +192,23 @@ internal sealed class MascotWindow : Form
         if (_spotKey == inp.StepKey)
         {
             // same step: ride along with the target (window dragged, content scrolled)
+            // no walking while it moves: ride along where that is fine, otherwise stand still and only choose a
+            // new spot once the content has rested a moment
             var glued = new PointF(t.X + _offset.X, t.Y + _offset.Y);
             if (Dist(t, _spotTarget) > 0.5f)
             {
                 _spotTarget = t;
-                if (SpotOk(inp, glued, size, s)) _pos = glued;
-                else _spotKey = "";      // the spot went bad (off screen, now covering something): choose again
+                _targetMovedAt = DateTime.UtcNow;
+                if (SpotOk(inp, glued, size, s)) { _pos = glued; _respot = false; }
+                else _respot = true;
             }
-            if (_spotKey == inp.StepKey) return;
+            if (!_respot || (DateTime.UtcNow - _targetMovedAt).TotalSeconds < 0.7) return;
+            _respot = false;
+            _spotKey = "";
         }
 
         // a new step (or a spot that went bad)
+        _respot = false;
         _spotKey = inp.StepKey;
         _spotTarget = t;
         if (Reaches(inp, t, size, s) && SpotOk(inp, _pos, size, s))

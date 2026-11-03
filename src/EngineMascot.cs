@@ -51,6 +51,29 @@ internal static partial class Engine
         if (t.AdvanceAt != null) return m;     // done, the next step is a moment away: stay put
         var target = step.Targets.FirstOrDefault(x => !x.Satisfied && !x.Optional && x.Geo != null)
                   ?? step.Targets.FirstOrDefault(x => !x.Satisfied && x.Geo != null);
+        // the target is past the edge of its pane: stay where it is (no walking while the user scrolls — the wheel
+        // at the edge shows the way) and just say which way and how far
+        if (target == null && step.Targets.FirstOrDefault(x => !x.Satisfied && x.ScrollHint is { dir: "up" or "down" or "left" or "right" or "any" }) is { } off)
+        {
+            var hnt = off.ScrollHint!.Value;
+            float sc = Native.ScaleAt(hnt.toward);
+            if (hnt.dir == "any")
+            {
+                // not seen yet, way unknown: go and stand by the pane to scroll, at the wheel. Finding it is a new
+                // spot to go to (once), not a ride-along
+                var at = ScrollHintPoint("any", hnt.view, hnt.toward, sc);
+                m.Target = at;
+                m.TargetBounds = new RectangleF(at.X - 20 * sc, at.Y - 34 * sc, 40 * sc, 68 * sc);
+                var loc = Settings.Current.Text;
+                m.Say = off.Label is { Length: > 0 } nm ? string.Format(loc.ScrollHere, nm) : loc.ScrollHereAny;
+                m.StepKey += "/look";
+                m.Scale = sc;
+                return m;
+            }
+            m.Say = ScrollHintText(hnt.dir, hnt.beyond, hnt.view, sc).text;
+            m.Scale = sc;
+            return m;
+        }
         if (target == null)
         {
             // a stroke or scroll step: point at where the path starts / where to scroll

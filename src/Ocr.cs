@@ -222,13 +222,14 @@ internal static unsafe class Ocr
     /// <paramref name="query"/>; with neither (read everything) both a Latin and a Cyrillic recognizer run, if
     /// installed, and each line keeps the reading that fits it.
     /// </summary>
-    public static List<OcrLine> Read(Bitmap img, string? lang = null, string? query = null)
+    /// <param name="budget">most pixels handed to the recognizer (the image is enlarged up to 2× within it); the cost grows with it</param>
+    public static List<OcrLine> Read(Bitmap img, string? lang = null, string? query = null, float budget = 2_500_000f)
     {
-        if (lang != null) return ReadWith(img, lang);
-        if (!string.IsNullOrWhiteSpace(query)) return ReadWith(img, AutoLang(query));
+        if (lang != null) return ReadWith(img, lang, budget);
+        if (!string.IsNullOrWhiteSpace(query)) return ReadWith(img, AutoLang(query), budget);
         string? latin = LangFor(false), cyrillic = LangFor(true);
-        if (latin == null || cyrillic == null) return ReadWith(img, null);
-        return Merge(ReadWith(img, latin), ReadWith(img, cyrillic));
+        if (latin == null || cyrillic == null) return ReadWith(img, null, budget);
+        return Merge(ReadWith(img, latin, budget), ReadWith(img, cyrillic, budget));
     }
 
     /// <summary>Latin reading by default; where the Cyrillic recognizer saw mostly Cyrillic letters, its reading wins.</summary>
@@ -259,18 +260,22 @@ internal static unsafe class Ocr
     /// engine's size limit); rectangles come back in <paramref name="img"/>'s pixels.
     /// The engine fails with E_ABORT when two recognitions overlap, so runs are queued.
     /// </summary>
-    private static List<OcrLine> ReadWith(Bitmap img, string? lang)
+    private static List<OcrLine> ReadWith(Bitmap img, string? lang, float budget)
     {
-        lock (RecognizeGate) return ReadUnlocked(img, lang);
+        lock (RecognizeGate) return ReadUnlocked(img, lang, budget);
     }
 
     private static readonly object RecognizeGate = new();
 
-    private static List<OcrLine> ReadUnlocked(Bitmap img, string? lang)
+    private static List<OcrLine> ReadUnlocked(Bitmap img, string? lang, float budget)
     {
         var engine = Engine(lang);
         const int maxDim = 2600;    // conservative; OcrEngine.MaxImageDimension is 10000 on current Windows
-        float scale = Math.Min(2f, maxDim / (float)Math.Max(img.Width, img.Height));
+        // small UI text reads better enlarged, but the cost grows with the pixel count: a big area (a whole editor)
+        // is enlarged less — at most `budget` pixels go to the recognizer
+        float scale = Math.Min(Math.Min(2f, maxDim / (float)Math.Max(img.Width, img.Height)),
+                               MathF.Sqrt(budget / Math.Max(1, img.Width * img.Height)));
+        scale = Math.Max(scale, 0.75f);
         int w = Math.Max(1, (int)(img.Width * scale)), h = Math.Max(1, (int)(img.Height * scale));
         using var src = new Bitmap(w, h, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(src))

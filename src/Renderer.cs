@@ -170,10 +170,11 @@ internal static class Renderer
         }
         using (var wheel = new SolidBrush(Palette.WithAlpha(p.Color, a))) g.FillRectangle(wheel, c.X - 2 * s, c.Y - 13 * s, 4 * s, 9 * s);
         float phase = (float)(DateTime.UtcNow.TimeOfDay.TotalSeconds % 0.9 / 0.9);
-        bool vertical = dir is "up" or "down";
-        float sign = dir is "down" or "right" ? 1 : -1;
+        bool vertical = dir is "up" or "down" or "any";
         using var chev = new Pen(Palette.WithAlpha(p.Color, a), 3 * s) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
-        for (int i = 0; i < 2; i++)
+        // "any": which way is not known — arrows both ways, one chevron each
+        foreach (float sign in dir == "any" ? new[] { 1f, -1f } : new[] { dir is "down" or "right" ? 1f : -1f })
+        for (int i = 0; i < (dir == "any" ? 1 : 2); i++)
         {
             float off = (26 + 9 * i + 8 * phase) * s * sign, h = 6 * s;
             int alpha = (int)(255 * a * (1 - phase * 0.6f) * (i == 0 ? 1 : 0.6f));

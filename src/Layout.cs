@@ -15,6 +15,7 @@ internal sealed class AnchorGeo
     public int[] Pids = Array.Empty<int>();
     public RectangleF? View;          // visible area the point must be inside (scrollable panes)
     public bool FromLastKnown;        // the visual anchor is out of view; P is where it was last seen
+    public string? GoneDir;           // which edge it most likely went past (up/down/left/right), when out of view
 }
 
 internal enum PrimKind { Circle, Rect, Arrow, Badge, Label, Info, Check, Checkbox, Stroke, Path, Wheel }

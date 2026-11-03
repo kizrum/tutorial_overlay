@@ -82,6 +82,8 @@ internal static class Resolver
         }
     }
 
+    private static readonly Dictionary<string, DateTime> LastFlip = new();
+
     private static void Cycle()
     {
         var wanted = _wanted;
@@ -97,8 +99,14 @@ internal static class Resolver
             catch (Exception e) { r = AnchorResult.Missing("error: " + e.Message, Array.Empty<int>()); }
             var prev = Get(a.Key);
             Results[a.Key] = r;
-            if (prev != null && prev.Found != r.Found && (a.Path.Count > 0 || a.Window != null || a.Title != null))
+            // at most one found/lost per anchor in 3 s: scrolling a virtualised list back and forth makes elements
+            // come and go many times, and every event lands in the agent's context
+            if (prev != null && prev.Found != r.Found && (a.Path.Count > 0 || a.Window != null || a.Title != null)
+                && (!LastFlip.TryGetValue(a.Key, out var at) || (DateTime.UtcNow - at).TotalSeconds >= 3))
+            {
+                LastFlip[a.Key] = DateTime.UtcNow;
                 Events.Emit(r.Found ? "anchor_found" : "anchor_lost", new() { ["anchor"] = a.Describe(), ["reason"] = r.Reason });
+            }
             if (a.Read != null && prev != null && r.Found && prev.Value != r.Value)
                 Events.Emit("uia_changed", new() { ["anchor"] = a.Describe(), ["property"] = a.Read, ["value"] = r.Value, ["was"] = prev.Value });
         }

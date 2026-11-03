@@ -105,7 +105,8 @@ internal sealed class Loc
     public string Review = "Повтор шага — нажмите «Готово», чтобы продолжить.";
     public string Why = "Почему так";
     public string ScrollUp = "Прокрутите вверх", ScrollDown = "Прокрутите вниз", ScrollLeft = "Прокрутите влево", ScrollRight = "Прокрутите вправо";
-    public string ScrollIssue = "Нужное место за краем окна — {0}.", ScrollFind = "Прокрутите окно, чтобы показать нужное место.";
+    public string ScrollIssue = "Нужное место за краем окна — {0}.", ScrollFind = "Прокрутите окно, чтобы показать нужное место.",
+        ScrollHere = "Покрутите здесь — я найду «{0}»", ScrollHereAny = "Покрутите здесь — я найду нужное место";
     public string IssueDialog = "Сначала закройте окно «{0}» — пока оно открыто, программа не принимает клики.";
     public string DialogMark = "Сначала подтвердите это окно (Enter) или закройте его";
     public string CantFind = "Не вижу, куда жать", DontGet = "Не понимаю, что делать", Cancel = "Отмена", HintHelp = "помощь";
@@ -166,6 +167,8 @@ internal sealed class Loc
         Why = "Why",
         ScrollUp = "Scroll up", ScrollDown = "Scroll down", ScrollLeft = "Scroll left", ScrollRight = "Scroll right",
         ScrollIssue = "The spot is outside the window — {0}.", ScrollFind = "Scroll the window to bring the spot into view.",
+        ScrollHere = "Scroll here — I'll spot “{0}”", ScrollHereAny = "Scroll here — I'll spot the place",
+
         IssueDialog = "Close the \"{0}\" window first — the app ignores clicks while it is open.",
         DialogMark = "Confirm this window first (Enter) or close it",
         CantFind = "I can't find where to click", DontGet = "I don't get what to do", Cancel = "Cancel", HintHelp = "help",

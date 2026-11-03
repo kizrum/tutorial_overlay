@@ -812,8 +812,28 @@ internal static partial class Engine
             var hit = new PointF(frame.X + m.X, frame.Y + m.Y);
             float px = a.Find.Axis == "y" ? o.X : hit.X, py = a.Find.Axis == "x" ? o.Y : hit.Y;
             geo.P = new PointF(px + a.Dx, py + a.Dy);
-            geo.View = bounds;
+            // the area searched is the area it can scroll out of
+            geo.View = a.Find.Within is RectangleF fw ? new RectangleF(bounds.X + fw.X, bounds.Y + fw.Y, fw.Width, fw.Height) : bounds;
             geo.FromLastKnown = !fr.Found;
+            if (!fr.Found && fr.LastRel is PointF lr)
+            {
+                double gone = (DateTime.UtcNow - fr.LastSeenAt).TotalSeconds;
+                if (fr.Moving)
+                {
+                    // lost while scrolling: a whole-area read is under way. Show nothing (rather than a guess)
+                    // until it has had its chance; after that it really is off, the way it was moving
+                    if (gone < 0.9) { reason = "searching"; return null; }
+                    // a pinned copy (sticky header) that went: the way the content scrolled; else the way it moved
+                    geo.GoneDir = fr.Went ?? GoneDirection(lr, fr.PrevRel, frame, geo.View.Value, true);
+                }
+                else
+                {
+                    geo.GoneDir = GoneDirection(lr, fr.PrevRel, frame, geo.View.Value, false);
+                    // it was still and is now unreadable (selected, hovered, redrawn): not scrolled away, so
+                    // keep the mark where it was for a while
+                    if (geo.GoneDir == null && gone < 3) geo.FromLastKnown = false;
+                }
+            }
         }
         return geo;
     }
@@ -821,7 +841,15 @@ internal static partial class Engine
     private static void ComputeMark(Mark m, Tutorial? t, int fgPid, DateTime now)
     {
         var ag = AnchorNow(m.Anchor, out var reason);
-        if (ag == null) { m.Geo = null; m.Visibility = reason; return; }
+        if (ag == null)
+        {
+            m.Geo = null;
+            m.Visibility = reason;
+            // a text/template not seen yet: which way is unknown, but where to scroll is — the area it is looked for in
+            m.ScrollHint = reason is "text not visible" or "template not visible" && FindArea(m.Anchor) is RectangleF fa
+                ? ("any", fa, new PointF(fa.X + fa.Width / 2, fa.Y + fa.Height / 2), -1) : null;
+            return;
+        }
         if (!m.Anchor.IsScreen)
         {
             bool hideInactive = m.HideInactive ?? t?.HideWhenInactive ?? HideWhenInactiveDefault;
@@ -829,14 +857,24 @@ internal static partial class Engine
         }
         var geo = Layout.Build(m, ag, m.Satisfied);
         m.ScrollHint = null;
-        if (ag.View is RectangleF view && OutsideView(geo.Center, view, ag.Scale, ag.FromLastKnown) is string dir)
+        if (ag.View is RectangleF view && OutsideView(geo.Center, view, ag.Scale, ag.FromLastKnown) is string seenDir
+            && (seenDir != "unknown" || ag.GoneDir == null ? seenDir : ag.GoneDir) is string dir0)
         {
+            string dir = dir0 == "unknown" ? "any" : dir0;      // not seen and no idea which way: just "scroll here"
             // the target scrolled out of the pane: point at the edge it went past
             var toward = new PointF(Math.Clamp(geo.Center.X, view.Left + 40 * ag.Scale, view.Right - 40 * ag.Scale),
                                     Math.Clamp(geo.Center.Y, view.Top + 40 * ag.Scale, view.Bottom - 40 * ag.Scale));
-            m.ScrollHint = (dir, view, toward);
+            // how far past the edge it is, when we know where it is (UIA rect, or a text/template seen before)
+            float beyond = dir switch
+            {
+                "down" => geo.Center.Y - view.Bottom, "up" => view.Top - geo.Center.Y,
+                "right" => geo.Center.X - view.Right, "left" => view.Left - geo.Center.X,
+                _ => -1,
+            };
+            // a text/template out of view is only known by where it was last seen — no distance from that
+            m.ScrollHint = (dir, view, toward, ag.FromLastKnown ? -1 : Math.Max(0, beyond));
             m.Geo = null;
-            m.Visibility = "scroll-" + dir;
+            m.Visibility = "scroll-" + dir0;
             return;
         }
         if (!m.Anchor.IsScreen)
@@ -873,6 +911,31 @@ internal static partial class Engine
         return Contrast.Pick(samples);
     }
 
+    /// <summary>
+    /// A text/template that is no longer on screen: which edge did it go past? Its last two sightings tell which
+    /// way it was moving; failing that, where it was last seen (top third → up, bottom third → down).
+    /// </summary>
+    private static string? GoneDirection(PointF last, PointF? before, Rectangle frame, RectangleF view, bool moving)
+    {
+        float ny = (frame.Y + last.Y - view.Top) / Math.Max(1, view.Height);
+        if (moving)
+        {
+            // it was scrolling and a whole-area read did not find it: it went the way it was moving
+            if (before is PointF b)
+            {
+                float dx = last.X - b.X, dy = last.Y - b.Y;
+                if (Math.Abs(dy) >= 2 && Math.Abs(dy) >= Math.Abs(dx)) return dy < 0 ? "up" : "down";
+                if (Math.Abs(dx) > 20) return dx < 0 ? "left" : "right";
+            }
+            return ny < 0.5f ? "up" : "down";
+        }
+        // it was still: only a text right at the top or bottom edge can have gone out unnoticed. Never sideways
+        // by position: lines start at the left of a pane, and an unreadable moment there is not a scroll
+        if (ny < 0.15f) return "up";
+        if (ny > 0.85f) return "down";
+        return null;
+    }
+
     private static string? OutsideView(PointF c, RectangleF view, float s, bool lastKnown)
     {
         float m = 6 * s;
@@ -884,39 +947,77 @@ internal static partial class Engine
     }
 
     /// <summary>An arrow at the pane's edge plus a caption, for targets that scrolled out of view.</summary>
+    /// <summary>
+    /// The target scrolled out of its pane: a scroll wheel at the edge it went past, arrows running that way, a
+    /// caption, and "≈ N notches" when we know how far it is (~60 px a notch at 100 %). Scrolled past it, the
+    /// target is beyond the other edge and the hint turns round by itself. Nothing here is reported to the agent.
+    /// </summary>
     private static void AddScrollVisuals(List<Mark> marks, Scene sc, List<RectangleF> avoid, int fgPid)
     {
-        var loc = Settings.Current.Text;
         var shown = new HashSet<string>();
         foreach (var m in marks)
         {
             if (m.ScrollHint is not { } h || m.Satisfied) continue;
+            if (h.dir is not ("up" or "down" or "left" or "right" or "any")) continue;
             if (!shown.Add(h.dir + h.view)) continue;        // one hint per pane and direction
             float s = Native.ScaleAt(h.toward);
-            var c = Palette.Accent;
-            PointF tip, tail;
-            string text;
-            switch (h.dir)
-            {
-                case "up": tip = new PointF(h.toward.X, h.view.Top + 14 * s); tail = new PointF(tip.X, tip.Y + 70 * s); text = loc.ScrollUp; break;
-                case "down": tip = new PointF(h.toward.X, h.view.Bottom - 14 * s); tail = new PointF(tip.X, tip.Y - 70 * s); text = loc.ScrollDown; break;
-                case "left": tip = new PointF(h.view.Left + 14 * s, h.toward.Y); tail = new PointF(tip.X + 70 * s, tip.Y); text = loc.ScrollLeft; break;
-                case "right": tip = new PointF(h.view.Right - 14 * s, h.toward.Y); tail = new PointF(tip.X - 70 * s, tip.Y); text = loc.ScrollRight; break;
-                default: continue;
-            }
-            var arrow = new Prim { Kind = PrimKind.Arrow, A = tail, B = tip, Color = c, Width = 4.5f * s, Scale = s };
-            float px = 15 * s;
+            var at = ScrollHintPoint(h.dir, h.view, h.toward, s);
+            var (text, notches) = ScrollHintText(h.dir, h.beyond, h.view, s);
+            var wheel = new Prim { Kind = PrimKind.Wheel, A = at, Rect = new RectangleF(at.X - 20 * s, at.Y - 34 * s, 40 * s, 68 * s),
+                                   Text = h.dir + "|" + (notches > 0 ? "≈" + notches : ""), Color = Palette.Accent, Scale = s };
+            float px = 14 * s;
             var sz = Theme.Measure(text, Theme.Font(px), 300 * s);
             float w = sz.Width + 28 * s, hh = sz.Height + 16 * s;
-            var box = h.dir is "up" or "down"
-                ? new RectangleF(tail.X - w / 2, h.dir == "up" ? tail.Y + 6 * s : tail.Y - 6 * s - hh, w, hh)
-                : new RectangleF(h.dir == "left" ? tail.X + 6 * s : tail.X - 6 * s - w, tail.Y - hh / 2, w, hh);
-            var label = new Prim { Kind = PrimKind.Label, Rect = box, Text = text, Size = px, Color = c, Scale = s, Radius = 8 * s };
-            sc.Prims.Add((arrow, 1f));
+            // the caption on the inner side of the wheel
+            var box = h.dir switch
+            {
+                "any" => new RectangleF(at.X - 30 * s - w, at.Y - hh / 2, w, hh),
+                "down" => new RectangleF(at.X - w / 2, at.Y - 44 * s - hh, w, hh),
+                "up" => new RectangleF(at.X - w / 2, at.Y + 44 * s, w, hh),
+                "right" => new RectangleF(at.X - 30 * s - w, at.Y - hh / 2, w, hh),
+                _ => new RectangleF(at.X + 30 * s, at.Y - hh / 2, w, hh),
+            };
+            var label = new Prim { Kind = PrimKind.Label, Rect = box, Text = text, Size = px, Color = Palette.Accent, Scale = s, Radius = 8 * s };
+            sc.Prims.Add((wheel, 1f));
+            avoid.Add(wheel.Rect);
+            // the mascot says it in its bubble: the caption would only repeat it
+            if (_tut is { Mascot: true } && Settings.Current.Mascot) continue;
             sc.Prims.Add((label, 1f));
-            avoid.Add(arrow.Extent());
             avoid.Add(box);
         }
+    }
+
+    /// <summary>The area a find anchor is looked for in (the element, or its "within" part), on screen.</summary>
+    private static RectangleF? FindArea(AnchorSpec a)
+    {
+        if (a.Find == null) return null;
+        var r = Resolver.Get(a.WithoutFind().Key);
+        if (r is not { Found: true } || !Native.IsWindow(r.Root) || Native.IsIconic(r.Root)) return null;
+        var frame = Native.FrameRect(r.Root);
+        RectangleF b = r.Rel is RectangleF rel ? new RectangleF(frame.X + rel.X, frame.Y + rel.Y, rel.Width, rel.Height) : frame;
+        var area = a.Find.Within is RectangleF w ? new RectangleF(b.X + w.X, b.Y + w.Y, w.Width, w.Height) : b;
+        area.Intersect(b);
+        return area.Width < 40 || area.Height < 40 ? null : area;
+    }
+
+    /// <summary>Where the wheel stands: just inside the edge the target went past, in line with the target.</summary>
+    private static PointF ScrollHintPoint(string dir, RectangleF view, PointF toward, float s) => dir switch
+    {
+        "any" => new PointF(view.Right - 60 * s, view.Y + view.Height / 2),
+        "down" => new PointF(toward.X, view.Bottom - 46 * s),
+        "up" => new PointF(toward.X, view.Top + 46 * s),
+        "right" => new PointF(view.Right - 30 * s, toward.Y),
+        _ => new PointF(view.Left + 30 * s, toward.Y),
+    };
+
+    private static (string text, int notches) ScrollHintText(string dir, float beyond, RectangleF view, float s)
+    {
+        var loc = Settings.Current.Text;
+        if (dir == "any") return (loc.ScrollFind, 0);
+        string text = dir switch { "up" => loc.ScrollUp, "down" => loc.ScrollDown, "left" => loc.ScrollLeft, _ => loc.ScrollRight };
+        // bring it in a little past the edge, not just to it
+        int notches = beyond < 0 ? 0 : Math.Clamp((int)Math.Ceiling((beyond + Math.Min(view.Height, view.Width) * 0.15f) / (60 * s)), 1, 99);
+        return (notches > 0 ? $"{text} · ≈{notches}" : text, notches);
     }
 
     private static bool OnAnyMonitor(PointF p) => Native.VirtualScreen().Contains((int)p.X, (int)p.Y)
