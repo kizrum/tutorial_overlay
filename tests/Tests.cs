@@ -432,14 +432,26 @@ public static class FileTests
     }
 }
 
+/// <summary>
+/// The local examples/ folder: real tutorials kept on this computer only (gitignored — tutorial specs never go into
+/// the repository). Where it is absent these tests have nothing to check and pass.
+/// </summary>
 public static class ExampleTests
 {
-    /// <summary>The shipped examples are real, working tutorials: the lint must find nothing in them.</summary>
+    private static string? Dir()
+    {
+        for (int up = 0; up < 8; up++)
+        {
+            var dir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, string.Concat(Enumerable.Repeat("../", up)), "examples"));
+            if (Directory.Exists(dir) && File.Exists(Path.Combine(dir, "..", "TutorialOverlay.csproj"))) return dir;
+        }
+        return null;
+    }
+
+    /// <summary>The examples are real, working tutorials: the lint must find nothing in them.</summary>
     public static void TestExamplesHaveNoUnknownFields()
     {
-        var dir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples");
-        for (int up = 0; !Directory.Exists(dir) && up < 8; up++) dir = Path.Combine(AppContext.BaseDirectory, string.Concat(Enumerable.Repeat("../", up)), "examples");
-        A.Check(Directory.Exists(dir), "examples folder not found from " + AppContext.BaseDirectory);
+        if (Dir() is not string dir) return;
         var problems = new List<string>();
         foreach (var f in Directory.GetFiles(dir, "*.json"))
         {
@@ -448,6 +460,14 @@ public static class ExampleTests
             problems.AddRange(w.Select(x => $"{Path.GetFileName(f)}: {x}"));
         }
         A.Check(problems.Count == 0, string.Join("\n    ", problems.Prepend("")));
+    }
+
+    /// <summary>Pixel offsets fit one display scale: every example must say which, or another screen breaks it.</summary>
+    public static void TestExamplesSayTheirScale()
+    {
+        if (Dir() is not string dir) return;
+        var missing = Directory.GetFiles(dir, "*.json").Where(f => J.Num(JsonNode.Parse(File.ReadAllText(f)), "scale") is not > 0).Select(Path.GetFileName).ToList();
+        A.Check(missing.Count == 0, "no \"scale\" in: " + string.Join(", ", missing));
     }
 }
 

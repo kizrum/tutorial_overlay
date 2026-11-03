@@ -4,3 +4,6 @@ publish/
 *.user
 .vs/
 overlay.key
+
+# tutorial specs (examples, saved tutorials) stay on this computer: never in the repository
+examples/
