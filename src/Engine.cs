@@ -1044,7 +1044,12 @@ internal static partial class Engine
         }
         var geo = Layout.Build(m, ag, m.Satisfied);
         m.ScrollHint = null;
+        // Out of view only if the point clicked (the anchor point) is out too: a frame drawn to one side of its point
+        // (a bar in the playlist, from the point to the right) can reach past the pane's edge while the point itself,
+        // where the user clicks, is in plain view. Judging by the frame alone hid such a target behind a scroll hint
+        // and its clicks went uncounted.
         if (ag.View is RectangleF view && OutsideView(geo.Center, view, ag.Scale, ag.FromLastKnown) is string seenDir
+            && (ag.FromLastKnown || OutsideView(ag.P, view, ag.Scale, false) != null)
             && (seenDir != "unknown" || ag.GoneDir == null ? seenDir : ag.GoneDir) is string dir0)
         {
             string dir = dir0 == "unknown" ? "any" : dir0;      // not seen and no idea which way: just "scroll here"
