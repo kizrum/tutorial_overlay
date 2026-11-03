@@ -1128,7 +1128,7 @@ internal static partial class Engine
             float s = Native.ScaleAt(h.toward);
             var at = ScrollHintPoint(h.dir, h.view, h.toward, s);
             var (text, notches) = ScrollHintText(h.dir, h.beyond, h.view, s);
-            var wheel = new Prim { Kind = PrimKind.Wheel, A = at, Rect = new RectangleF(at.X - 20 * s, at.Y - 34 * s, 40 * s, 68 * s),
+            var wheel = new Prim { Kind = PrimKind.Wheel, A = at, Rect = Prim.WheelBox(at, s),
                                    Text = h.dir + "|" + (notches > 0 ? "≈" + notches : ""), Color = Palette.Accent, Scale = s };
             float px = 14 * s;
             var sz = Theme.Measure(text, Theme.Font(px), 300 * s);

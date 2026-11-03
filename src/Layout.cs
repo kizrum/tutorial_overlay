@@ -54,6 +54,12 @@ internal sealed class Prim
         return r;
     }
 
+    /// <summary>
+    /// All a scroll-wheel hint draws: the wheel, its counter (±30) and the running arrows (up to ±45 either way, by
+    /// direction) — the box for repainting it and for keeping the mascot and the card off it.
+    /// </summary>
+    public static RectangleF WheelBox(PointF c, float s) => new(c.X - 48 * s, c.Y - 48 * s, 96 * s, 96 * s);
+
     public RectangleF Extent()
     {
         float g = Width * 2 + 10 * Scale;

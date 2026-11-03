@@ -515,6 +515,7 @@ internal sealed class Condition
     public Size ScrollPrevSize;
     public DateTime ScrollSampledAt;
     public bool ScrollSampling;
+    public DateTime OffAreaAt;       // the user scrolled the app, but not over the area: the mascot says where
     public bool PixelSampling;       // a screen read for a pixel condition is under way (off the UI thread)
 
     public static Condition Parse(JsonNode n, AnchorSpec? defaults)
@@ -602,6 +603,7 @@ internal sealed class Condition
     {
         SeenPresent = false; Met = false; SeenUnmet = false;
         TraceActive = TraceFailed = HoldBroken = false; FailReason = null; ScrollCount = 0; ScrollAccum = 0; SeenHidden = false; ScrollPx = 0; ScrollPrev = null;
+        OffAreaAt = default;
     }
 
     public static List<PointF> ParsePoints(JsonNode? n)

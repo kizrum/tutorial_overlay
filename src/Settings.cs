@@ -106,7 +106,8 @@ internal sealed class Loc
     public string Why = "Почему так";
     public string ScrollUp = "Прокрутите вверх", ScrollDown = "Прокрутите вниз", ScrollLeft = "Прокрутите влево", ScrollRight = "Прокрутите вправо";
     public string ScrollIssue = "Нужное место за краем окна — {0}.", ScrollFind = "Прокрутите окно, чтобы показать нужное место.",
-        ScrollHere = "Покрутите здесь — я найду «{0}»", ScrollHereAny = "Покрутите здесь — я найду нужное место";
+        ScrollHere = "Покрутите здесь — я найду «{0}»", ScrollHereAny = "Покрутите здесь — я найду нужное место",
+        ScrollOver = "Крутите над «{0}» — там, где рамка", ScrollOverAny = "Крутите внутри рамки";
     public string IssueDialog = "Сначала закройте окно «{0}» — пока оно открыто, программа не принимает клики.";
     public string PrepareTitle = "Подготовимся к началу туториала", DialogTitle = "Сначала закроем окно",
         PrepareText = "В программе открыто окно «{0}». Ответьте на него или закройте — пока оно открыто, программа не принимает клики. Потом продолжим.";
@@ -171,6 +172,7 @@ internal sealed class Loc
         ScrollUp = "Scroll up", ScrollDown = "Scroll down", ScrollLeft = "Scroll left", ScrollRight = "Scroll right",
         ScrollIssue = "The spot is outside the window — {0}.", ScrollFind = "Scroll the window to bring the spot into view.",
         ScrollHere = "Scroll here — I'll spot “{0}”", ScrollHereAny = "Scroll here — I'll spot the place",
+        ScrollOver = "Scroll over “{0}” — inside the frame", ScrollOverAny = "Scroll inside the frame",
 
         IssueDialog = "Close the \"{0}\" window first — the app ignores clicks while it is open.",
         PrepareTitle = "Let's get ready to start", DialogTitle = "First, close this window",

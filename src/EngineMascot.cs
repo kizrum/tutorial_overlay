@@ -75,7 +75,7 @@ internal static partial class Engine
                 // spot to go to (once), not a ride-along
                 var at = ScrollHintPoint("any", hnt.view, hnt.toward, sc);
                 m.Target = at;
-                m.TargetBounds = new RectangleF(at.X - 20 * sc, at.Y - 34 * sc, 40 * sc, 68 * sc);
+                m.TargetBounds = Prim.WheelBox(at, sc);
                 var loc = Settings.Current.Text;
                 m.Say = off.Label is { Length: > 0 } nm ? string.Format(loc.ScrollHere, nm) : loc.ScrollHereAny;
                 m.StepKey += "/look";
@@ -89,10 +89,18 @@ internal static partial class Engine
         if (target == null)
         {
             // a stroke or scroll step: point at where the path starts / where to scroll
-            if (MotionFocus(step) is PointF mf)
+            if (MotionFocus(step) is { } mf)
             {
-                m.Target = mf;
-                m.TargetBounds = new RectangleF(mf.X - 14, mf.Y - 14, 28, 28);
+                m.Target = mf.at;
+                m.TargetBounds = mf.keepClear;
+                m.Scale = Native.ScaleAt(mf.at);
+                // scrolled the app but not over the area: say where (for a couple of seconds after each such turn)
+                if (mf.scroll is { } sc && (DateTime.UtcNow - sc.OffAreaAt).TotalSeconds < 2.5)
+                {
+                    var loc = Settings.Current.Text;
+                    var name = sc.Area!.Anchor.Path.LastOrDefault()?.Name ?? sc.Area.Anchor.Title ?? sc.Area.Anchor.Window;
+                    m.Say = name is { Length: > 0 } ? string.Format(loc.ScrollOver, name) : loc.ScrollOverAny;
+                }
                 return m;
             }
             // targets that are all off screen right now: hide with them; a step without targets: stay put

@@ -211,9 +211,17 @@ internal static partial class Engine
             int fgPid = ForegroundPid();
             foreach (var c in step.Until.Where(c => !c.Met && c.Type == "scroll"))
             {
-                ScrollDebug($"wheel {e.Button} {e.Delta} at {e.X},{e.Y}" + (c.Area != null && !InRegion(c.Area, p) ? " (outside the area)" : ""));
-                if (c.Area != null) { if (!InRegion(c.Area, p)) continue; }
-                else if (t!.Defaults.Process != null && !ProcName(fgPid).Equals(t.Defaults.Process, StringComparison.OrdinalIgnoreCase)) continue;
+                bool outside = c.Area != null && !InRegion(c.Area, p);
+                ScrollDebug($"wheel {e.Button} {e.Delta} at {e.X},{e.Y}" + (outside ? " (outside the area)" : ""));
+                if (outside)
+                {
+                    // scrolling the app, but another pane (a piano roll instead of the browser): say where. Scrolling
+                    // in another program is none of our business
+                    var proc = c.Area!.Anchor.Process ?? t!.Defaults.Process;
+                    if (proc == null || ProcName(fgPid).Equals(proc, StringComparison.OrdinalIgnoreCase)) c.OffAreaAt = DateTime.UtcNow;
+                    continue;
+                }
+                if (c.Area == null && t!.Defaults.Process != null && !ProcName(fgPid).Equals(t.Defaults.Process, StringComparison.OrdinalIgnoreCase)) continue;
                 // wheel forward (delta > 0) scrolls up; tilt right (delta > 0) scrolls right
                 string dir = e.Button == "v" ? (e.Delta > 0 ? "up" : "down") : (e.Delta > 0 ? "right" : "left");
                 if (dir != c.Direction) continue;
@@ -267,7 +275,7 @@ internal static partial class Engine
                     if (hideInactive && !c.Area.Anchor.IsScreen && !AppActive(g.ag.Pids, c.Area.Anchor.Process, fgPid)) continue;
                 }
                 else continue;
-                var box = new RectangleF(at.X - 20 * s, at.Y - 34 * s, 40 * s, 68 * s);
+                var box = Prim.WheelBox(at, s);
                 if (RegionGeo(c.Area!) is { } area)
                 {
                     var areaRect = area.circle ? new RectangleF(area.c.X - area.r, area.c.Y - area.r, 2 * area.r, 2 * area.r) : area.rect;
@@ -422,12 +430,22 @@ internal static partial class Engine
     }
 
     /// <summary>Where the mascot points on a stroke or scroll step without targets: the start of the path / the wheel.</summary>
-    private static PointF? MotionFocus(Step step)
+    /// <summary>
+    /// Where a stroke or scroll step happens, for the mascot: the point to show, what it must not cover there (the
+    /// whole wheel hint with its counter, not just a point), and for a scroll step the condition itself.
+    /// </summary>
+    private static (PointF at, RectangleF keepClear, Condition? scroll)? MotionFocus(Step step)
     {
         foreach (var c in step.Until.Where(c => !c.Met))
         {
-            if (c.Type == "trace" && PathOnScreen(c, out _) is { Count: > 0 } path) return path[0];
-            if (c.Type == "scroll" && c.Area != null && RegionGeo(c.Area) is { } g) return g.circle ? g.c : new PointF(g.rect.Right - 34 * g.ag.Scale, g.rect.Y + g.rect.Height / 2);
+            if (c.Type == "trace" && PathOnScreen(c, out _) is { Count: > 0 } path)
+                return (path[0], new RectangleF(path[0].X - 14, path[0].Y - 14, 28, 28), null);
+            if (c.Type == "scroll" && c.Area != null && RegionGeo(c.Area) is { } g)
+            {
+                float s = g.ag.Scale;
+                var at = g.circle ? new PointF(g.c.X + g.r + 30 * s, g.c.Y) : new PointF(g.rect.Right - 34 * s, g.rect.Y + g.rect.Height / 2);
+                return (at, Prim.WheelBox(at, s), c);
+            }
         }
         return null;
     }
