@@ -351,6 +351,9 @@ internal static partial class Engine
                 case "outro_save" or "outro_repeat" or "outro_continue" or "outro_close":
                     Outro(action, source);
                     break;
+                case "wait_finish":
+                    if (t is { State: TutorialState.Waiting }) { FinishNow(t, "user"); _stepVersion++; }
+                    break;
             }
         }
     }
@@ -408,16 +411,37 @@ internal static partial class Engine
         if (t.KeepOpen)
         {
             t.State = TutorialState.Waiting;
+            t.WaitingSince = DateTime.UtcNow;
             Events.Emit("tutorial_waiting", new() { ["title"] = t.Title, ["completed"] = t.Steps.Count });
         }
-        else
-        {
-            t.State = TutorialState.Finished;
-            t.OutroOpen = t.Outro;
-            // the end card keeps the tutorial's look until it is closed
-            if (!t.OutroOpen) ApplySettings(Settings.Global);
-            Events.Emit("tutorial_finished", new() { ["title"] = t.Title, ["total"] = t.Steps.Count, ["outro"] = t.Outro, ["savedAs"] = t.SavedAs });
-        }
+        else FinishNow(t, null);
+        _stepVersion++;
+    }
+
+    private static void FinishNow(Tutorial t, string? reason)
+    {
+        t.State = TutorialState.Finished;
+        t.OutroOpen = t.Outro;
+        // the end card keeps the tutorial's look until it is closed
+        if (!t.OutroOpen) ApplySettings(Settings.Global);
+        var ev = new JsonObject { ["title"] = t.Title, ["total"] = t.Steps.Count, ["outro"] = t.Outro, ["savedAs"] = t.SavedAs };
+        if (reason != null) ev["reason"] = reason;
+        Events.Emit("tutorial_finished", ev);
+    }
+
+    /// <summary>
+    /// How long the card waits for append_steps with no request at all from the agent. An agent that is still
+    /// preparing the next lesson calls tools (screenshot, find_text, validate…), and each call restarts the wait;
+    /// one that has gone quiet or away must not leave the user before a spinner forever.
+    /// </summary>
+    private static readonly TimeSpan WaitForSteps = TimeSpan.FromSeconds(30);
+
+    private static void CheckWaiting(Tutorial t, DateTime now)
+    {
+        long ticks = System.Threading.Interlocked.Read(ref McpServer.LastRequestTicks);
+        var last = ticks == 0 ? t.WaitingSince : new DateTime(Math.Max(ticks, t.WaitingSince.Ticks), DateTimeKind.Utc);
+        if (now - last < WaitForSteps) return;
+        FinishNow(t, "no_more_steps");
         _stepVersion++;
     }
 
@@ -1432,6 +1456,7 @@ internal static partial class Engine
 
     private static void EvaluateTutorial(Tutorial t, DateTime now, int fgPid)
     {
+        if (t.State == TutorialState.Waiting) { CheckWaiting(t, now); return; }
         if (t.State != TutorialState.Running) return;
         var s = t.Current;
         if (s == null) return;
@@ -1530,6 +1555,9 @@ internal static partial class Engine
             card.Title = t.Title.Length > 0 ? t.Title : Settings.Current.Text.Tutorial;
             card.Text = "";
             card.Controls = new HashSet<string> { "stop" };
+            // the user is never left before a spinner with no way on: finish now, straight to the end card
+            if (t.State == TutorialState.Waiting)
+                card.Extra = new List<CardButton> { new("wait_finish", Settings.Current.Text.WaitFinish, "primary", "wait_finish") };
         }
         else
         {

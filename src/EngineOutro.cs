@@ -85,6 +85,7 @@ internal static partial class Engine
                 // the card waits ("preparing the next step") until the agent appends steps
                 t.OutroOpen = false;
                 t.State = TutorialState.Waiting;
+                t.WaitingSince = DateTime.UtcNow;
                 Events.Emit("continue_requested", new()
                 {
                     ["title"] = t.Title, ["completed"] = t.Steps.Count, ["app"] = t.Defaults.Process, ["savedAs"] = t.SavedAs,

@@ -119,7 +119,7 @@ internal sealed class Loc
         SketchText = "Рисуйте мышью · Enter или правый клик — готово · Ctrl+Z — убрать штрих · Esc — отмена", SketchClear = "Стереть";
 
     public string OutroHead = "ГОТОВО", OutroTitle = "Туториал пройден!", OutroText = "Вы прошли «{0}» — шагов: {1}. Что дальше?",
-        OutroSave = "Сохранить туториал", OutroRepeat = "Пройти ещё раз", OutroContinue = "Продолжить обучение", OutroClose = "Закрыть",
+        OutroSave = "Сохранить туториал", OutroRepeat = "Пройти ещё раз", OutroContinue = "Продолжить обучение", OutroClose = "Закрыть", WaitFinish = "Завершить",
         OutroSavedTitle = "Сохранено", OutroSavedText = "Туториал в вашей библиотеке: его можно пройти снова из меню значка в трее (Туториалы).",
         TrayTutorials = "Туториалы", TrayTutorialsEmpty = "Пока нет сохранённых", TrayTutorialsFolder = "Открыть папку туториалов";
     public string HoldKeys = "Держите {0}";
@@ -184,7 +184,7 @@ internal sealed class Loc
         Sketch = "Circle it", Sketched = "Circled: {0}", SketchTitle = "Circle the part of the screen you mean",
         SketchText = "Draw with the mouse · Enter or right click — done · Ctrl+Z — undo stroke · Esc — cancel", SketchClear = "Clear",
         OutroHead = "DONE", OutroTitle = "Tutorial complete!", OutroText = "You finished \"{0}\" — {1} steps. What next?",
-        OutroSave = "Save tutorial", OutroRepeat = "Go through again", OutroContinue = "Keep learning", OutroClose = "Close",
+        OutroSave = "Save tutorial", OutroRepeat = "Go through again", OutroContinue = "Keep learning", OutroClose = "Close", WaitFinish = "Finish",
         OutroSavedTitle = "Saved", OutroSavedText = "It is in your library: replay it any time from the tray icon menu (Tutorials).",
         TrayTutorials = "Tutorials", TrayTutorialsEmpty = "Nothing saved yet", TrayTutorialsFolder = "Open tutorials folder",
         HoldKeys = "Hold {0}",
