@@ -13,6 +13,7 @@ internal static class Program
 {
     public const string Version = "0.1.0";
     private static System.Windows.Forms.Control? _ui;
+    private static MascotWindow? _mascot;
 
     // what this instance runs with — shown in the tray and the settings window
     public static int Port { get; private set; }
@@ -138,6 +139,7 @@ internal static class Program
         {
             // the canvas is shown with ShowWindow, so it is not in OpenForms
             var handles = new System.Collections.Generic.HashSet<IntPtr> { ui.Handle };
+            if (_mascot is { IsHandleCreated: true } m) handles.Add(m.Handle);
             foreach (System.Windows.Forms.Form f in System.Windows.Forms.Application.OpenForms) handles.Add(f.Handle);
             foreach (var h in handles) Native.SetWindowDisplayAffinity(h, capturable ? 0u : Native.WDA_EXCLUDEFROMCAPTURE);
         });
@@ -189,6 +191,9 @@ internal static class Program
 
         var overlay = new OverlayWindow();
         var card = new CardWindow();
+        var mascot = new MascotWindow();
+        _ = mascot.Handle;
+        _mascot = mascot;
         var buttons = new ButtonHost();
         _ = overlay.Handle;
         _ = card.Handle;
@@ -233,6 +238,7 @@ internal static class Program
                 if (frame.Changed) overlay.Present(frame.Scene);
                 buttons.Update(frame.Buttons);
                 card.UpdateModel(frame.Card);
+                mascot.Update(frame.Mascot);
             }
             catch (Exception e) { Log.Warn("frame: " + e); }
         };

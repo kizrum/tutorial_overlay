@@ -115,6 +115,7 @@ internal static partial class Engine
                 AdvanceDelayMs = J.Int(spec, "advanceDelayMs") ?? 450,
                 HideWhenInactive = J.Bool(spec, "hideWhenInactive") ?? Settings.Current.HideWhenInactive ?? HideWhenInactiveDefault,
                 Outro = J.Bool(spec, "outro") ?? true,
+                Mascot = J.Bool(spec, "mascot") ?? true,
                 Spec = spec is JsonObject so ? (JsonObject)so.DeepClone() : new JsonObject(),
                 SavedAs = savedAs,
             };
@@ -294,6 +295,7 @@ internal static partial class Engine
         t.CompletedHow = null;
         var s = t.Steps[idx];
         s.ResetRuntime();
+        s.EnteredAt = DateTime.UtcNow;
         // coming back must not bounce straight forward again because the step's goal is already true
         s.Review = back;
         _stepVersion++;
@@ -483,6 +485,7 @@ internal static partial class Engine
         public bool Changed;
         public List<ButtonGeo> Buttons = new();
         public CardModel Card = new();
+        public MascotInput? Mascot;
     }
 
     public static Frame Tick()
@@ -531,9 +534,17 @@ internal static partial class Engine
             // compose the canvas
             var sc = new Scene { Pulse = Animate ? 0.5f + 0.5f * (float)Math.Sin(now.Ticks / (double)TimeSpan.TicksPerMillisecond / 1600.0 * Math.PI * 2) : 1f };
             float dim = 0;
+            // with the mascot on, a step's highlight appears when it has arrived (appeared, or stopped walking)
+            bool holdTargets = step != null && HoldForMascot(t!, step, now);
             foreach (var m in visible)
             {
                 var g = m.Geo!;
+                if (holdTargets && !m.Satisfied && step!.Targets.Contains(m))
+                {
+                    m.ShownAt = null;
+                    f.Card.Avoid.Add(g.Bounds);
+                    continue;
+                }
                 if (m.ShownAt == null) m.ShownAt = now;
                 float alpha = Animate ? (float)Math.Clamp((now - m.ShownAt.Value).TotalMilliseconds / 180.0, 0, 1) : 1f;
                 if (!m.Satisfied)
@@ -588,6 +599,7 @@ internal static partial class Engine
 
             if (t is { Active: true }) EvaluateTutorial(t, now, fgPid);
             BuildCard(f.Card, _tut, fgPid);
+            f.Mascot = MascotFor(_tut, f.Card);
 
             var sig = Signature(sc);
             f.Changed = sig != _lastSignature || sc.Ripples.Count > 0;

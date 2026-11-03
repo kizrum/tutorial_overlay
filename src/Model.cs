@@ -553,6 +553,8 @@ internal sealed class Step
     public string Title = "";
     public string Text = "";
     public string? Why;                          // "why it works this way" — the card teaches, not just instructs
+    public string? Say;                          // the mascot's short line (default: the title)
+    public DateTime EnteredAt;                   // when the step became current (mascot / highlight sync)
     public List<Mark> Targets = new();
     public List<Condition> Until = new();
     public bool UntilAll;                // false: any condition completes the step
@@ -586,6 +588,7 @@ internal sealed class Step
             Title = J.Str(n, "title") ?? "",
             Text = J.Str(n, "text") ?? J.Str(n, "description") ?? J.Str(n, "body") ?? "",
             Why = J.Str(n, "why") ?? J.Str(n, "explain") ?? J.Str(n, "because"),
+            Say = J.Str(n, "say"),
             UntilAll = (J.Str(n, "untilMode") ?? "any").Equals("all", StringComparison.OrdinalIgnoreCase),
             Toggle = J.Bool(n, "toggle"),
             Dim = J.Num(n, "dim") is double d ? (float)d : (J.Bool(n, "dim") == true ? 0.45f : null),
@@ -650,6 +653,7 @@ internal sealed class Tutorial
     public int AdvanceDelayMs = 450;
     public bool HideWhenInactive = true;
     public bool Outro = true;            // after the last step: offer save / repeat / continue on the card
+    public bool Mascot = true;           // "Шажок" points at the targets (also needs the global setting)
     public JsonObject Spec = new();      // what it was started from (+ appended steps) — what "save" writes
     public string? SavedAs;              // name in the tutorial library, once saved
 

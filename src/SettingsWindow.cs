@@ -26,7 +26,7 @@ internal sealed class SettingsWindow : Form
     private Label _portStatus = null!;
     private readonly DarkButton _ru, _en;
     private readonly List<DarkSwatch> _swatches = new();
-    private readonly DarkToggle _autoColor, _animate, _hideInactive, _hideCapture;
+    private readonly DarkToggle _autoColor, _animate, _hideInactive, _hideCapture, _mascot;
     private readonly Dictionary<string, DarkField> _keyBoxes = new();
     private readonly Dictionary<string, Chord?> _chords = new();
     private readonly List<(DarkButton tab, Panel page)> _tabs = new();
@@ -123,6 +123,7 @@ internal sealed class SettingsWindow : Form
         _en = (DarkButton)FindByTag("en");
         _autoColor = (DarkToggle)FindByTag("autoColor");
         _animate = (DarkToggle)FindByTag("animate");
+        _mascot = (DarkToggle)FindByTag("mascot");
         _hideInactive = (DarkToggle)FindByTag("hideInactive");
         _hideCapture = (DarkToggle)FindByTag("hideCapture");
         Select(_tabs[0].tab);
@@ -268,6 +269,7 @@ internal sealed class SettingsWindow : Form
         int tw = _pageW;
         add(null, new DarkToggle(_t.SetAutoColor, g.AutoColor, _s, tw) { Tag = "autoColor" }, wide: true);
         add(null, new DarkToggle(_t.SetAnimate, g.Animate ?? true, _s, tw) { Tag = "animate" }, wide: true);
+        add(null, new DarkToggle(_t.SetMascot, g.Mascot, _s, tw) { Tag = "mascot" }, wide: true);
         add(null, new DarkToggle(_t.SetHideInactive, g.HideWhenInactive ?? true, _s, tw) { Tag = "hideInactive" }, wide: true);
         add(null, new DarkToggle(_t.SetHideCapture, g.HideFromCapture, _s, tw) { Tag = "hideCapture" }, wide: true);
         return p;
@@ -461,6 +463,7 @@ internal sealed class SettingsWindow : Form
         _accent = Palette.DefaultAccent; ShowAccent();
         _autoColor.Checked = true;
         _animate.Checked = true;
+        _mascot.Checked = true;
         _hideInactive.Checked = true;
         _hideCapture.Checked = false;
         foreach (var (a, c) in Settings.DefaultHotkeys()) _chords[a] = c;
@@ -490,6 +493,7 @@ internal sealed class SettingsWindow : Form
             root["accent"] = $"#{_accent.R:X2}{_accent.G:X2}{_accent.B:X2}";
             root["autoColor"] = _autoColor.Checked;
             root["animate"] = _animate.Checked;
+            root["mascot"] = _mascot.Checked;
             root["hideWhenInactive"] = _hideInactive.Checked;
             root["hideFromCapture"] = _hideCapture.Checked;
             var hk = new JsonObject();

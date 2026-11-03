@@ -61,7 +61,8 @@ internal static class Tools
         Tool("start_tutorial", "Start a tutorial; only the current step's targets show, steps advance by themselves. " +
             "spec={title, app (default process for anchors), window, dim, toggle, keepOpen (wait for append_steps after last step), advanceDelayMs, hideWhenInactive, startAt, " +
             "outro (default true: end card offers Save/Repeat/Keep learning), lang:'ru'|'en', accent, hotkeys:{done,back,skip,undo,stop:'Ctrl+Alt+Right'|'none'}, " +
-            "steps:[{id, title, text, why (shown on the card: teach the idea, not just the click), anchor, " +
+            "mascot (default true: a character flies to each target, points and says the step's 'say' line), " +
+            "steps:[{id, title, text, why (shown on the card: teach the idea, not just the click), say (mascot's short line, ≤60 chars; default title), anchor, " +
             "targets:[{id, name, anchor, shapes, toggle, check, button, optional, doneStyle:'hide'|'check', hint, number, arrow, " +
             "opens:{title|window|process|element, timeoutMs} (counts only if this NEW window appears, else event no_effect), " +
             "grid:{from:[x,y] first cell centre, step:[dx,dy], rows, cols, cells:[[r,c]…]|[c…], w, h} (target per cell; name may use {row} {col} {n})}], " +

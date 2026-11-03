@@ -140,7 +140,7 @@ internal sealed class Loc
         RestartBusy = "Порт {0} уже занят ({1}). Сервер не перезапущен и продолжает работать на {2}.",
         SetUrl = "Адрес MCP", SetKey = "Ключ", SetKeySource = "Откуда взят: {0}", Show = "Показать", Hide = "Скрыть", Copy = "Копировать",
         SetLang = "Язык", SetAccent = "Цвет отметок", SetPickColor = "Выбрать…", SetReset = "Сбросить",
-        SetAutoColor = "Подбирать цвет отметок под приложение", SetAnimate = "Анимация",
+        SetAutoColor = "Подбирать цвет отметок под приложение", SetAnimate = "Анимация", SetMascot = "Маскот «Шажок» показывает, куда нажать",
         SetHideInactive = "Прятать отметки, когда приложение не на переднем плане",
         SetHideCapture = "Скрывать оверлей от скриншотов и записи экрана",
         SetKeysNote = "Щёлкните в поле и нажмите сочетание (с Ctrl, Alt или Win). Backspace или Delete — отключить.",
@@ -194,7 +194,7 @@ internal sealed class Loc
         RestartBusy = "Port {0} is already in use ({1}). The server was not restarted and keeps running on {2}.",
         SetUrl = "MCP address", SetKey = "Key", SetKeySource = "Taken from: {0}", Show = "Show", Hide = "Hide", Copy = "Copy",
         SetLang = "Language", SetAccent = "Mark colour", SetPickColor = "Choose…", SetReset = "Reset",
-        SetAutoColor = "Match mark colour to the app", SetAnimate = "Animation",
+        SetAutoColor = "Match mark colour to the app", SetAnimate = "Animation", SetMascot = "Mascot \"Shazhok\" shows where to click",
         SetHideInactive = "Hide marks while the app is not in front",
         SetHideCapture = "Hide the overlay from screenshots and screen recording",
         SetKeysNote = "Click a field and press a chord (with Ctrl, Alt or Win). Backspace or Delete turns it off.",
@@ -227,6 +227,8 @@ internal sealed class Settings
     public bool HideFromCapture;
     /// <summary>Pick mark colours that contrast with the app around each target (explicit "color" still wins).</summary>
     public bool AutoColor = true;
+    /// <summary>"Шажок", the mascot that points at targets during a tutorial.</summary>
+    public bool Mascot = true;
     /// <summary>Server port when --port is not given (read at start-up).</summary>
     public int? Port;
 
@@ -265,7 +267,7 @@ internal sealed class Settings
     public Settings Clone() => new()
     {
         Lang = Lang, Accent = Accent, Hotkeys = new Dictionary<string, Chord>(Hotkeys), Animate = Animate, HideWhenInactive = HideWhenInactive,
-        HideFromCapture = HideFromCapture, AutoColor = AutoColor, Port = Port,
+        HideFromCapture = HideFromCapture, AutoColor = AutoColor, Port = Port, Mascot = Mascot,
     };
 
     /// <summary>Overlay the fields present in <paramref name="n"/>.</summary>
@@ -278,6 +280,7 @@ internal sealed class Settings
         if (J.Bool(n, "hideWhenInactive") is bool hw) HideWhenInactive = hw;
         if (J.Bool(n, "hideFromCapture") is bool hc) HideFromCapture = hc;
         if (J.Bool(n, "autoColor") is bool ac) AutoColor = ac;
+        if (J.Bool(n, "mascot") is bool ms) Mascot = ms;
         if (J.Int(n, "port") is int port && port is > 0 and < 65536) Port = port;
         if (J.Get(n, "hotkeys") is JsonObject hk)
             foreach (var a in Actions)
