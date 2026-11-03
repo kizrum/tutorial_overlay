@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace TutorialOverlay;
 
@@ -8,9 +9,11 @@ namespace TutorialOverlay;
 /// only one tutorial, and two agents driving one screen would fight over it. Another agent waits for its turn
 /// (wait_for_turn) instead of starting a second server.
 ///
-/// The server is released when its holder ends its session (HTTP DELETE, sent by MCP clients on exit), calls
-/// release, or goes silent: 3 minutes without a request, or 30 while a tutorial it started is running (the user
-/// may take a while over a step while the agent only watches the events).
+/// The server is released when its holder's client goes away — its event stream (GET /mcp) closes and is not
+/// reopened within a few seconds; Claude Code sends no DELETE on exit, but its connection closes — when it ends
+/// its session (HTTP DELETE), or calls release. While the holder's stream is open it keeps the server however
+/// quiet it is. A client without a stream is released after going silent: 3 minutes without a request, or 30
+/// while a tutorial it started is running (the user may take a while over a step).
 /// </summary>
 internal sealed class ClientLease
 {
@@ -37,6 +40,8 @@ internal sealed class ClientLease
     {
         expired = null;
         if (_holder == null) return null;
+        // its event stream is open: the client is running, however quiet the agent is
+        if (_streams.ContainsKey(_holder)) return _holder;
         var limit = HolderHasTutorial(_holder) ? TutorialTimeout : IdleTimeout;
         if (_now() - _seen <= limit) return _holder;
         expired = _holder;
@@ -92,6 +97,37 @@ internal sealed class ClientLease
         lock (_lock)
         {
             if (_holder != session) return false;
+            _holder = null;
+        }
+        Changed?.Invoke(null, session, why);
+        return true;
+    }
+
+    // open event streams (GET /mcp) per session: an open stream means that client is still running
+    private readonly Dictionary<string, int> _streams = new();
+
+    public void StreamOpened(string session)
+    {
+        lock (_lock) _streams[session] = _streams.GetValueOrDefault(session) + 1;
+    }
+
+    public void StreamClosed(string session)
+    {
+        lock (_lock)
+        {
+            int n = _streams.GetValueOrDefault(session) - 1;
+            if (n > 0) _streams[session] = n; else _streams.Remove(session);
+        }
+    }
+
+    public bool HasStream(string session) { lock (_lock) return _streams.ContainsKey(session); }
+
+    /// <summary>The holder's stream closed and was not reopened: its client is gone — free the server now.</summary>
+    public bool ReleaseIfDisconnected(string session, string why)
+    {
+        lock (_lock)
+        {
+            if (_holder != session || _streams.ContainsKey(session)) return false;
             _holder = null;
         }
         Changed?.Invoke(null, session, why);

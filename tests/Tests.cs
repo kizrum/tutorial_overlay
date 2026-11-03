@@ -511,6 +511,41 @@ public static class LeaseTests
         A.Check(l.TryUse("b", out _), "but not forever");
     }
 
+    public static void TestOpenStreamKeepsTheHolder()
+    {
+        var c = new Clock();
+        var l = new ClientLease(() => c.Now);
+        l.TryUse("a", out _);
+        l.StreamOpened("a");
+        c.Now += ClientLease.TutorialTimeout + TimeSpan.FromHours(1);
+        A.Check(!l.TryUse("b", out _), "a quiet agent whose client is still connected keeps the server");
+        A.Check(!l.ReleaseIfDisconnected("a", "x"), "not released while its stream is open");
+    }
+
+    public static void TestClosedStreamFreesTheServer()
+    {
+        var l = new ClientLease();
+        l.TryUse("a", out _);
+        l.StreamOpened("a");
+        l.StreamOpened("a");
+        l.StreamClosed("a");
+        A.Check(l.HasStream("a"), "one of two streams still open");
+        l.StreamClosed("a");
+        A.Check(l.ReleaseIfDisconnected("a", "client disconnected"), "last stream closed: released");
+        A.Check(l.TryUse("b", out _), "next agent gets it at once");
+    }
+
+    public static void TestReconnectWithinGraceKeepsIt()
+    {
+        var l = new ClientLease();
+        l.TryUse("a", out _);
+        l.StreamOpened("a");
+        l.StreamClosed("a");
+        l.StreamOpened("a");          // reconnected before the grace check
+        A.Check(!l.ReleaseIfDisconnected("a", "client disconnected"), "kept");
+        A.Eq("a", l.Holder, "holder");
+    }
+
     public static void TestChangeEvents()
     {
         var log = new List<string>();

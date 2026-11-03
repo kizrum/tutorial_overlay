@@ -101,6 +101,8 @@ internal sealed class McpServer
         if (!OriginOk(ctx)) { ctx.Response.StatusCode = 403; return; }
         if (!Authorized(ctx))
         {
+            // what reached us and was turned away (never the key itself): a client whose DELETE or stream lacks the key shows up here
+            Log.Info($"{ctx.Request.Method} /mcp refused: bad or missing key (session {Short(SessionOf(ctx))})");
             ctx.Response.StatusCode = 401;
             await ctx.Response.WriteAsync(ctx.Request.Query.ContainsKey("key")
                 ? "the key is no longer accepted in the URL: send it as a header (Authorization: Bearer <key>)"
@@ -113,6 +115,7 @@ internal sealed class McpServer
             case "GET": await HandleSse(ctx); break;
             case "DELETE":
                 // the client ends its session (MCP clients do on exit): the server is free for the next agent
+                Log.Info($"DELETE /mcp: session {Short(SessionOf(ctx))} ends");
                 Lease.Release(SessionOf(ctx), "session ended");
                 ctx.Response.StatusCode = 200;
                 break;
@@ -322,17 +325,28 @@ internal sealed class McpServer
         };
     }
 
-    /// <summary>Server → client notifications: every overlay event as notifications/message.</summary>
+    /// <summary>A holder whose stream dropped may reconnect within this time before the server counts it as gone.</summary>
+    private static readonly TimeSpan StreamGrace = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Server → client notifications: every overlay event as notifications/message — to the holder only; another
+    /// session's stream stays open with keep-alives (it is how we know that client is still there).
+    /// The stream is also the client's pulse: an MCP client keeps it open while it runs, and its operating system
+    /// closes the connection when the client exits, even without a DELETE. So while the holder's stream is open the
+    /// server stays its own however long the agent is quiet, and once it closes (and is not reopened within a few
+    /// seconds) the server is free at once.
+    /// </summary>
     private static async Task HandleSse(HttpContext ctx)
     {
         if (!ctx.Request.Headers.Accept.ToString().Contains("text/event-stream")) { ctx.Response.StatusCode = 405; return; }
-        // the event stream is the holder's: an agent waiting for its turn gets none of it
-        if (Lease.Holder is string h && h != SessionOf(ctx)) { ctx.Response.StatusCode = 405; return; }
+        var session = SessionOf(ctx);
         ctx.Response.ContentType = "text/event-stream";
         ctx.Response.Headers.CacheControl = "no-cache";
         var ch = Channel.CreateBounded<JsonObject>(new BoundedChannelOptions(500) { FullMode = BoundedChannelFullMode.DropOldest });
-        void OnEvent(JsonObject ev) => ch.Writer.TryWrite(ev);
+        void OnEvent(JsonObject ev) { if (Lease.Holder == session) ch.Writer.TryWrite(ev); }
         Events.Published += OnEvent;
+        Lease.StreamOpened(session);
+        Log.Info($"GET /mcp: event stream opened by session {Short(session)}");
         try
         {
             await ctx.Response.WriteAsync(": connected\n\n", ctx.RequestAborted);
@@ -357,6 +371,18 @@ internal sealed class McpServer
         }
         catch (OperationCanceledException) { }
         catch (IOException) { }
-        finally { Events.Published -= OnEvent; }
+        finally
+        {
+            Events.Published -= OnEvent;
+            Lease.StreamClosed(session);
+            Log.Info($"GET /mcp: event stream of session {Short(session)} closed");
+            _ = ReleaseUnlessReconnected(session);
+        }
+    }
+
+    private static async Task ReleaseUnlessReconnected(string session)
+    {
+        await Task.Delay(StreamGrace);
+        Lease.ReleaseIfDisconnected(session, "client disconnected");
     }
 }
