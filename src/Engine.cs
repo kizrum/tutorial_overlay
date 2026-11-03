@@ -601,6 +601,7 @@ internal static partial class Engine
             bool sampleNow = (now - _lastPixel).TotalMilliseconds >= 150;
             if (sampleNow) _lastPixel = now;
             var probes = new List<(PointF p, int r)>();
+            var due = new List<(Mark m, PointF pt)>();
             foreach (var m in visible.Where(m => m.Check != null))
             {
                 if (ProbePoint(m) is not { } pp) continue;
@@ -608,8 +609,9 @@ internal static partial class Engine
                 // only after the canvas has shown this mark (with its probe hole) — otherwise the probe can
                 // still see whatever we drew there a moment ago
                 bool rendered = m.ShownAt is DateTime sa && (now - sa).TotalMilliseconds > 120;
-                if (sampleNow && rendered) RunPixelCheck(m, pp.pt, pp.ag);
+                if (sampleNow && rendered && CanSample(m, pp.pt, pp.ag)) due.Add((m, pp.pt));
             }
+            if (due.Count > 0) RunPixelChecks(due);
 
             // compose the canvas
             var sc = new Scene { Pulse = Animate ? 0.5f + 0.5f * (float)Math.Sin(now.Ticks / (double)TimeSpan.TicksPerMillisecond / 1600.0 * Math.PI * 2) : 1f };
@@ -1227,36 +1229,63 @@ internal static partial class Engine
         }
     }
 
-    /// <summary>
-    /// Reads the screen at the mark's probe off the UI thread and outside <see cref="Sync"/> (a screen read waits
-    /// for the compositor; clicks and tool calls must not wait for it), then judges the colour under the lock.
-    /// </summary>
-    private static void RunPixelCheck(Mark m, PointF pt, AnchorGeo ag)
+    /// <summary>Whether the mark's probe can be read now: not already being read, and the app itself is under it.</summary>
+    private static bool CanSample(Mark m, PointF pt, AnchorGeo ag)
     {
-        var chk = m.Check!;
-        if (m.CheckSampling) return;
-        if (!m.Anchor.IsScreen && !ShowsAnchorWindow(pt, ag)) return;   // covered: don't conclude anything
-        if (Native.HitWindow(pt).rootPid == OwnPid) return; // under our card / a button: can't see the app there
-        m.CheckSampling = true;
-        int epoch = m.Epoch;
+        if (m.CheckSampling) return false;
+        if (!m.Anchor.IsScreen && !ShowsAnchorWindow(pt, ag)) return false;   // covered: don't conclude anything
+        return Native.HitWindow(pt).rootPid != OwnPid;  // under our card / a button: can't see the app there
+    }
+
+    /// <summary>
+    /// Reads the screen at the marks' probes off the UI thread and outside <see cref="Sync"/> (a screen read waits
+    /// for the compositor; clicks and tool calls must not wait for it), then judges the colours under the lock.
+    /// All the probes due in one frame share one screen read: a step with a row of 18 cells used to read the screen
+    /// 18 times every 150 ms, and those reads, each synchronised with the compositor, made the mouse, the mascot and
+    /// the clicks lag.
+    /// </summary>
+    private static void RunPixelChecks(List<(Mark m, PointF pt)> due)
+    {
+        var batch = due.Select(d => (d.m, d.pt, chk: d.m.Check!, epoch: d.m.Epoch)).ToList();
+        foreach (var b in batch) b.m.CheckSampling = true;
         System.Threading.Tasks.Task.Run(() =>
         {
-            var color = ScreenCapture.Sample(pt, chk.Radius);
+            var colors = new Color[batch.Count];
+            try
+            {
+                foreach (var grp in Enumerable.Range(0, batch.Count).GroupBy(i => batch[i].chk.Radius))
+                {
+                    var idx = grp.ToList();
+                    var read = ScreenCapture.SampleMany(idx.Select(i => batch[i].pt).ToList(), grp.Key);
+                    for (int k = 0; k < idx.Count; k++) colors[idx[k]] = read[k];
+                }
+            }
+            catch (Exception e)
+            {
+                Log.Debug("pixel checks: " + e.Message);
+                lock (Sync) foreach (var b in batch) if (b.m.Epoch == b.epoch) b.m.CheckSampling = false;
+                return;
+            }
             lock (Sync)
             {
-                // the step was left or entered again meanwhile: this reading belongs to the old visit
-                if (m.Epoch != epoch) return;
-                m.CheckSampling = false;
-                if (!ReferenceEquals(m.Check, chk)) return;
-                bool ok = chk.Evaluate(color);
-                if (m.CheckOk == ok) return;
-                bool first = m.CheckOk == null;
-                m.CheckOk = ok;
-                Events.Emit("check_changed", new()
+                for (int i = 0; i < batch.Count; i++)
                 {
-                    ["mark"] = m.Id, ["ok"] = ok, ["initial"] = first, ["color"] = $"#{color.R:X2}{color.G:X2}{color.B:X2}",
-                    ["at"] = J.PtJson(pt), ["step"] = _tut?.Index,
-                });
+                    var (m, pt, chk, epoch) = batch[i];
+                    // the step was left or entered again meanwhile: this reading belongs to the old visit
+                    if (m.Epoch != epoch) continue;
+                    m.CheckSampling = false;
+                    if (!ReferenceEquals(m.Check, chk)) continue;
+                    var color = colors[i];
+                    bool ok = chk.Evaluate(color);
+                    if (m.CheckOk == ok) continue;
+                    bool first = m.CheckOk == null;
+                    m.CheckOk = ok;
+                    Events.Emit("check_changed", new()
+                    {
+                        ["mark"] = m.Id, ["ok"] = ok, ["initial"] = first, ["color"] = $"#{color.R:X2}{color.G:X2}{color.B:X2}",
+                        ["at"] = J.PtJson(pt), ["step"] = _tut?.Index,
+                    });
+                }
             }
         });
     }
