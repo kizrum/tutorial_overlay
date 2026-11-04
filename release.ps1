@@ -40,6 +40,17 @@ $zip = "dist\$name.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }
 Compress-Archive -Path "$out\*" -DestinationPath $zip
 
+# the winget manifest of this version (submitted as a pull request to microsoft/winget-pkgs): templates in winget\
+$hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+$wingetDir = "dist\winget\$version"
+New-Item -ItemType Directory -Force $wingetDir | Out-Null
+foreach ($t in Get-ChildItem winget\*.yaml) {
+    $text = (Get-Content $t.FullName -Raw).Replace('{VERSION}', $version).Replace('{SHA256}', $hash).Replace('{DATE}', (Get-Date -Format 'yyyy-MM-dd'))
+    [IO.File]::WriteAllText((Join-Path $PSScriptRoot "$wingetDir\$($t.Name)"), $text, (New-Object Text.UTF8Encoding $false))
+}
+winget validate --manifest $wingetDir
+if ($LASTEXITCODE -ne 0) { throw 'winget manifest is not valid' }
+
 if ($Tag) {
     git tag -a "v$version" -m "TutorialOverlay $version"
     Write-Host "tagged v$version (push: git push origin main v$version)"
