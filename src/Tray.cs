@@ -149,35 +149,48 @@ internal sealed class TrayIcon : IDisposable
     /// A small step card — progress bar, a tick and two text lines — like the card the user follows,
     /// plus a status dot: green = agent connected, grey = waiting. During a tutorial the bar shows its progress.
     /// </summary>
+    /// <summary>
+    /// The icon drawn on a 32-unit grid and scaled to <paramref name="size"/> px. Without the status dot it is the
+    /// program's emblem (the plugin listing icon: --render-icon).
+    /// </summary>
+    public static Bitmap Render(int size, bool connected, float? progress, bool status)
+    {
+        var bmp = new Bitmap(size, size);
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(Color.Transparent);
+        g.ScaleTransform(size / 32f, size / 32f);
+        // the emblem sits in the middle of its square; the tray icon keeps its old spot, next to the status dot
+        var card = status ? new RectangleF(2, 3, 27, 25) : new RectangleF(2.5f, 3.5f, 27, 25);
+        float dx = card.X - 2, dy = card.Y - 3;
+        using (var path = Theme.Rounded(card, 5))
+        {
+            using (var bg = new SolidBrush(Palette.Ink)) g.FillPath(bg, path);
+            using var edge = new Pen(Palette.Line, 1.4f);
+            g.DrawPath(edge, path);
+        }
+        // progress bar along the top, like the card's step progress
+        float bx = 6 + dx, by = 7 + dy, bw = 19, bh = 3.2f;
+        using (var track = new SolidBrush(Palette.InkHover)) g.FillRectangle(track, bx, by, bw, bh);
+        using (var fill = new SolidBrush(Palette.Accent)) g.FillRectangle(fill, bx, by, bw * Math.Clamp(progress ?? 0.6f, 0.15f, 1f), bh);
+        Theme.IconCheck(g, new PointF(10 + dx, 16.5f + dy), 8, Palette.Accent, 2.4f);
+        using (var line = new Pen(Palette.TextDim, 2.2f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+        {
+            g.DrawLine(line, 16 + dx, 16 + dy, 24 + dx, 16 + dy);
+            g.DrawLine(line, 7 + dx, 22.5f + dy, (status ? 18 : 24) + dx, 22.5f + dy);
+        }
+        if (status)
+        {
+            var c = connected ? Palette.Success : Palette.TextDim;
+            using (var ring = new SolidBrush(Color.FromArgb(255, 10, 11, 15))) g.FillEllipse(ring, 19.5f, 19.5f, 12.5f, 12.5f);
+            using (var dot = new SolidBrush(c)) g.FillEllipse(dot, 21.5f, 21.5f, 8.5f, 8.5f);
+        }
+        return bmp;
+    }
+
     private void SetIcon(bool connected, float? progress)
     {
-        const int n = 32;
-        using var bmp = new Bitmap(n, n);
-        using (var g = Graphics.FromImage(bmp))
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Color.Transparent);
-            var card = new RectangleF(2, 3, 27, 25);
-            using (var path = Theme.Rounded(card, 5))
-            {
-                using (var bg = new SolidBrush(Palette.Ink)) g.FillPath(bg, path);
-                using var edge = new Pen(Palette.Line, 1.4f);
-                g.DrawPath(edge, path);
-            }
-            // progress bar along the top, like the card's step progress
-            float bx = 6, by = 7, bw = 19, bh = 3.2f;
-            using (var track = new SolidBrush(Palette.InkHover)) g.FillRectangle(track, bx, by, bw, bh);
-            using (var fill = new SolidBrush(Palette.Accent)) g.FillRectangle(fill, bx, by, bw * Math.Clamp(progress ?? 0.6f, 0.15f, 1f), bh);
-            Theme.IconCheck(g, new PointF(10, 16.5f), 8, Palette.Accent, 2.4f);
-            using (var line = new Pen(Palette.TextDim, 2.2f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-            {
-                g.DrawLine(line, 16, 16, 24, 16);
-                g.DrawLine(line, 7, 22.5f, 18, 22.5f);
-            }
-            var status = connected ? Palette.Success : Palette.TextDim;
-            using (var ring = new SolidBrush(Color.FromArgb(255, 10, 11, 15))) g.FillEllipse(ring, 19.5f, 19.5f, 12.5f, 12.5f);
-            using (var dot = new SolidBrush(status)) g.FillEllipse(dot, 21.5f, 21.5f, 8.5f, 8.5f);
-        }
+        using var bmp = Render(32, connected, progress, status: true);
         var h = bmp.GetHicon();
         var old = _hicon;
         _hicon = h;

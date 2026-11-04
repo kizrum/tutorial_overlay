@@ -179,6 +179,15 @@ internal static class Program
         // MCP over stdin/stdout for clients that start their servers themselves: a bridge to the one real server
         if (args.Length == 1 && args[0] == "--stdio") return StdioBridge.Run();
         if (args.Length == 1 && args[0] == "--launch") return StdioBridge.Launch();
+        // the emblem as a PNG (the plugin's listing icon is made with it): --render-icon file.png [size]
+        if (args.Length is 2 or 3 && args[0] == "--render-icon")
+        {
+            // the default accent, not this user's settings: the emblem is the same for everyone
+            int size = args.Length == 3 && int.TryParse(args[2], out var s) ? s : 512;
+            using var icon = TrayIcon.Render(size, false, 0.6f, status: false);
+            icon.Save(args[1], System.Drawing.Imaging.ImageFormat.Png);
+            return 0;
+        }
         Native.SetProcessDpiAwarenessContext(Native.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
