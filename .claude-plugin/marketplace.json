@@ -1,0 +1,12 @@
+{
+  "name": "tutorial-overlay",
+  "owner": { "name": "kizrum", "url": "https://github.com/kizrum" },
+  "description": "TutorialOverlay: step-by-step tutorials on top of any Windows app, for Claude Code.",
+  "plugins": [
+    {
+      "name": "tutorial-overlay",
+      "source": "./plugin",
+      "description": "Step-by-step tutorials drawn right on top of any Windows app, driven by Claude."
+    }
+  ]
+}

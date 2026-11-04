@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tutorial-overlay": {
+      "command": "tutorial-overlay",
+      "args": ["--stdio"]
+    }
+  }
+}
