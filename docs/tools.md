@@ -12,7 +12,7 @@
 | `append_steps(steps)` | add steps (with `keepOpen` the tutorial waits for them after the last one) |
 | `goto_step(index\|id\|relative)` | go to a step; its targets are shown again |
 | `complete_step(expectIndex?)` | complete the step on the agent's behalf |
-| `stop_tutorial()` | stop |
+| `stop_tutorial(outro?)` | end the tutorial: after its last step (a `keepOpen` tutorial waiting for more) it finishes with the end card, so the user is told it is done; midway the card is hidden (`outro` overrides) |
 | `status()` | the state, the targets' rectangles and why each is or is not visible (`visible/occluded/minimized/inactive/…`) |
 | `inspect(anchor\|app, within?, ocr?)` | the best first look: a picture of the window or element with **numbered frames** on its UI Automation elements, and for every number an anchor that finds exactly that element (`match: exact`, `index` among look-alikes; window-handle ids are never used). Elements that draw nothing right now (hover-only buttons), wrappers and stacked look-alikes get no number and are counted in `blank` / `overlapping`; over `maxItems` the numbers spread over the area and the rest is listed in `omitted`. When UIA names next to nothing (FL Studio, games), OCR text gets numbers too, with a `find: {text}` anchor inside the smallest named panel around it — each one checked first against the read the text search itself will make there; `debug: true` lists the lines left out and why. One call instead of `describe` + `screenshot` + `find_text`; the answer has `ms` with the time UIA and OCR took |
 | `describe(app)` | the process's windows and its UI Automation tree with physical rectangles and `rel` offsets |

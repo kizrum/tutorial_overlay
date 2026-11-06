@@ -32,6 +32,8 @@ only fixes things.
 - Window captures of apps that are not DPI-aware (old WinForms, some plugins) on a scaled monitor: the print is
   stretched like Windows stretches the window, so it lines up with UI Automation's rectangles. Before, such
   windows came out at 2/3 size (at 150 %), and text and templates were looked for in the wrong place.
+- `stop_tutorial` after the last step of a `keepOpen` tutorial finishes it with the end card (done, save, repeat)
+  instead of hiding the card without a word; midway it still stops and hides (`outro` overrides either way).
 - `describe` and other UIA walks fetch each node's children in one call: 2–2.5× faster on deep trees (VS Code,
   Chrome).
 - The log file records how long each tool call took.

@@ -264,10 +264,22 @@ internal static partial class Engine
         }
     }
 
-    public static JsonObject StopTutorial()
+    /// <summary>
+    /// The agent ends the tutorial. Every step done (a keepOpen tutorial waiting for more): it finishes like any
+    /// tutorial, with the end card (done, save, repeat) — the user is told, not left with a card that vanishes.
+    /// Midway, or with outro:false: stopped, the card hidden.
+    /// </summary>
+    public static JsonObject StopTutorial(JsonNode? args = null)
     {
         lock (Sync)
         {
+            if (_tut is { Active: true } && (J.Bool(args, "outro") ?? _tut.State == TutorialState.Waiting))
+            {
+                RequireOwned();
+                FinishNow(_tut, "agent");
+                _stepVersion++;
+                return TutorialJson();
+            }
             if (_tut is { Active: true })
             {
                 RequireOwned();

@@ -39,7 +39,10 @@ restart Claude Code. Do not try to install or download it yourself.
 7. **Start and follow:** `start_tutorial(spec)`, then `events(since, timeoutMs)` to see hits, misses, `no_effect`
    and `help`. For a long lesson use `keepOpen: true` and `append_steps`.
 8. **Help:** on a `help` event, answer with `hint(text)` right in the card; explain the cause, not only the click.
-9. **Finish:** offer to save the tutorial (the end card does too), then call `release`.
+9. **Finish:** with `keepOpen`, when no more steps will come, call `stop_tutorial` after the last step: the user
+   gets the end card (done, save, repeat) instead of a card that waits. Never stop a lesson without telling the user
+   why. (An older TutorialOverlay only hides the card on `stop_tutorial`: say "that's all" with `hint` first.) Offer
+   to save the tutorial (the end card does too), then call `release`.
 
 For a single "where is X" question, `draw` one mark instead of a whole tutorial.
 
