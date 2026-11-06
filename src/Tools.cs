@@ -91,7 +91,7 @@ internal static class Tools
             Obj(("app", T("string", "process name")), ("window", T("string", "title substr")), ("element", T("object", "subtree root, as anchor.element")),
                 ("depth", T("integer", "default 8")), ("maxNodes", T("integer", "default 600")), ("namedOnly", T("boolean", "skip unnamed nodes")))),
         Tool("inspect", "Best first look: image of an anchor (window or element) with NUMBERED frames on its UIA elements, plus for each number a ready anchor " +
-            "that resolves to exactly that element. Self-drawn UIs (few UIA names): OCR text gets numbers too, with find:{text} anchors. Replaces describe+screenshot+find_text.",
+            "that resolves to exactly that element. Self-drawn UIs (few UIA names): OCR text gets numbers too (find:{text}), and so do icons that occur once (role 'icon', find:{template}). Replaces describe+screenshot+find_text.",
             Obj(("anchor", T("object", SameAnchor)), ("app", T("string", "process name, instead of anchor")), ("within", T("array", "[x,y,w,h] part of the element")),
                 ("ocr", T("boolean", "default: when UIA names fewer than 8 buttons/captions")), ("lang", T("string", "OCR language")),
                 ("maxItems", T("integer", "safety stop, default all")), ("maxEdge", T("integer", $"image long edge, default {DefaultMaxEdge}")))),

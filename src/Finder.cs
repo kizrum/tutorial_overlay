@@ -306,6 +306,26 @@ internal static class Finder
             StartTracking(a.Key, shot, m, readArea, area, r.Root);
             return new FindResult(true, new PointF(c.X - frame.X, c.Y - frame.Y), 0, last, DateTime.UtcNow, Size: m.Size);
         }
+        // where it was a moment ago, first: a search around it costs a few milliseconds, the whole window ~200 ms —
+        // and a template target is looked for on every pass while its app is in front
+        if (prev is { Found: true } && prev.Root == IntPtr.Zero)
+        {
+            var was = new PointF(frame.X + prev.Rel.X - area.X, frame.Y + prev.Rel.Y - area.Y);
+            var near = Rectangle.Intersect(Rectangle.Round(new RectangleF(was.X - tpl.FW - 48, was.Y - tpl.FH - 48, 2 * tpl.FW + 96, 2 * tpl.FH + 96)),
+                                           new Rectangle(0, 0, shot.Width, shot.Height));
+            if (near.Width >= tpl.FW + 2 && near.Height >= tpl.FH + 2)
+            {
+                using var part = shot.Clone(near, shot.PixelFormat);
+                var pimg = Template.Gray(part, out int pw, out int ph);
+                var (px, py, ps) = Match(pimg, pw, ph, tpl, Template.GrayFull(part), part.Width, part.Height);
+                if (Log.Verbose) Log.Debug($"template {f.Template}: near the last spot, score {ps:0.000}");
+                if (ps <= f.MaxScore)
+                {
+                    var hitNear = new PointF(area.X + near.X + px + tpl.FW / 2f, area.Y + near.Y + py + tpl.FH / 2f);
+                    return new FindResult(true, new PointF(hitNear.X - frame.X, hitNear.Y - frame.Y), ps, last, DateTime.UtcNow, Size: new SizeF(tpl.FW, tpl.FH));
+                }
+            }
+        }
         var img = Template.Gray(shot, out int iw, out int ih);
         // the same picture of the same place (relative to the window) as last time: the answer is the same too
         var hc = new HashCode();
@@ -314,7 +334,9 @@ internal static class Finder
         var place = new Rectangle((int)Math.Round(area.X - frame.X), (int)Math.Round(area.Y - frame.Y), shot.Width, shot.Height);
         if (LastLook.TryGetValue(a.Key, out var look) && look.hash == hash && ReferenceEquals(look.tpl, tpl) && look.area == place)
             return look.res.Found ? look.res with { LastRel = last, At = DateTime.UtcNow } : Miss();
+        long fullAt = Environment.TickCount64;
         var (bx, by, score) = Match(img, iw, ih, tpl, Template.GrayFull(shot), shot.Width, shot.Height);
+        if (Log.Verbose) Log.Debug($"template {f.Template}: whole area {shot.Width}x{shot.Height} in {Environment.TickCount64 - fullAt} ms, score {score:0.000}");
         FindResult res;
         if (score > f.MaxScore) res = Miss();
         else

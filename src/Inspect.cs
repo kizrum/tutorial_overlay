@@ -24,11 +24,14 @@ internal static class Inspect
     public const int DefaultMaxItems = 400;
     /// <summary>Fewer UIA buttons / captions than this in the area: the UI is probably self-drawn, so OCR is added (ocr: auto).</summary>
     private const int OcrBelow = 8;
+    /// <summary>Icons numbered at most: the rest of the unique marks are rarely what a lesson points at.</summary>
+    private const int MaxIcons = 60;
 
     internal sealed record Node(Resolver.ElInfo Info, int Depth);
 
     /// <summary>El: a text item's container element (its find runs inside it); Exact: the text is the whole line.</summary>
-    private sealed record Item(int N, bool Text, string Role, string Name, RectangleF Rect, JsonObject Anchor, JsonObject? El = null, bool Exact = false);
+    /// <summary>Template: an icon item's template id (find:{template}).</summary>
+    private sealed record Item(int N, bool Text, string Role, string Name, RectangleF Rect, JsonObject Anchor, JsonObject? El = null, bool Exact = false, string? Template = null);
 
     private static readonly HashSet<string> Interactive = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -223,6 +226,55 @@ internal static class Inspect
                 ocrMs = ocrTime.ElapsedMilliseconds;
             }
 
+            // ---- icons with no text and no UIA name (Play / Stop / Record in FL): a template anchor each, for the
+            // ones that occur once and that the template search finds back right there
+            long iconMs = 0;
+            int iconsFound = 0, iconsRepeated = 0;
+            if ((J.Bool(args, "icons") ?? ocr) && items.Count < maxItems)
+            {
+                var iconTime = Stopwatch.StartNew();
+                var taken = new List<RectangleF>();
+                if (ocrLines != null) taken.AddRange(ocrLines.Select(l => new RectangleF(area.X + l.Bounds.X, area.Y + l.Bounds.Y, l.Bounds.Width, l.Bounds.Height)));
+                var blobs = Icons.FindBlobs(gray, sw, sh)
+                    .Where(b =>
+                    {
+                        var sr = new RectangleF(area.X + b.X, area.Y + b.Y, b.Width, b.Height);
+                        var c = new PointF(sr.X + sr.Width / 2, sr.Y + sr.Height / 2);
+                        // text (read or numbered) and elements of about its own size already say what it is
+                        if (taken.Any(t => RectangleF.Inflate(t, 3, 3).Contains(c))) return false;
+                        return !items.Any(it => it.Rect.Contains(c) && it.Rect.Width * it.Rect.Height <= 4 * sr.Width * sr.Height);
+                    }).ToList();
+                var rgb = Rgb(shot);
+                var sigs = blobs.Select(b => Icons.Signature(gray, sw, sh, b, rgb)).ToList();
+                var unique = Icons.Unique(blobs, sigs);
+                iconsRepeated = blobs.Count - unique.Count;
+                foreach (var bi in unique.OrderBy(i => Math.Round(blobs[i].Y / 12.0)).ThenBy(i => blobs[i].X))
+                {
+                    if (items.Count >= maxItems || iconsFound >= MaxIcons) break;
+                    var b = blobs[bi];
+                    var cut = Rectangle.Intersect(Rectangle.Inflate(b, 3, 3), new Rectangle(0, 0, sw, sh));
+                    using var piece = shot.Clone(cut, shot.PixelFormat);
+                    var tpl = Template.From(piece);
+                    var id = "auto-" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(tpl.Full))[..12].ToLowerInvariant();
+                    if (!TemplateStore.Exists(id)) TemplateStore.Put(id, tpl, ScreenCapture.Png(piece, 0, out _));
+                    var screenBox = new RectangleF(area.X + cut.X, area.Y + cut.Y, cut.Width, cut.Height);
+                    int ci = within ? -1 : Container(nodes, screenBox, area);
+                    var anchor = (JsonObject)baseAnchor.DeepClone();
+                    JsonObject? el = null;
+                    if (ci >= 0)
+                    {
+                        el = Disambiguate(nodes, ci);
+                        anchor["element"] = basePath.Count == 0 ? el.DeepClone() : new JsonArray(basePath.Select(n => n.DeepClone()).Append(el.DeepClone()).ToArray());
+                    }
+                    // no search to check it: the template is cut from this very spot (a perfect match here), and every
+                    // other spot that looks the same was dropped above as a look-alike — the finder lands here
+                    anchor["find"] = new JsonObject { ["template"] = id };
+                    items.Add(new Item(items.Count + 1, false, "icon", "icon", screenBox, anchor, el, false, id));
+                    iconsFound++;
+                }
+                iconMs = iconTime.ElapsedMilliseconds;
+            }
+
             int maxEdge = J.Int(args, "maxEdge") ?? 1024;
             var png = Annotate(shot, area, items, maxEdge, out float scale);
             // every item's anchor is the shared one plus {name, role} (or find:{text}); only what differs is listed,
@@ -233,6 +285,11 @@ internal static class Inspect
             {
                 var o = new JsonObject { ["n"] = it.N, ["role"] = it.Role, ["name"] = it.Name, ["rect"] = J.RectJson(it.Rect) };
                 if (composite) o["anchor"] = it.Anchor;
+                else if (it.Template != null)
+                {
+                    o["template"] = it.Template;
+                    if (it.El != null) o["el"] = it.El.DeepClone();
+                }
                 else if (it.Text)
                 {
                     if (it.El != null) o["el"] = it.El.DeepClone();
@@ -250,14 +307,16 @@ internal static class Inspect
                 ["anchor"] = composite ? null : baseAnchor,
                 ["items"] = list,
                 ["note"] = (composite ? "each item's anchor rings/frames it as is. "
-                                      : "item anchor = {...anchor, element: el ?? {name, role}}; text item = {...anchor, element: el (if any), find:{text: name, match:'exact' if exact}}. ") +
+                                      : "item anchor = {...anchor, element: el ?? {name, role}}; text item = {...anchor, element: el (if any), find:{text: name, match:'exact' if exact}}; icon item = {...anchor, element: el (if any), find:{template}}. ") +
                            "It rings/frames the item as is (offset for a point inside); text anchors follow scrolling. " +
                            "Numbers are what could be verified, not the whole UI: no number on your target → describe / find_text / pick, never the nearest number. validate before start_tutorial.",
-                ["ms"] = new JsonObject { ["uia"] = uiaMs, ["ocr"] = ocr ? (JsonNode)ocrMs : null, ["total"] = total.ElapsedMilliseconds },
+                ["ms"] = new JsonObject { ["uia"] = uiaMs, ["ocr"] = ocr ? (JsonNode)ocrMs : null, ["icons"] = iconMs > 0 ? (JsonNode)iconMs : null, ["total"] = total.ElapsedMilliseconds },
             };
             if (items.Count == 0) info["note"] = "nothing named here; try ocr:true, a smaller anchor, or pick(anchor)";
             if (choice.Blank > 0)
                 info["blank"] = $"{choice.Blank} UIA elements draw nothing here right now (buttons that show on hover, empty slots): not numbered";
+            if (iconsRepeated > 0)
+                info["repeatedIcons"] = $"{iconsRepeated} icon-like marks occur more than once (step buttons, knobs): not numbered — a template would find any of them";
             if (repeated > 0)
                 info["unverifiedText"] = $"{repeated} OCR lines the text search would not find back as they are (repeated, or read differently up close): not numbered — debug:true lists them";
             if (choice.Overlapping > 0)
@@ -485,6 +544,27 @@ internal static class Inspect
         return x.Length > 0 && y.Length > 0 && (x.Contains(y) || y.Contains(x));
     }
 
+    /// <summary>3 bytes a pixel (r, g, b), row after row.</summary>
+    private static byte[] Rgb(Bitmap b)
+    {
+        int w = b.Width, h = b.Height;
+        var res = new byte[w * h * 3];
+        var data = b.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            unsafe
+            {
+                for (int y = 0; y < h; y++)
+                {
+                    byte* row = (byte*)data.Scan0 + y * data.Stride;
+                    for (int x = 0; x < w; x++, row += 4) { int o = (y * w + x) * 3; res[o] = row[2]; res[o + 1] = row[1]; res[o + 2] = row[0]; }
+                }
+            }
+        }
+        finally { b.UnlockBits(data); }
+        return res;
+    }
+
     /// <summary>The shot scaled to maxEdge with a frame and a number tag on each item (drawn after scaling, so tags stay legible).</summary>
     private static byte[] Annotate(Bitmap shot, Rectangle area, List<Item> items, int maxEdge, out float scale)
     {
@@ -500,11 +580,12 @@ internal static class Inspect
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             var uia = Color.FromArgb(235, 40, 130);
             var text = Color.FromArgb(0, 140, 255);
+            var icon = Color.FromArgb(230, 150, 0);
             float s = scale;
             RectangleF Img(RectangleF r) => new((r.X - area.X) * s, (r.Y - area.Y) * s, r.Width * s, r.Height * s);
             foreach (var it in items)
             {
-                using var pen = new Pen(it.Text ? text : uia, 1.5f);
+                using var pen = new Pen(it.Template != null ? icon : it.Text ? text : uia, 1.5f);
                 var r = Img(it.Rect);
                 g.DrawRectangle(pen, r.X, r.Y, r.Width, r.Height);
             }
@@ -531,7 +612,7 @@ internal static class Inspect
                     x = r.Right + 2 + w <= img.Width ? r.Right + 2 : Math.Max(0, r.X - w - 2);
                     y = Math.Clamp(r.Y + (r.Height - h) / 2, 0, Math.Max(0, img.Height - h));
                 }
-                using var bg = new SolidBrush(it.Text ? text : uia);
+                using var bg = new SolidBrush(it.Template != null ? icon : it.Text ? text : uia);
                 g.FillRectangle(bg, x, y, w, h);
                 g.DrawString(label, font, white, x + 0.5f, y - 0.5f);
             }

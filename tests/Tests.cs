@@ -1057,3 +1057,60 @@ public static class CaseTests
         A.Check(Resolver.Matches(new ElementSpec { Name = "SAVE AS", NameExact = true }, save), "exact element name");
     }
 }
+
+public static class IconTests
+{
+    // a dark picture with marks drawn on it: gray and rgb buffers like inspect's
+    private static (byte[] gray, byte[] rgb, int w, int h) Canvas(int w, int h, Action<Action<int, int, byte, byte, byte>> draw)
+    {
+        var gray = new byte[w * h]; var rgb = new byte[w * h * 3];
+        for (int i = 0; i < w * h; i++) { gray[i] = 30; rgb[i * 3] = rgb[i * 3 + 1] = rgb[i * 3 + 2] = 30; }
+        draw((x, y, r, g, b) => { int i = y * w + x; gray[i] = (byte)((r * 77 + g * 150 + b * 29) >> 8); rgb[i * 3] = r; rgb[i * 3 + 1] = g; rgb[i * 3 + 2] = b; });
+        return (gray, rgb, w, h);
+    }
+
+    private static void Square(Action<int, int, byte, byte, byte> px, int x0, int y0, int s, byte r, byte g, byte b)
+    {
+        for (int y = y0; y < y0 + s; y++) for (int x = x0; x < x0 + s; x++) px(x, y, r, g, b);
+    }
+
+    public static void TestRepeatedMarksAreDroppedTheOneOffKept()
+    {
+        var (gray, rgb, w, h) = Canvas(600, 200, px =>
+        {
+            for (int k = 0; k < 10; k++) Square(px, 20 + k * 40, 120, 16, 200, 200, 200);         // ten step buttons
+            for (int y = 0; y < 20; y++) for (int x = 0; x <= y; x++) px(30 + x, 20 + y, 220, 220, 220);   // a play triangle
+        });
+        var blobs = Icons.FindBlobs(gray, w, h);
+        A.Check(blobs.Count >= 11, $"triangle and squares found ({blobs.Count})");
+        var sigs = blobs.Select(b => Icons.Signature(gray, w, h, b, rgb)).ToList();
+        var unique = Icons.Unique(blobs, sigs);
+        A.Eq(1, unique.Count, "only the one-off mark");
+        A.Check(blobs[unique[0]].Y < 60, "it is the triangle");
+    }
+
+    public static void TestSameShapeOtherColourOrSizeIsAnotherIcon()
+    {
+        var (gray, rgb, w, h) = Canvas(400, 120, px =>
+        {
+            Square(px, 20, 20, 20, 210, 40, 40);     // a red record circle's stand-in
+            Square(px, 100, 20, 20, 120, 120, 120);  // a grey one of the same shape
+            Square(px, 180, 20, 14, 120, 120, 120);  // a grey smaller one
+        });
+        var blobs = Icons.FindBlobs(gray, w, h);
+        var sigs = blobs.Select(b => Icons.Signature(gray, w, h, b, rgb)).ToList();
+        A.Eq(blobs.Count, Icons.Unique(blobs, sigs).Count, "colour and size tell them apart");
+    }
+
+    public static void TestFramesLinesAndSpecksAreNotIcons()
+    {
+        var (gray, _, w, h) = Canvas(500, 300, px =>
+        {
+            for (int x = 10; x < 300; x++) { px(x, 10, 200, 200, 200); px(x, 200, 200, 200, 200); }   // a panel frame
+            for (int y = 10; y <= 200; y++) { px(10, y, 200, 200, 200); px(299, y, 200, 200, 200); }
+            for (int x = 350; x < 480; x++) px(x, 50, 200, 200, 200);                                 // a long line
+            px(400, 250, 200, 200, 200);                                                                // a speck
+        });
+        A.Eq(0, Icons.FindBlobs(gray, w, h).Count, "no icons");
+    }
+}

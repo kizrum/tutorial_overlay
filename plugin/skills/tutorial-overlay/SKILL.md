@@ -18,7 +18,7 @@ restart Claude Code. Do not try to install or download it yourself.
 
 1. **Look first.** `inspect(app)` returns a picture with numbered frames and a ready anchor for every number —
    UIA elements, and for apps that draw their own interface (FL Studio, games, many audio and 3D tools) the text OCR
-   reads there. Use the anchor of the number you want as is. Inspect a smaller element (or `within`) when the picture
+   reads there and icons without text (numbered by what you see — they have no name; their anchor is a template). Use the anchor of the number you want as is. Inspect a smaller element (or `within`) when the picture
    is too reduced to read. For what has no number, `describe(app)` gives the UIA tree, `find_text` searches a caption,
    and `pick(anchor)` lets the user click the spot — you get the exact offset. If `inspect` is not among the tools
    (an older TutorialOverlay), start with `describe(app)` and `screenshot(anchor)` instead.

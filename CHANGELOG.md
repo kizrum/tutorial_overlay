@@ -42,6 +42,11 @@ only fixes things.
   instead of hiding the card without a word; midway it still stops and hides (`outro` overrides either way).
 - The mascot at the end card (and while the card waits for more steps) walks over to the card and points at it,
   instead of staying where the last target was, over the app's toolbar.
+- `inspect` numbers icons that have no text and no UIA name (FL's Play / Stop / Record), each with a template anchor
+  cut from the picture. Found from edges alone (own code, about 50 ms for a whole FL window); a mark that occurs
+  more than once (step buttons, knobs) gets no number — told apart by shape, ink colour and size.
+- Template anchors are looked for around where they were found a moment ago before the whole area: one search of
+  a whole FL window takes ~150 ms, and a template target was searched like that on every pass.
 - Text anchors looked for in a whole app window read it at full size in tiles, as `inspect` does: shrunk to fit one
   recognizer run, small UI text was lost (FL's "TOOLS" menu was never found).
 - `inspect` numbers a caption even when a UIA panel of the same name lies around it ("Channel rack"): only an
