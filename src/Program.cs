@@ -301,15 +301,21 @@ internal static class Program
         WriteInstanceFile();
 
         var timer = new System.Windows.Forms.Timer { Interval = 30 };
+        var perf = new FramePerf();
         timer.Tick += (_, _) =>
         {
             try
             {
+                long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
                 var frame = Engine.Tick();
+                long t1 = System.Diagnostics.Stopwatch.GetTimestamp();
                 if (frame.Changed) overlay.Present(frame.Scene);
+                long t2 = System.Diagnostics.Stopwatch.GetTimestamp();
                 buttons.Update(frame.Buttons);
                 card.UpdateModel(frame.Card);
+                long t3 = System.Diagnostics.Stopwatch.GetTimestamp();
                 mascot.Update(frame.Mascot);
+                perf.Add(t0, t1, t2, t3, System.Diagnostics.Stopwatch.GetTimestamp(), frame.Changed, Engine.MarkCount);
                 // the canvas goes on top (it appeared, or its once-a-second re-raise) in one batch with our other
                 // windows above it: the marks never cover the card, the buttons or the mascot, not even for a moment
                 if (overlay.RaisePending)
@@ -340,6 +346,38 @@ internal static class Program
         Events.Flush();
         Log.CloseFile();
         return 0;
+    }
+
+    /// <summary>
+    /// Where a frame's time goes (engine, canvas, card, mascot), logged every 5 s while marks are shown: a step with
+    /// dozens of targets must not make the overlay or the mascot stutter, and this says which part would.
+    /// </summary>
+    private sealed class FramePerf
+    {
+        private readonly double[] _sum = new double[4], _max = new double[4];
+        private int _n, _drawn, _marks;
+        private long _since = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        public void Add(long t0, long t1, long t2, long t3, long t4, bool drawn, int marks)
+        {
+            long[] ts = { t0, t1, t2, t3, t4 };
+            for (int i = 0; i < 4; i++)
+            {
+                double ms = (ts[i + 1] - ts[i]) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                _sum[i] += ms;
+                if (ms > _max[i]) _max[i] = ms;
+            }
+            _n++;
+            if (drawn) _drawn++;
+            _marks = Math.Max(_marks, marks);
+            if ((t4 - _since) * 1.0 / System.Diagnostics.Stopwatch.Frequency < 5) return;
+            if (_marks > 0)
+                Log.File($"frames: {_n} in 5 s ({_drawn} drawn), {_marks} marks; ms avg/max — engine {_sum[0] / _n:0.0}/{_max[0]:0}, " +
+                         $"canvas {_sum[1] / _n:0.0}/{_max[1]:0}, card {_sum[2] / _n:0.0}/{_max[2]:0}, mascot {_sum[3] / _n:0.0}/{_max[3]:0}");
+            Array.Clear(_sum); Array.Clear(_max);
+            _n = _drawn = _marks = 0;
+            _since = t4;
+        }
     }
 
     /// <summary>Help sketches pile up with every "circle it": keep the last 50, none older than 14 days.</summary>

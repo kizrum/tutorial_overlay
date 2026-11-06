@@ -14,7 +14,21 @@ internal static partial class Engine
     /// on screen right now, and if not — why. Later steps often point at things earlier steps open, so a
     /// "not found" there is a warning, not necessarily a bug.
     /// </summary>
+    /// <summary>
+    /// Window and text lookups made during one validate, by anchor key (offsets are not in it): a grid of 68 cells on
+    /// one "808 Kick" caption reads that caption once, not 68 times (15 s → well under one).
+    /// </summary>
+    [ThreadStatic] private static Dictionary<string, AnchorResult>? _resolved;
+    [ThreadStatic] private static Dictionary<string, FindResult>? _found;
+
     public static JsonObject Validate(JsonNode args)
+    {
+        _resolved = new(); _found = new();
+        try { return ValidateCore(args); }
+        finally { _resolved = null; _found = null; }
+    }
+
+    private static JsonObject ValidateCore(JsonNode args)
     {
         var spec = J.Unwrap(J.Get(args, "spec")) ?? (J.Has(args, "steps") ? args : null);
         var steps = new List<(int index, Step? step, string? error, JsonNode? raw)>();
@@ -150,7 +164,11 @@ internal static partial class Engine
             return o;
         }
         AnchorResult r;
-        try { r = Resolver.ResolveNow(a.WithoutFind()); }
+        try
+        {
+            var wf = a.WithoutFind();
+            if (_resolved == null || !_resolved.TryGetValue(wf.Key, out r!)) { r = Resolver.ResolveNow(wf); if (_resolved != null) _resolved[wf.Key] = r; }
+        }
         catch (Exception e) when (Resolver.IsGone(e) || e is InvalidOperationException) { return Bad("element vanished while reading it: " + e.Message); }
         if (!r.Found) return Bad(r.Reason == "process not running" ? "process not running" : "not found: " + r.Reason, r.Reason == "process not running" ? "error" : "warning");
         if (Native.IsAboveUs(Native.ProcessId(r.Root)))
@@ -171,7 +189,10 @@ internal static partial class Engine
         if (a.Find is FindSpec fs)
         {
             FindResult fr;
-            try { fr = Finder.Search(a, null); }
+            try
+            {
+                if (_found == null || !_found.TryGetValue(a.Key, out fr!)) { fr = Finder.Search(a, null); if (_found != null) _found[a.Key] = fr; }
+            }
             catch (Exception e) { return Bad((fs.Text != null ? "text search failed: " : "template search failed: ") + e.Message, "error"); }
             if (!fr.Found)
                 return Bad(fs.Text != null ? $"text \"{fs.TextShown}\" not visible in the element (scrolled away? different wording or language?)"

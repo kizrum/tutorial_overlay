@@ -55,6 +55,8 @@ internal static partial class Engine
     private static string _lastSignature = "";
 
     public static Tutorial? Tutorial => _tut;
+    /// <summary>Marks the last frame worked on (the current step's targets and free marks): for the frame timing log.</summary>
+    public static volatile int MarkCount;
 
     /// <summary>Where the step card currently is (boxed Rectangle, set by the UI thread; null = hidden).</summary>
     public static volatile object? CardRect;
@@ -620,6 +622,7 @@ internal static partial class Engine
                 // the tutorial's main window stays resolved so the card can pick the right monitor
                 .Concat(t is { Active: true } && t.Defaults.Process != null ? new[] { t.Defaults } : Array.Empty<AnchorSpec>())
                 .Concat(InputAnchors(step));
+            MarkCount = marks.Count;
             var anchorList = anchors.ToList();
             Finder.SetWanted(anchorList);
             Resolver.SetWanted(anchorList.Select(a => a.Find != null ? a.WithoutFind() : a),
