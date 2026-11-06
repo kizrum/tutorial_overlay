@@ -65,8 +65,8 @@ fields, colour swatches for the marks, a dark title bar. It writes `config.json`
 **Port.** Next to the port field is a live check: "free ✓", "in use: program (PID)" or "this server runs on it".
 "Pick a free one" keeps the entered port if it will do, otherwise puts in the first free one in 7788–7899. A port in
 use cannot be saved, and a restart does not begin if the new port was taken meanwhile, so a working server is never
-closed for nothing. The new port works after a restart; the window offers to restart the server. The address in
-`.mcp.json` has to be changed by hand.
+closed for nothing. The new port works after a restart; the window offers to restart the server. A client connected
+over stdio (`--stdio`) finds the new port by itself; one connected over HTTP has its address changed by hand.
 
 "For the agent → Copy the connect command" (and the same item in the tray menu) puts a ready line on the clipboard:
 `claude mcp add --scope user tutorial-overlay -- "<this exe>" --stdio`. It holds neither the port nor the key
@@ -113,8 +113,11 @@ stdout carries JSON-RPC only; the bridge's diagnostics go to stderr.
 claude mcp add --transport http tutorial-overlay http://127.0.0.1:7788/mcp --header "Authorization: Bearer <key>"
 ```
 
-with the port and the key of this computer. The repository root has a `.mcp.json` of this kind (the key comes from
-`${TUTORIAL_OVERLAY_KEY}`).
+with the port and the key of this computer.
+
+The repository root's `.mcp.json` uses stdio through the installed `tutorial-overlay` command (no port or key to keep
+in sync). That bridge talks to whichever server is running — a development build started by hand included — and
+does not hold the development exe open, so rebuilding is not blocked while Claude Code is connected.
 
 ## Settings
 

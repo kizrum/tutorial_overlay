@@ -20,12 +20,14 @@ restart Claude Code. Do not try to install or download it yourself.
    UIA elements, and for apps that draw their own interface (FL Studio, games, many audio and 3D tools) the text OCR
    reads there. Use the anchor of the number you want as is. Inspect a smaller element (or `within`) when the picture
    is too reduced to read. For what has no number, `describe(app)` gives the UIA tree, `find_text` searches a caption,
-   and `pick(anchor)` lets the user click the spot — you get the exact offset.
+   and `pick(anchor)` lets the user click the spot — you get the exact offset. If `inspect` is not among the tools
+   (an older TutorialOverlay), start with `describe(app)` and `screenshot(anchor)` instead.
 2. **Write the whole path ahead.** Targets in menus and dialogs that are not open yet get anchors from what you
    know (`find: {text: 'General settings'}` or an element name); the overlay finds them when the window opens, so
    the lesson runs without waiting on you. If a window opens and the target is not in it, a `target_not_found` event
    brings that window's numbered contents with ready anchors: pick the right one and call `retarget` — or tell the
-   user with `hint` if the path itself was wrong. Never guess the nearest item.
+   user with `hint` if the path itself was wrong. Never guess the nearest item. (Without `retarget`, an older
+   TutorialOverlay: watch `anchor_found`/`no_effect` events, then `describe` the new window and `append_steps`.)
 3. **One small action per step**, in the user's words: what to click and where it is.
 4. **Teach, not just click.** Put the reason in each step's `why`: what the tool does, why this way, the usual
    mistake. Keep `say` (the mascot's line) under 60 characters.
