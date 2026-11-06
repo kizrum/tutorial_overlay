@@ -81,7 +81,7 @@ internal sealed class Template
 /// <summary>Where a template was last found, relative to its window's frame (so marks follow window moves).</summary>
 /// <summary>Where a template / text was last found; PrevRel is the sighting before LastRel (which way it was moving).</summary>
 /// <summary>Size: of the found text / template piece (what a shape without coordinates frames); kept while it is out of view.</summary>
-internal sealed record FindResult(bool Found, PointF Rel, float Score, PointF? LastRel, DateTime At, PointF? PrevRel = null, DateTime LastSeenAt = default, bool Moving = false, string? Went = null, SizeF Size = default);
+internal sealed record FindResult(bool Found, PointF Rel, float Score, PointF? LastRel, DateTime At, PointF? PrevRel = null, DateTime LastSeenAt = default, bool Moving = false, string? Went = null, SizeF Size = default, IntPtr Root = default);
 
 /// <summary>
 /// Visual anchors: finds templates inside the anchor's element using the window's own pixels (PrintWindow),
@@ -156,8 +156,34 @@ internal static class Finder
         }
     }
 
-    /// <summary>Synchronous search (template tool, screenshots).</summary>
+    /// <summary>
+    /// Synchronous search (template tool, screenshots). A text named only by its app ({process, find:{text}}) is
+    /// also looked for in the app's menus and dialogs, topmost first: a path written ahead ("OPTIONS → General
+    /// settings") names menu items without knowing their window. Root in the result: the window it was found in
+    /// (default: the anchor's own). Where it was found last time is read first.
+    /// </summary>
     public static FindResult Search(AnchorSpec a, FindResult? prev)
+    {
+        if (a.Find?.Text == null || a.Process == null || a.Window != null || a.Title != null || a.WindowClass != null || a.Hwnd != null || a.Path.Count > 0)
+            return SearchIn(a, prev);
+        var pids = Resolver.Pids(a.Process);
+        var popups = Resolver.Popups.Where(w => pids.Contains(w.Pid) && Native.IsWindowVisible(w.Hwnd)).Select(w => w.Hwnd).ToList();
+        if (popups.Count == 0) return SearchIn(a, prev);
+        if (prev is { Found: true, Root: var was } && was != IntPtr.Zero && popups.Remove(was)) popups.Insert(0, was);
+        bool mainFirst = prev is { Found: true } && prev.Root == IntPtr.Zero;
+        FindResult? main = mainFirst ? SearchIn(a, prev) : null;
+        if (main is { Found: true }) return main;
+        foreach (var h in popups)
+        {
+            var r = SearchIn(a.WithHwnd(h), null);
+            if (r.Found) return r with { Root = h };
+        }
+        var miss = main ?? SearchIn(a, prev);
+        // last seen in a menu: a miss still belongs to that window (its last position is relative to it)
+        return prev is { Root: var seenIn } && seenIn != IntPtr.Zero && miss.Root == IntPtr.Zero ? miss with { Root = seenIn } : miss;
+    }
+
+    private static FindResult SearchIn(AnchorSpec a, FindResult? prev)
     {
         var f = a.Find!;
         PointF? last = prev?.Found == true ? prev.Rel : prev?.LastRel;

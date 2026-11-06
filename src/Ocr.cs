@@ -232,16 +232,73 @@ internal static unsafe class Ocr
         return Merge(ReadWith(img, latin, budget), ReadWith(img, cyrillic, budget));
     }
 
-    /// <summary>Latin reading by default; where the Cyrillic recognizer saw mostly Cyrillic letters, its reading wins.</summary>
-    private static List<OcrLine> Merge(List<OcrLine> latin, List<OcrLine> cyrillic)
+    /// <summary>
+    /// Latin reading by default; where the Cyrillic recognizer saw mostly Cyrillic letters, its reading wins —
+    /// unless those letters are only look-alikes of the Latin reading ("ТгасК" for "Track", "СН" for "CH"): such a
+    /// line could be either script, and goes to the one the unambiguous lines of the picture are written in.
+    /// </summary>
+    internal static List<OcrLine> Merge(List<OcrLine> latin, List<OcrLine> cyrillic)
     {
+        var cyr = cyrillic.Where(c => CyrillicShare(c.Text) >= 0.6).ToList();
+        bool Twin(OcrLine c) => latin.Any(l => Overlap(l.Bounds, c.Bounds) > 0.3 && Fold(l.Text) == Fold(c.Text));
+        int cyrSure = cyr.Count(c => !Twin(c));
+        // sure Latin: the Cyrillic recognizer did not see Cyrillic there at all
+        int latSure = latin.Count(l => Letters(l.Text).lat > 0 && !cyr.Any(c => Overlap(l.Bounds, c.Bounds) > 0.3));
+        bool twinsAreCyrillic = cyrSure > latSure;
         var res = new List<OcrLine>(latin);
-        foreach (var c in cyrillic)
+        foreach (var c in cyr)
         {
-            if (CyrillicShare(c.Text) < 0.6) continue;
+            if (Twin(c) && !twinsAreCyrillic) continue;
             var cb = c.Bounds;
             res.RemoveAll(l => Overlap(l.Bounds, cb) > 0.3);
             res.Add(c);
+        }
+        return res.OrderBy(l => Math.Round(l.Bounds.Y / 8)).ThenBy(l => l.Bounds.X).ToList();
+    }
+
+    private const string CyrTwins = "авекмнорстухгпиёіѕ", LatTwins = "abekmhopctyxrnueis";
+
+    /// <summary>Lower case, no spaces, Cyrillic look-alikes as their Latin twins: "ТгасК 6" and "Track 6" fold alike.</summary>
+    internal static string Fold(string s)
+    {
+        var sb = new StringBuilder(s.Length);
+        foreach (var ch in s.ToLowerInvariant())
+        {
+            if (char.IsWhiteSpace(ch)) continue;
+            int k = CyrTwins.IndexOf(ch);
+            sb.Append(k >= 0 ? LatTwins[k] : ch);
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Everything in a big picture at <paramref name="scale"/> (small UI text needs ≥ 1×): one recognizer run per
+    /// tile within the engine's size limit, tiles overlapping so a line cut by one edge is whole in the next tile;
+    /// a line read twice is kept once (the longer reading).
+    /// </summary>
+    public static List<OcrLine> ReadTiled(Bitmap img, string? lang, float scale)
+    {
+        const int maxDim = 2600, overlap = 320;
+        int tile = Math.Max(overlap * 2, (int)(maxDim / scale) - 8);
+        var res = new List<OcrLine>();
+        for (int ty = 0; ty < img.Height; ty += tile - overlap)
+        {
+            for (int tx = 0; tx < img.Width; tx += tile - overlap)
+            {
+                var r = Rectangle.Intersect(new Rectangle(tx, ty, tile, tile), new Rectangle(0, 0, img.Width, img.Height));
+                if (r.Width < 8 || r.Height < 8) continue;
+                using var part = img.Clone(r, img.PixelFormat);
+                foreach (var line in Read(part, lang, null, r.Width * (float)r.Height * scale * scale + 1))
+                {
+                    var moved = new OcrLine();
+                    foreach (var w in line.Words) moved.Words.Add(new OcrWord(w.Text, new RectangleF(w.Rect.X + r.X, w.Rect.Y + r.Y, w.Rect.Width, w.Rect.Height)));
+                    var twin = res.FindIndex(o => Overlap(o.Bounds, moved.Bounds) > 0.5);
+                    if (twin < 0) res.Add(moved);
+                    else if (moved.Text.Length > res[twin].Text.Length) res[twin] = moved;
+                }
+                if (r.Right >= img.Width) break;
+            }
+            if (ty + tile >= img.Height) break;
         }
         return res.OrderBy(l => Math.Round(l.Bounds.Y / 8)).ThenBy(l => l.Bounds.X).ToList();
     }
@@ -417,7 +474,9 @@ internal static unsafe class Ocr
                     if (m.Length > 0) res.Add(new TextMatch(Original(m.Index, m.Length), Span(m.Index, m.Length), 0));
                 continue;
             }
-            int tol = q.Length / 6;
+            // one look-alike slip is forgiven from 4 characters on ("MIDl" for "MIDI"); longer texts, one per 6.
+            // Other differences cost more than the tolerance, so "Pattern 12" still never passes for "Pattern 1"
+            int tol = Math.Max(q.Length >= 4 ? 1 : 0, q.Length / 6);
             if (match == "exact")
             {
                 int d = Distance(text, q, tol + 1);

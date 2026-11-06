@@ -12,8 +12,8 @@ internal static class Tools
 {
     public const string Instructions =
         "Screen overlay for step-by-step tutorials in any Windows app. All coordinates are PHYSICAL pixels. " +
-        "Typical flow: describe(app) → pick UIA anchors (or a panel + pixel offset for apps that draw their own UI, " +
-        "use screenshot(anchor) to measure offsets) → start_tutorial(spec). The user's clicks, misses, completed steps " +
+        "Typical flow: inspect(app) → choose numbered items, copy their anchors (describe / screenshot / find_text / pick for " +
+        "what inspect does not number) → validate → start_tutorial(spec). The user's clicks, misses, completed steps " +
         "and window open/close arrive as events (stdout JSON lines of the overlay process, MCP notifications, or the " +
         "events tool with long-poll) — react to them instead of asking the user whether they are done. " +
         "Write steps that teach: put the reason in each step's 'why' (what the tool does, why this way, the common mistake). " +
@@ -89,6 +89,11 @@ internal static class Tools
         Tool("describe", "Windows and UI Automation tree of an app (physical rects; rel = offset from window frame). No app: all top-level windows.",
             Obj(("app", T("string", "process name")), ("window", T("string", "title substr")), ("element", T("object", "subtree root, as anchor.element")),
                 ("depth", T("integer", "default 8")), ("maxNodes", T("integer", "default 600")), ("namedOnly", T("boolean", "skip unnamed nodes")))),
+        Tool("inspect", "Best first look: image of an anchor (window or element) with NUMBERED frames on its UIA elements, plus for each number a ready anchor " +
+            "that resolves to exactly that element. Self-drawn UIs (few UIA names): OCR text gets numbers too, with find:{text} anchors. Replaces describe+screenshot+find_text.",
+            Obj(("anchor", T("object", SameAnchor)), ("app", T("string", "process name, instead of anchor")), ("within", T("array", "[x,y,w,h] part of the element")),
+                ("ocr", T("boolean", "default: when UIA names fewer than 8 buttons/captions")), ("lang", T("string", "OCR language")),
+                ("maxItems", T("integer", "safety stop, default all")), ("maxEdge", T("integer", $"image long edge, default {DefaultMaxEdge}")))),
         Tool("screenshot", "Image of an anchor's rect or a screen area, without the overlay's drawings, plus image→screen mapping. " +
             "Prefer an element anchor over the whole window: image tokens grow with size.",
             Obj(("anchor", T("object", SameAnchor)), ("rect", T("array", "[x,y,w,h] screen rect")), ("pad", T("integer", "px around the anchor rect")),
@@ -107,6 +112,9 @@ internal static class Tools
             Obj(("text", T("string", "case-insensitive, small OCR slips tolerated")), ("anchor", T("object", SameAnchor)), ("rect", T("array", "[x,y,w,h] screen rect")),
                 ("within", T("array", "[x,y,w,h] part of the element")), ("match", T("string", "contains|exact|regex")), ("lang", T("string", "e.g. 'en-US', 'ru'")),
                 ("max", T("integer", $"most matches returned (default {DefaultMaxMatches})")))),
+        Tool("retarget", "Give a step's target another anchor (e.g. from a target_not_found event's candidates), and the card its real name (label/title/text); shapes and checks stay.",
+            Obj(("target", T("string", "target id, label or index")), ("anchor", T("object", SameAnchor)), ("step", T("integer", "default: current")),
+                ("label", T("string", "target's new name")), ("title", T("string", "step's new title")), ("text", T("string", "step's new text: the item's real name")))),
         Tool("validate", "Resolve every anchor of a spec (or the running tutorial) now; per step: ok or why not. Later steps often wait for windows earlier steps open.",
             Obj(("spec", T("object", "as start_tutorial; omit for the running one")))),
         Tool("ask", "Ask the user (panel above the card) and WAIT: options → {choice,label}; input → {text}; else {cancelled}|{timedOut}.",
@@ -121,7 +129,7 @@ internal static class Tools
         Tool("wait_for_turn", "The overlay serves ONE agent at a time. If a call answered 'busy', wait here until the other agent is done; you then hold it. Never start another TutorialOverlay instead.",
             Obj(("timeoutMs", T("integer", "default 600000, max 1800000")))),
         Tool("release", "Done with the overlay: let another agent use it (a running tutorial keeps running for the user).", new JsonObject()),
-        Tool("events", "Events after seq: hit, miss, step_*, tutorial_*, window_opened/closed, anchor_found/lost, opened, no_effect, blocked, prepare_started/done (step 0: a dialog to answer before step 1), button, pick, " +
+        Tool("events", "Events after seq: hit, miss, step_*, tutorial_*, window_opened/closed, anchor_found/lost, target_not_found (a window opened, the target is not in it: its numbered contents attached → retarget), opened, no_effect, blocked, prepare_started/done (step 0: a dialog to answer before step 1), button, pick, " +
             "help (reason cant_find|dont_understand|other; other: user text + optional pencil sketch with image path → answer with hint), " +
             "continue_requested (append the next lesson), outro, …. timeoutMs long-polls.",
             Obj(("since", T("integer", "last seen seq")), ("timeoutMs", T("integer", "max 60000")))),
@@ -148,12 +156,14 @@ internal static class Tools
         ["stop_tutorial"] = ("Stop the tutorial", false, false, true),
         ["status"] = ("Tutorial status", true, false, true),
         ["describe"] = ("Describe an app's UI", true, false, true),
+        ["inspect"] = ("Inspect an app with numbered elements", true, false, true),
         ["screenshot"] = ("Screenshot", true, false, true),
         ["template"] = ("Remember a UI picture", false, false, true),
         ["hint"] = ("Show a hint", false, false, true),
         ["pick"] = ("Ask the user to click", true, false, false),
         ["find_text"] = ("Find text on screen", true, false, true),
         ["validate"] = ("Check a tutorial's anchors", true, false, true),
+        ["retarget"] = ("Change a step target's anchor", false, false, true),
         ["ask"] = ("Ask the user", true, false, false),
         ["ask_area"] = ("Ask the user to circle an area", true, false, false),
         ["save_tutorial"] = ("Save a tutorial", false, true, true),
@@ -185,6 +195,21 @@ internal static class Tools
     {
         // whose call this is: a tutorial belongs to the agent (session) that started it
         Engine.Caller.Value = session;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            return await CallInner(name, args, ct);
+        }
+        finally
+        {
+            // what each look at the screen costs; tools that wait for the user or for events are not timed
+            if (name is not ("events" or "pick" or "ask" or "ask_area" or "wait_for_turn"))
+                Log.File($"tool {name}: {sw.ElapsedMilliseconds} ms");
+        }
+    }
+
+    private static async Task<JsonObject> CallInner(string name, JsonNode args, CancellationToken ct)
+    {
         try
         {
             return name switch
@@ -198,6 +223,7 @@ internal static class Tools
                 "stop_tutorial" => Text(Engine.StopTutorial()),
                 "status" => Text(Engine.Status()),
                 "describe" => TextRaw(await Task.Run(() => Describe.Run(args, ct), ct)),
+                "inspect" => AreaResult(await Task.Run(() => Inspect.Run(args), ct)),
                 "screenshot" => await Task.Run(() => Screenshot(args), ct),
                 "events" => await EventsTool(args, ct),
                 "pick" => Text(await Engine.Pick(args, ct)),
@@ -208,6 +234,7 @@ internal static class Tools
                 "list_tutorials" => Text(new JsonObject { ["tutorials"] = new JsonArray(Tutorials.List().Select(o => (JsonNode)o).ToArray()), ["dir"] = Tutorials.Dir }),
                 "delete_tutorial" => Text(new JsonObject { ["deleted"] = Tutorials.Delete(J.Str(args, "name") ?? throw new ArgumentException("name is required")) }),
                 "validate" => Text(await Task.Run(() => Engine.Validate(args), ct)),
+                "retarget" => Text(Engine.Retarget(args)),
                 "ask" => Text(await Engine.Ask(args, ct)),
                 "ask_area" => AreaResult(await Engine.AskArea(args, ct)),
                 _ => Fail("unknown tool: " + name),

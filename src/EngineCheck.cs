@@ -176,6 +176,13 @@ internal static partial class Engine
             if (!fr.Found)
                 return Bad(fs.Text != null ? $"text \"{fs.Text}\" not visible in the element (scrolled away? different wording or language?)"
                                            : $"template '{fs.Template}' not visible in the element (scrolled away?)");
+            if (fr.Root != IntPtr.Zero && Native.IsWindow(fr.Root))
+            {
+                // found in a menu / dialog of the app: its window is the one that must show the point
+                frame = Native.FrameRect(fr.Root);
+                ag.Root = fr.Root;
+                o["window"] = $"0x{fr.Root.ToInt64():X} \"{Native.WindowTitle(fr.Root)}\"";
+            }
             var hit = new PointF(frame.X + fr.Rel.X, frame.Y + fr.Rel.Y);
             float px = fs.Axis == "y" ? origin.X : hit.X, py = fs.Axis == "x" ? origin.Y : hit.Y;
             ag.P = new PointF(px + a.Dx, py + a.Dy);

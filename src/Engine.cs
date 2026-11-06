@@ -22,6 +22,7 @@ internal sealed class CardModel
     public bool CanBack, CanUndo;
     public string? Hint, HintTitle, Issue;
     public bool HelpPending, Highlighting, Review;
+    public bool Checking;                // a target was not in the window that opened: the agent is looking for it
     public List<(string label, bool done)> Checklist = new();
     public List<CardButton> Extra = new();
     public HashSet<string> Controls = new();
@@ -619,6 +620,7 @@ internal static partial class Engine
             int fgPid = ForegroundPid();
             foreach (var m in marks) ComputeMark(m, step != null && step.Targets.Contains(m) ? t : null, fgPid, now);
             if (step is { Sequence: true }) ApplySequence(step, now);
+            WatchMissing(t, step, now);
             var visible = marks.Where(m => m.Geo != null).ToList();
             Declutter(visible);
 
@@ -983,6 +985,17 @@ internal static partial class Engine
         {
             var fr = Finder.Get(a.Key);
             if (fr == null) { reason = "searching"; return null; }
+            // found in one of the app's menus / dialogs (an anchor naming only the app): the mark belongs to that window
+            if (fr.Root != IntPtr.Zero && fr.Root != root)
+            {
+                if (!Native.IsWindow(fr.Root) || !Native.IsWindowVisible(fr.Root)) { reason = "closed"; return null; }
+                root = fr.Root;
+                frame = Native.FrameRect(root);
+                bounds = frame;
+                o = a.OriginOf(bounds);
+                geo.Root = root;
+                geo.Bounds = bounds;
+            }
             PointF? seen = fr.Found ? fr.Rel : fr.LastRel;
             if (seen is not PointF m) { reason = a.Find.Text != null ? "text not visible" : "template not visible"; return null; }
             var hit = new PointF(frame.X + m.X, frame.Y + m.Y);
@@ -1024,8 +1037,10 @@ internal static partial class Engine
         {
             m.Geo = null;
             m.Visibility = reason;
-            // a text/template not seen yet: which way is unknown, but where to scroll is — the area it is looked for in
-            m.ScrollHint = reason is "text not visible" or "template not visible" && FindArea(m.Anchor) is RectangleF fa
+            // a text/template not seen yet: which way is unknown, but where to scroll is — the area it is looked for in.
+            // Only inside a named element or part (a list, a panel): a text looked for in a whole app is usually in a
+            // menu or dialog not open yet, and a wheel in the window's corner would send the user the wrong way
+            m.ScrollHint = reason is "text not visible" or "template not visible" && ScrollsToFind(m.Anchor) && FindArea(m.Anchor) is RectangleF fa
                 ? ("any", fa, new PointF(fa.X + fa.Width / 2, fa.Y + fa.Height / 2), -1) : null;
             return;
         }
@@ -1184,6 +1199,9 @@ internal static partial class Engine
     }
 
     /// <summary>The area a find anchor is looked for in (the element, or its "within" part), on screen.</summary>
+    /// <summary>A find anchor whose search area is a scrollable part (an element or a part of it), not a whole window.</summary>
+    internal static bool ScrollsToFind(AnchorSpec a) => a.Find != null && (a.Path.Count > 0 || a.Find.Within != null);
+
     private static RectangleF? FindArea(AnchorSpec a)
     {
         if (a.Find == null) return null;
@@ -1580,6 +1598,7 @@ internal static partial class Engine
             card.Hint = s.Hint;
             card.HintTitle = s.HintTitle;
             card.HelpPending = s.HelpPending;
+            card.Checking = s.Checking;
             card.Highlighting = s.HighlightUntil != null;
             card.Issue = TargetIssue(s);
             card.Review = s.Review && !s.Until.Any(c => c.SeenUnmet && c.Type != "manual");
@@ -1840,7 +1859,7 @@ internal static partial class Engine
         if (s != null && t.Active)
             o["step"] = new JsonObject
             {
-                ["id"] = s.Id, ["title"] = s.Title,
+                ["id"] = s.Id, ["title"] = s.Title, ["text"] = s.Text, ["checking"] = s.Checking ? true : null,
                 ["targets"] = new JsonArray(s.Targets.Select(m => (JsonNode)MarkJson(m)).ToArray()),
                 ["until"] = new JsonArray(s.Until.Select(c => (JsonNode)c.ToJson()).ToArray()),
                 ["undoDepth"] = s.History.Count,

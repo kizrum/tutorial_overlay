@@ -459,7 +459,8 @@ internal static class Resolver
         return parts.Count switch { 0 => UiaCondition.TrueCondition, 1 => parts[0], _ => new AndCondition(parts.ToArray()) };
     }
 
-    private static bool Matches(ElementSpec s, ElInfo i)
+    /// <summary>The test FindOne applies to each candidate (inspect counts look-alikes with it, so its indexes agree).</summary>
+    internal static bool Matches(ElementSpec s, ElInfo i)
     {
         if (i.Rect == null || i.Offscreen) return false;   // apps like FL hide closed windows instead of destroying them
         if (s.Name != null && !(s.NameExact ? i.Name.Equals(s.Name, StringComparison.OrdinalIgnoreCase)
@@ -522,17 +523,39 @@ internal static class Resolver
         };
     }
 
-    /// <summary>Depth-first (pre-order) walk of the control view; every node access is individually guarded.</summary>
+    /// <summary>
+    /// Depth-first (pre-order) walk of the control view; every node access is individually guarded.
+    /// Each node's children come in one cross-process call with their properties (2-2.5× faster than asking
+    /// sibling by sibling on Chrome / VS Code trees); a provider that fails that call is walked sibling by sibling.
+    /// </summary>
     public static int Walk(AutomationElement root, CacheRequest cr, int maxDepth, int maxNodes,
         Func<AutomationElement, ElInfo, int, bool> visit)
     {
         var walker = TreeWalker.ControlViewWalker;
+        var withChildren = NewCacheRequest();
+        withChildren.TreeScope = TreeScope.Element | TreeScope.Children;
         int count = 0;
         bool stop = false;
 
         void Children(AutomationElement el, int depth)
         {
             if (depth >= maxDepth || stop) return;
+            AutomationElementCollection? kids = null;
+            try { kids = el.GetUpdatedCache(withChildren).CachedChildren; }
+            catch (Exception ex) when (IsGone(ex) || ex is InvalidOperationException) { }
+            if (kids != null)
+            {
+                foreach (AutomationElement kid in kids)
+                {
+                    if (stop) return;
+                    if (++count > maxNodes) { stop = true; return; }
+                    var info = Read(kid, cached: true);
+                    if (info == null) continue;
+                    if (!visit(kid, info, depth + 1)) { stop = true; return; }
+                    Children(kid, depth + 1);
+                }
+                return;
+            }
             AutomationElement? child;
             try { child = walker.GetFirstChild(el, cr); }
             catch (Exception ex) when (IsGone(ex) || ex is InvalidOperationException) { return; }

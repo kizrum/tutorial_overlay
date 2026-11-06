@@ -152,7 +152,7 @@ internal sealed class Loc
         KeyStop = "Завершить туториал", KeyNone = "нет", SetSave = "Сохранить", SetDefaults = "По умолчанию",
         SetRestartAsk = "Порт изменён на {0}. Перезапустить сервер сейчас?\n\nАгенту придётся подключиться заново по новому адресу.",
         SetAfterTutorial = "Сохранено. Цвет и язык применятся после текущего туториала.", SetSaveFailed = "Не удалось сохранить настройки: {0}";
-    public string HelpSent = "Передал ассистенту — сейчас подскажу.", Highlighting = "Подсвечиваю, куда нажать…";
+    public string HelpSent = "Передал ассистенту — сейчас подскажу.", Highlighting = "Подсвечиваю, куда нажать…", Checking = "Уточняю, где этот пункт…";
     public string IssueMinimized = "Окно свёрнуто — разверните его.", IssueOccluded = "Нужное место закрыто другим окном.",
         IssueInactive = "Переключитесь в нужное приложение.", IssueMissing = "Не нахожу нужный элемент на экране.",
         IssueOffscreen = "Нужное место за пределами экрана.", IssueNotRunning = "Приложение не запущено.",
@@ -213,7 +213,7 @@ internal sealed class Loc
         KeyStop = "Stop tutorial", KeyNone = "none", SetSave = "Save", SetDefaults = "Defaults",
         SetRestartAsk = "The port is now {0}. Restart the server now?\n\nThe agent will have to reconnect to the new address.",
         SetAfterTutorial = "Saved. Colour and language apply after the current tutorial.", SetSaveFailed = "Could not save settings: {0}",
-        HelpSent = "Told the assistant — a hint is coming.", Highlighting = "Highlighting where to click…",
+        HelpSent = "Told the assistant — a hint is coming.", Highlighting = "Highlighting where to click…", Checking = "Checking where this item is…",
         IssueMinimized = "The window is minimized — restore it.", IssueOccluded = "Another window covers the spot.",
         IssueInactive = "Switch to the app.", IssueMissing = "Can't find the element on screen.",
         IssueOffscreen = "The spot is off screen.", IssueNotRunning = "The app is not running.",

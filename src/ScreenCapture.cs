@@ -154,6 +154,7 @@ internal static class ScreenCapture
                     finally { g.ReleaseHdc(hdc); }
                 }
                 if (!ok) { e.Bmp.Dispose(); e.Bmp = null; return null; }
+                StretchVirtualized(hwnd, win, e.Bmp);
                 e.Win = win;
                 e.At = Environment.TickCount64;
             }
@@ -161,6 +162,28 @@ internal static class ScreenCapture
         }
         if (LooksBlank(bmp)) { bmp.Dispose(); return null; }
         return bmp;
+    }
+
+    /// <summary>
+    /// A window that is not DPI-aware draws at 96 dpi and Windows stretches its picture on a scaled monitor; PrintWindow
+    /// hands out the unstretched drawing in the print's top-left corner (at 150 %: two thirds of the size). Stretched
+    /// here the same way, so the print matches the window on screen and UIA's physical rectangles.
+    /// </summary>
+    private static void StretchVirtualized(IntPtr hwnd, Rectangle win, Bitmap print)
+    {
+        uint dpi;
+        try { dpi = Native.GetDpiForWindow(hwnd); } catch { return; }
+        if (dpi == 0) return;
+        float factor = Native.ScaleAt(new PointF(win.X + win.Width / 2f, win.Y + win.Height / 2f)) * 96f / dpi;
+        if (Math.Abs(factor - 1) < 0.05f) return;
+        int w = (int)Math.Round(win.Width / factor), h = (int)Math.Round(win.Height / factor);
+        if (w <= 0 || h <= 0 || w > print.Width || h > print.Height) return;
+        using var drawn = print.Clone(new Rectangle(0, 0, w, h), PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(print);
+        g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        g.DrawImage(drawn, new Rectangle(0, 0, print.Width, print.Height));
+        Log.Debug($"capture: 0x{hwnd.ToInt64():X} is DPI-virtualized ({dpi} dpi on a {factor:0.##}× monitor): print stretched");
     }
 
     /// <summary>Some GPU-composited windows print as solid black: treat that as "couldn't capture".</summary>

@@ -727,3 +727,230 @@ public static class ToolAnnotationTests
             A.Check(TutorialOverlay.Tools.List().First(t => J.Str(t, "name") == n)!["annotations"]!["readOnlyHint"]!.GetValue<bool>(), n + " read-only");
     }
 }
+
+public static class InspectTests
+{
+    private static Inspect.Node N(string role, string name, float x, float y, float w, float h, string id = "", bool off = false) =>
+        new(new Resolver.ElInfo(name, role, id, "", new RectangleF(x, y, w, h), off), 1);
+
+    public static void TestChooseKeepsNamedVisibleAndSmall()
+    {
+        var area = new RectangleF(0, 0, 1000, 800);
+        var nodes = new List<Inspect.Node>
+        {
+            N("Pane", "Editor", 0, 0, 900, 700),        // 0: big container: no number
+            N("Button", "Save", 10, 10, 30, 30),        // 1
+            N("Button", "", 50, 10, 30, 30),            // 2: nameless
+            N("Button", "Hidden", 90, 10, 30, 30, off: true), // 3: offscreen
+            N("Button", "Away", 2000, 10, 30, 30),      // 4: outside the area
+            N("Pane", "Small panel", 10, 100, 200, 100),// 5: small container
+            N("Text", "Save", 11, 11, 28, 28),          // 6: the button's own caption: same rectangle
+            N("Pane", "", 300, 300, 50, 50, id: "91163828"), // 7: id is a window handle
+            N("Edit", "", 300, 400, 100, 20, id: "SearchBox"), // 8: stable id
+        };
+        var all = Inspect.Choose(nodes, area, 50);
+        A.Eq("1,5,8", string.Join(",", all.Picked), "picked, reading order");
+        A.Eq(0, all.Omitted.Count, "nothing omitted");
+        // over max: buttons before panels, and what did not fit is reported by role
+        var one = Inspect.Choose(nodes, area, 2);
+        A.Eq("1,8", string.Join(",", one.Picked), "interactive first");
+        A.Eq(1, one.Omitted["Pane"], "omitted pane reported");
+    }
+
+    public static void TestChooseDropsWrappersAndBlankElements()
+    {
+        var area = new RectangleF(0, 0, 1000, 800);
+        var nodes = new List<Inspect.Node>
+        {
+            N("Button", "Toggle Chat", 100, 10, 56, 38),   // 0: a wrapper ...
+            N("Button", "Toggle Chat", 110, 10, 37, 37),   // 1: ... around the real button
+            N("Button", "Copy code", 500, 300, 39, 39),    // 2: shows on hover only
+            N("Button", "Run", 200, 10, 30, 30),           // 3: inside nothing of its name
+        };
+        var c = Inspect.Choose(nodes, area, 50, r => r.X == 500);
+        A.Eq("1,3", string.Join(",", c.Picked), "inner button kept, blank dropped");
+        A.Eq(1, c.Blank, "blank counted");
+    }
+
+    public static void TestChooseDropsClickableWrappersAndStackedLookAlikes()
+    {
+        var area = new RectangleF(0, 0, 1000, 800);
+        var nodes = new List<Inspect.Node>
+        {
+            N("Button", "Click to expand", 500, 0, 400, 300),  // 0: around two real buttons
+            N("Button", "Copy", 520, 20, 30, 30),               // 1
+            N("Button", "Retry", 560, 20, 30, 30),              // 2
+            N("TreeItem", "Mascot.cs", 0, 139, 300, 37),        // 3: a row scrolled under ...
+            N("TreeItem", "Model.cs", 0, 300, 300, 37),         // 4: a row on its own
+            N("TreeItem", "src", 0, 157, 300, 38),              // 5: ... the sticky header, later in the tree: drawn on top
+        };
+        var c = Inspect.Choose(nodes, area, 50);
+        A.Eq("1,2,5,4", string.Join(",", c.Picked), "wrapper and the covered row dropped, the header kept");
+        A.Eq(1, c.Overlapping, "covered row reported");
+    }
+
+    public static void TestChooseSpreadsNumbersOverTheArea()
+    {
+        var area = new RectangleF(0, 0, 900, 900);
+        var nodes = new List<Inspect.Node>();
+        for (int k = 0; k < 10; k++) nodes.Add(N("TreeItem", "file" + k, 10, 10 + 25 * k, 200, 20));   // a long list top-left
+        nodes.Add(N("Button", "Send", 800, 850, 40, 30));                                              // bottom-right
+        nodes.Add(N("Button", "Stop", 850, 850, 40, 30));
+        // the list's cell and the buttons' cell take turns: two of each, not four rows of the list
+        var c = Inspect.Choose(nodes, area, 4);
+        A.Eq("0,1,10,11", string.Join(",", c.Picked), "cells take turns");
+        A.Eq(8, c.Omitted["TreeItem"], "omitted rows reported");
+        var tree = Inspect.Choose(nodes.Take(10).Append(N("TreeItem", "far", 800, 800, 60, 20)).ToList(), area, 2);
+        A.Check(tree.Picked.Contains(10), "the far cell gets a turn before the list's second row");
+        A.Eq(9, tree.Omitted["TreeItem"], "the rest is reported");
+    }
+
+    public static void TestIsBlankElementLooksAtTheMiddleOfIcons()
+    {
+        int w = 60, h = 60;
+        var g = new byte[w * h];
+        for (int i = 0; i < g.Length; i++) g[i] = 30;
+        for (int x = 0; x < 12; x++) g[2 * w + x] = 200;            // a neighbour's caption grazes the corner
+        A.Check(!Inspect.IsBlank(g, w, h, new Rectangle(0, 0, 40, 40)), "whole rect is not flat");
+        A.Check(Inspect.IsBlankElement(g, w, h, new Rectangle(0, 0, 40, 40)), "but the icon's middle is empty");
+        g[20 * w + 20] = 200;                                       // an icon in the middle
+        A.Check(!Inspect.IsBlankElement(g, w, h, new Rectangle(0, 0, 40, 40)), "icon");
+    }
+
+    public static void TestIsBlank()
+    {
+        int w = 40, h = 40;
+        var g = new byte[w * h];
+        for (int i = 0; i < g.Length; i++) g[i] = (byte)(30 + i % 3);   // flat background with a little noise
+        A.Check(Inspect.IsBlank(g, w, h, new Rectangle(0, 0, 40, 40)), "flat");
+        for (int y = 15; y < 25; y++) g[y * w + 20] = 110;              // a faint vertical stroke: an icon
+        A.Check(!Inspect.IsBlank(g, w, h, new Rectangle(0, 0, 40, 40)), "icon");
+        A.Check(Inspect.IsBlank(g, w, h, new Rectangle(0, 0, 10, 10)), "the empty corner");
+        A.Check(!Inspect.IsBlank(g, w, h, new Rectangle(100, 100, 10, 10)), "outside the picture is not judged");
+    }
+
+    public static void TestDisambiguateLikeTheResolver()
+    {
+        var nodes = new List<Inspect.Node>
+        {
+            N("Button", "Copy", 0, 0, 10, 10),           // 0
+            N("Button", "Copy link", 0, 20, 10, 10),     // 1: contains "Copy"
+            N("Button", "Copy", 0, 40, 10, 10),          // 2
+            N("Button", "Copy link", 0, 60, 10, 10, id: "link2"), // 3
+            N("Button", "Paste", 0, 80, 10, 10),         // 4
+            N("Button", "Run", 0, 100, 10, 10, id: "123"),// 5
+            N("Button", "Run", 0, 120, 10, 10, id: "456"),// 6: numeric ids are no way out
+        };
+        A.Eq("{\"name\":\"Paste\",\"role\":\"Button\"}", Inspect.Disambiguate(nodes, 4).ToJsonString(), "unique");
+        A.Eq("{\"name\":\"Copy\",\"role\":\"Button\",\"match\":\"exact\",\"index\":1}", Inspect.Disambiguate(nodes, 2).ToJsonString(), "index among exact");
+        A.Eq("{\"automationId\":\"link2\",\"role\":\"Button\"}", Inspect.Disambiguate(nodes, 3).ToJsonString(), "stable id");
+        A.Eq("{\"name\":\"Run\",\"role\":\"Button\",\"match\":\"exact\",\"index\":1}", Inspect.Disambiguate(nodes, 6).ToJsonString(), "numeric id ignored");
+    }
+
+    public static void TestTextHelpers()
+    {
+        A.Eq("Adam Szabo & Johan", Inspect.Query("Adam Szabo & Johan Vi..berg - Knock Me Out"), "start of a long line");
+        A.Eq(null, Inspect.Query("O •"), "no words");
+        A.Eq(null, Inspect.Query("130.000"), "a number changes by itself");
+        A.Eq("808 CH", Inspect.Query("808 CH"), "two letters are enough");
+        A.Check(Inspect.SameWords("Toggle Panel (Ctrl+J)", "Toggle Panel"), "caption of a named element");
+        A.Check(!Inspect.SameWords("Save", "Open"), "different");
+        A.Check(!Inspect.StableId("91163828") && Inspect.StableId("SearchBox") && !Inspect.StableId(""), "stable ids");
+    }
+}
+
+public static class OcrMergeTests
+{
+    private static OcrLine L(string text, float x, float y, float w = 80, float h = 16)
+    {
+        var l = new OcrLine();
+        var words = text.Split(' ');
+        float ww = w / words.Length;
+        for (int i = 0; i < words.Length; i++) l.Words.Add(new OcrWord(words[i], new RectangleF(x + i * ww, y, ww - 2, h)));
+        return l;
+    }
+
+    public static void TestFoldMakesLookAlikesEqual()
+    {
+        A.Eq(Ocr.Fold("Track 6"), Ocr.Fold("ТгасК 6"), "Track / ТгасК");
+        A.Eq(Ocr.Fold("808 CH"), Ocr.Fold("808 СН"), "CH / СН");
+        A.Check(Ocr.Fold("Файл") != Ocr.Fold("Fain"), "real Cyrillic stays different");
+    }
+
+    public static void TestLookAlikeLinesFollowTheUnambiguousOnes()
+    {
+        // an English UI: "Track 6" read by the Cyrillic recognizer as "ТгасК 6" stays Latin
+        var latin = new List<OcrLine> { L("Track 6", 0, 0), L("Browser", 0, 30), L("Mixer", 0, 60) };
+        var cyr = new List<OcrLine> { L("ТгасК 6", 0, 0), L("Вгоwsег", 0, 30), L("Міхег", 0, 60) };
+        var en = Ocr.Merge(latin, cyr);
+        A.Check(en.Any(l => l.Text == "Track 6") && !en.Any(l => l.Text == "ТгасК 6"), "English UI keeps Latin twins");
+        // a Russian UI: the same twin goes Cyrillic, because the sure lines are Cyrillic
+        var latin2 = new List<OcrLine> { L("HeT", 0, 0), L("Fanл", 0, 30), L("Npaвka", 0, 60) };
+        var cyr2 = new List<OcrLine> { L("Нет", 0, 0), L("Файл", 0, 30), L("Правка", 0, 60) };
+        var ru = Ocr.Merge(latin2, cyr2);
+        A.Check(ru.Any(l => l.Text == "Нет") && ru.Any(l => l.Text == "Файл"), "Russian UI keeps Cyrillic");
+    }
+}
+
+public static class InspectContainerTests
+{
+    public static void TestTextIsSearchedInsideTheSmallestNamedPanel()
+    {
+        var area = new RectangleF(0, 0, 2560, 1500);
+        var nodes = new List<Inspect.Node>
+        {
+            new(new Resolver.ElInfo("FL Studio", "Pane", "", "", new RectangleF(0, 0, 2560, 1500)), 1),   // the whole area
+            new(new Resolver.ElInfo("Browser", "Pane", "", "", new RectangleF(0, 120, 400, 1400)), 2),
+            new(new Resolver.ElInfo("Channel rack", "Pane", "", "", new RectangleF(415, 120, 1900, 370)), 2),
+            new(new Resolver.ElInfo("", "Pane", "91163828", "", new RectangleF(0, 200, 400, 300)), 3),     // window-handle id: not a container
+        };
+        A.Eq(1, Inspect.Container(nodes, new RectangleF(79, 280, 67, 16), area), "browser row");
+        A.Eq(2, Inspect.Container(nodes, new RectangleF(608, 208, 61, 13), area), "channel rack row");
+        A.Eq(-1, Inspect.Container(nodes, new RectangleF(2400, 1400, 50, 14), area), "only the whole window: none");
+    }
+}
+
+public static class MissingTargetTests
+{
+    public static void TestOnlyUnresolvedAnchorsCountAsMissing()
+    {
+        foreach (var v in new[] { "element not found", "window not found", "text not visible", "template not visible", "searching", "no visible window" })
+            A.Check(Engine.IsMissing(v), v);
+        // resolved but not shown right now: the window is there, the target too — nothing to report
+        foreach (var v in new[] { "visible", "occluded", "inactive", "offscreen", "scroll-down", "later", "resolving", "minimized" })
+            A.Check(!Engine.IsMissing(v), v);
+    }
+}
+
+public static class ScrollHintTests
+{
+    public static void TestNoScrollHintForTextInAWholeApp()
+    {
+        var loose = AnchorSpec.Parse(A.Json("{\"process\":\"FL64\",\"find\":{\"text\":\"General settings\"}}"), null);
+        var inList = AnchorSpec.Parse(A.Json("{\"process\":\"FL64\",\"element\":{\"name\":\"Browser\"},\"find\":{\"text\":\"808 Kick\"}}"), null);
+        var inPart = AnchorSpec.Parse(A.Json("{\"process\":\"FL64\",\"find\":{\"text\":\"Track 5\",\"within\":[0,100,300,800]}}"), null);
+        A.Check(!Engine.ScrollsToFind(loose), "menu item looked for in the whole app: no wheel");
+        A.Check(Engine.ScrollsToFind(inList) && Engine.ScrollsToFind(inPart), "inside a list or part: scroll hint as before");
+    }
+}
+
+public static class OcrShortWordTests
+{
+    private static OcrLine L(string text)
+    {
+        var l = new OcrLine();
+        float x = 0;
+        foreach (var w in text.Split(' ')) { l.Words.Add(new OcrWord(w, new RectangleF(x, 0, 10 * w.Length, 14))); x += 10 * w.Length + 6; }
+        return l;
+    }
+
+    public static void TestOneLookAlikeSlipInShortWords()
+    {
+        var lines = new List<OcrLine> { L("MIDl"), L("Audio"), L("Pattern 12") };
+        A.Eq(1, Ocr.Find(lines, "MIDI").Count, "MIDl read for MIDI");
+        A.Eq(1, Ocr.Find(lines, "MIDI", "exact").Count, "exact too");
+        A.Eq(0, Ocr.Find(lines, "MIDX").Count, "a real difference is not forgiven");
+        A.Eq(0, Ocr.Find(lines, "Pattern 1", "exact").Count, "Pattern 12 is not Pattern 1");
+        A.Eq(0, Ocr.Find(lines, "Aud").Count == 1 ? 0 : 1, "a short query still finds its word");
+    }
+}

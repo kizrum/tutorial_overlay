@@ -148,6 +148,14 @@ internal sealed class AnchorSpec
     }
 
     /// <summary>The same anchor without its visual search — what the resolver resolves.</summary>
+    /// <summary>The same anchor in one particular top-level window.</summary>
+    public AnchorSpec WithHwnd(IntPtr hwnd)
+    {
+        var c = (AnchorSpec)MemberwiseClone();
+        c.Hwnd = hwnd.ToInt64();
+        return c;
+    }
+
     public AnchorSpec WithoutFind()
     {
         var c = (AnchorSpec)MemberwiseClone();
@@ -666,6 +674,7 @@ internal sealed class Step
     public readonly List<JsonObject> Misses = new();   // recent misses, for help requests
     public string? Hint, HintTitle;                    // agent's answer shown on the card
     public bool HelpPending;
+    public bool Checking;                              // target_not_found sent: the agent is looking for the right item
     public List<PointF[]>? Sketch;                     // what the user circled with the help request (until the answer)
     public DateTime? HighlightUntil;
     public DateTime NextPing;
@@ -726,6 +735,7 @@ internal sealed class Step
         Misses.Clear();
         Hint = HintTitle = null;
         HelpPending = false;
+        Checking = false;
         HighlightUntil = null;
         SeqMissingSince = null;
         AutoColor = null;

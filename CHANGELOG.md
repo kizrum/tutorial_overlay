@@ -6,6 +6,36 @@ only fixes things.
 
 ## [Unreleased]
 
+- `inspect(anchor | app)`: one look instead of `describe` + `screenshot` + `find_text`. The picture comes with
+  numbered frames on the UI Automation elements (and, when UIA names next to nothing, on the text OCR reads), and
+  each number carries an anchor that finds exactly that element. Look-alikes get `match: exact` and `index` counted
+  the way the resolver counts them; window-handle automation ids, which change on every run, are never used.
+  Everything that passes the visibility checks gets a number; not numbered, and counted instead: elements that draw
+  nothing right now (buttons that appear on hover), wrappers around other controls, rows covered by a sticky header.
+  Text gets a number only after the same read the anchor's text search will make (that panel's pixels, language
+  and size) finds it there, once: inside the smallest named panel around it, so "808 Kick" in the browser and in the
+  channel rack both get one. The overview reads the window at full size, in tiles (small UI text was lost when a
+  big window was shrunk to fit one recognizer run).
+- OCR: a line the Cyrillic recognizer reads with look-alikes only ("ТгасК" for "Track") goes to the script the
+  unambiguous lines are in, instead of always to Cyrillic. Affects `find_text` without `text` and `inspect`.
+- Paths through menus and dialogs: when a window of the app opens and the current step's target is still not
+  found 1.5 s later, a `target_not_found` event brings that window's numbered contents (the `inspect` list with
+  ready anchors); `retarget(target, anchor)` swaps the target's anchor while the tutorial runs. So a whole path can
+  be written ahead from what the agent knows, and the agent only steps in when the app differs. Meanwhile the card
+  says it is checking where the item is; `retarget` also takes the item's real name (`label`, `title`, `text`), so
+  the card never keeps asking for an item that does not exist.
+- A text anchor that names only the app (`{process, find: {text}}`) is also looked for in the app's open menus and
+  dialogs, topmost first, and its mark belongs to the window it was found in. Before, such anchors searched only
+  the main window, so a menu item written ahead was never found.
+- No scroll hint ("scroll down") for a text looked for in a whole app: not seen there means a menu or dialog that is
+  not open yet, not a list to scroll. Text inside an element or `within` keeps the hint.
+- Window captures of apps that are not DPI-aware (old WinForms, some plugins) on a scaled monitor: the print is
+  stretched like Windows stretches the window, so it lines up with UI Automation's rectangles. Before, such
+  windows came out at 2/3 size (at 150 %), and text and templates were looked for in the wrong place.
+- `describe` and other UIA walks fetch each node's children in one call: 2–2.5× faster on deep trees (VS Code,
+  Chrome).
+- The log file records how long each tool call took.
+
 ## [0.3.0] - 2026-11-03
 
 Connect like any other MCP server: one command, no key, no port.

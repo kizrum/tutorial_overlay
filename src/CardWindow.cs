@@ -152,7 +152,7 @@ internal sealed class CardWindow : NoActivateForm
     private static string Signature(CardModel m, float s) =>
         string.Join("\u0001", Settings.Current.Lang, Settings.Current.Accent.ToArgb(), Settings.Current.HotkeySignature, m.State, m.Index, m.Prep, m.Total, m.Title, m.Text, m.Done, m.Required, m.Completed, m.CanBack, m.CanUndo,
             string.Join(",", m.Checklist.Select(c => c.label + c.done)), string.Join(",", m.Extra.Select(b => b.Id + b.Text)),
-            string.Join(",", m.Controls), m.Why, m.Hint, m.HintTitle, m.Issue, m.HelpPending, m.Highlighting, m.Review, s);
+            string.Join(",", m.Controls), m.Why, m.Hint, m.HintTitle, m.Issue, m.HelpPending, m.Highlighting, m.Review, m.Checking, s);
 
     /// <summary>Global hotkeys exist only while the card is shown; re-registered when the settings change.</summary>
     private void SetHotkeys(bool on)
@@ -327,13 +327,14 @@ internal sealed class CardWindow : NoActivateForm
 
     /// <summary>One message block above the buttons: the agent's hint, else "highlighting / sent", else why targets are hidden.</summary>
     /// <summary>Waiting for the next steps or for an answer to "help": show motion, not a frozen card.</summary>
-    private static bool Busy(CardModel m) => m.State == "waiting" || (m.HelpPending && m.Hint == null);
+    private static bool Busy(CardModel m) => m.State == "waiting" || (m.HelpPending && m.Hint == null) || m.Checking;
 
     private (string? title, string text, Color color)? Note(CardModel m)
     {
         var loc = Settings.Current.Text;
         if (m.State == "waiting") return (null, loc.Preparing, Palette.Named["blue"]);
         if (m.Hint != null) return (m.HintTitle, m.Hint, Palette.Named["blue"]);
+        if (m.Checking) return (null, loc.Checking, Palette.Named["blue"]);
         if (m.HelpPending) return (null, m.Highlighting ? loc.Highlighting + " " + loc.HelpSent : loc.HelpSent, Palette.Warn);
         if (m.Issue != null) return (null, m.Issue, Palette.Warn);
         if (m.Review) return (null, loc.Review, Palette.Named["blue"]);

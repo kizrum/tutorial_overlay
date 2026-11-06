@@ -16,22 +16,28 @@ restart Claude Code. Do not try to install or download it yourself.
 
 ## How to build a tutorial
 
-1. **Look first.** `describe(app)` gives the windows and the UI Automation tree. Anchor targets to elements by
-   name and role. For apps that draw their own interface (FL Studio, games, many audio and 3D tools) UIA shows only
-   panels: use `find_text` (OCR) for captions, `screenshot(anchor)` to measure, or `pick(anchor)` and let the user
-   click the spot — you get the exact offset.
-2. **One small action per step**, in the user's words: what to click and where it is.
-3. **Teach, not just click.** Put the reason in each step's `why`: what the tool does, why this way, the usual
+1. **Look first.** `inspect(app)` returns a picture with numbered frames and a ready anchor for every number —
+   UIA elements, and for apps that draw their own interface (FL Studio, games, many audio and 3D tools) the text OCR
+   reads there. Use the anchor of the number you want as is. Inspect a smaller element (or `within`) when the picture
+   is too reduced to read. For what has no number, `describe(app)` gives the UIA tree, `find_text` searches a caption,
+   and `pick(anchor)` lets the user click the spot — you get the exact offset.
+2. **Write the whole path ahead.** Targets in menus and dialogs that are not open yet get anchors from what you
+   know (`find: {text: 'General settings'}` or an element name); the overlay finds them when the window opens, so
+   the lesson runs without waiting on you. If a window opens and the target is not in it, a `target_not_found` event
+   brings that window's numbered contents with ready anchors: pick the right one and call `retarget` — or tell the
+   user with `hint` if the path itself was wrong. Never guess the nearest item.
+3. **One small action per step**, in the user's words: what to click and where it is.
+4. **Teach, not just click.** Put the reason in each step's `why`: what the tool does, why this way, the usual
    mistake. Keep `say` (the mascot's line) under 60 characters.
-4. **Say when a step is done.** No `until`: done when all targets are clicked. Otherwise pick the condition that
+5. **Say when a step is done.** No `until`: done when all targets are clicked. Otherwise pick the condition that
    matches the result: `appear` for a window that opens, `uia` for a checkbox or toggle state, `pixel` for a cell
    that lights up, `key` for a shortcut, `drag`, `scroll`, `trace`. Use `opens` on a target that must open a window.
-5. **Check before starting:** `validate(spec)` resolves every anchor. Fix errors; warnings on later steps often
+6. **Check before starting:** `validate(spec)` resolves every anchor. Fix errors; warnings on later steps often
    mean a window an earlier step opens.
-6. **Start and follow:** `start_tutorial(spec)`, then `events(since, timeoutMs)` to see hits, misses, `no_effect`
+7. **Start and follow:** `start_tutorial(spec)`, then `events(since, timeoutMs)` to see hits, misses, `no_effect`
    and `help`. For a long lesson use `keepOpen: true` and `append_steps`.
-7. **Help:** on a `help` event, answer with `hint(text)` right in the card; explain the cause, not only the click.
-8. **Finish:** offer to save the tutorial (the end card does too), then call `release`.
+8. **Help:** on a `help` event, answer with `hint(text)` right in the card; explain the cause, not only the click.
+9. **Finish:** offer to save the tutorial (the end card does too), then call `release`.
 
 For a single "where is X" question, `draw` one mark instead of a whole tutorial.
 
