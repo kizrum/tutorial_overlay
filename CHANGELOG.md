@@ -42,6 +42,10 @@ only fixes things.
   instead of hiding the card without a word; midway it still stops and hides (`outro` overrides either way).
 - The mascot at the end card (and while the card waits for more steps) walks over to the card and points at it,
   instead of staying where the last target was, over the app's toolbar.
+- Text anchors looked for in a whole app window read it at full size in tiles, as `inspect` does: shrunk to fit one
+  recognizer run, small UI text was lost (FL's "TOOLS" menu was never found).
+- `inspect` numbers a caption even when a UIA panel of the same name lies around it ("Channel rack"): only an
+  element about the caption's own size makes the caption redundant.
 - `validate` reads each window and caption once per check: a grid of 68 cells on one caption took 15 s, now 0.35 s.
 - The log records where a frame's time goes (engine, canvas, card, mascot) every 5 s while marks are shown.
 - `describe` and other UIA walks fetch each node's children in one call: 2–2.5× faster on deep trees (VS Code,

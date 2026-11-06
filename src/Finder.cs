@@ -183,11 +183,16 @@ internal static class Finder
         return prev is { Root: var seenIn } && seenIn != IntPtr.Zero && miss.Root == IntPtr.Zero ? miss with { Root = seenIn } : miss;
     }
 
-    /// <summary>One read for every wording: in their language, or with both recognizers when they mix scripts.</summary>
+    /// <summary>
+    /// One read for every wording: in their language, or with both recognizers when they mix scripts. An area bigger
+    /// than the budget (a whole app window) is read at full size in tiles: shrunk to fit one run, small UI text such
+    /// as FL's "TOOLS" was lost; smaller areas are enlarged up to 2× as before.
+    /// </summary>
     private static List<OcrLine> ReadFor(Bitmap shot, FindSpec f, float budget)
     {
         bool oneScript = f.Texts.Select(Ocr.AutoLang).Distinct().Count() <= 1;
-        return Ocr.Read(shot, f.Lang, oneScript ? f.Text : null, budget);
+        var query = oneScript ? f.Text : null;
+        return (float)shot.Width * shot.Height > budget ? Ocr.ReadTiled(shot, f.Lang, 1f, query) : Ocr.Read(shot, f.Lang, query, budget);
     }
 
     /// <summary>

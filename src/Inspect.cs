@@ -125,6 +125,7 @@ internal static class Inspect
         int texts = 0, repeated = 0;
         bool debug = J.Bool(args, "debug") ?? false;
         bool within = J.Has(args, "within");
+        List<OcrLine>? ocrLines = null;
         var skipped = new JsonArray();
         using (shot)
         {
@@ -136,6 +137,7 @@ internal static class Inspect
                 var ocrTime = Stopwatch.StartNew();
                 string? lang = J.Str(args, "lang");
                 var lines = Ocr.ReadTiled(shot, lang, (float)Math.Clamp(J.Num(args, "ocrScale") ?? 1.0, 0.5, 2.0));
+                ocrLines = lines;
                 // the finder's own read of an element (Finder.Search: that element's pixels, the query's language,
                 // 1.5 Mpx), made once per element and language; rectangles relative to the shot
                 var finderReads = new Dictionary<(int, string), (List<OcrLine> lines, Rectangle crop)>();
@@ -149,7 +151,8 @@ internal static class Inspect
                     if (crop.Width >= 4 && crop.Height >= 4)
                     {
                         using var part = shot.Clone(crop, shot.PixelFormat);
-                        read = Ocr.Read(part, lang, query, 1_500_000f);
+                        // exactly as Finder.ReadFor reads it: big areas in tiles at full size, small ones enlarged
+                        read = (float)part.Width * part.Height > 1_500_000f ? Ocr.ReadTiled(part, lang, 1f, query) : Ocr.Read(part, lang, query, 1_500_000f);
                     }
                     return finderReads[key] = (read, crop);
                 }
@@ -161,7 +164,10 @@ internal static class Inspect
                     var screen = new RectangleF(area.X + lb.X, area.Y + lb.Y, lb.Width, lb.Height);
                     var c = new PointF(screen.X + screen.Width / 2, screen.Y + screen.Height / 2);
                     // already named by UIA: the number on the element is enough
-                    if (items.Any(it => !it.Text && it.Rect.Contains(c) && SameWords(it.Name, line.Text))) { Skip("named by uia"); continue; }
+                    // already named by UIA: the number on the element is enough — unless that element is a whole panel
+                    // around its caption ("Channel rack"): the caption is a target of its own
+                    if (items.Any(it => !it.Text && it.Rect.Contains(c) && SameWords(it.Name, line.Text)
+                                        && it.Rect.Width * it.Rect.Height <= 6 * Math.Max(1, screen.Width * screen.Height))) { Skip("named by uia"); continue; }
                     var query = Query(line.Text);
                     if (query == null) { Skip("no words"); continue; }
                     // where the anchor's text search will run: the smallest named UIA element around the line (a panel —
@@ -264,6 +270,12 @@ internal static class Inspect
                     ["hint"] = $"more than maxItems ({maxItems}): inspect a smaller element (or within) to number them",
                 };
             if (debug) info["skippedText"] = skipped;
+            if (debug && ocrLines != null)
+                info["ocrLines"] = new JsonArray(ocrLines.Select(l => (JsonNode)new JsonObject
+                {
+                    ["text"] = l.Text,
+                    ["words"] = new JsonArray(l.Words.Select(w => (JsonNode)new JsonArray(w.Text, Math.Round(area.X + w.Rect.X), Math.Round(area.Y + w.Rect.Y), Math.Round(w.Rect.Width), Math.Round(w.Rect.Height))).ToArray()),
+                }).ToArray());
             if (walked >= maxNodes) info["truncated"] = $"UIA walk stopped at {maxNodes} nodes: indexes of look-alike elements may be off, validate them";
             if (scale < 0.6f) info["hint"] = "image strongly reduced: inspect a smaller element (or within) to read small text";
             Log.File($"inspect: {nodes.Count} nodes, {items.Count - texts} uia + {texts} text items, uia {uiaMs} ms, ocr {ocrMs} ms");

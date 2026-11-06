@@ -276,7 +276,7 @@ internal static unsafe class Ocr
     /// tile within the engine's size limit, tiles overlapping so a line cut by one edge is whole in the next tile;
     /// a line read twice is kept once (the longer reading).
     /// </summary>
-    public static List<OcrLine> ReadTiled(Bitmap img, string? lang, float scale)
+    public static List<OcrLine> ReadTiled(Bitmap img, string? lang, float scale, string? query = null)
     {
         const int maxDim = 2600, overlap = 320;
         int tile = Math.Max(overlap * 2, (int)(maxDim / scale) - 8);
@@ -288,7 +288,7 @@ internal static unsafe class Ocr
                 var r = Rectangle.Intersect(new Rectangle(tx, ty, tile, tile), new Rectangle(0, 0, img.Width, img.Height));
                 if (r.Width < 8 || r.Height < 8) continue;
                 using var part = img.Clone(r, img.PixelFormat);
-                foreach (var line in Read(part, lang, null, r.Width * (float)r.Height * scale * scale + 1))
+                foreach (var line in Read(part, lang, query, r.Width * (float)r.Height * scale * scale + 1))
                 {
                     var moved = new OcrLine();
                     foreach (var w in line.Words) moved.Words.Add(new OcrWord(w.Text, new RectangleF(w.Rect.X + r.X, w.Rect.Y + r.Y, w.Rect.Width, w.Rect.Height)));
