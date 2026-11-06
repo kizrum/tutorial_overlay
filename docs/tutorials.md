@@ -57,10 +57,19 @@ centre of the found text; `offset` counts from it. The mark follows the caption 
 0.7 s). `match`: `contains` (default), `exact` (the whole line), `regex`. Recognition slips of the "a letter for a
 look-alike" kind (l/I/1, 0/O, 5/S, 8/B, 2/Z, a Latin letter for the same-looking Cyrillic one — up to one in 6
 letters) are forgiven, but only within whole words: "Kicks" will not match "Kick". Other characters must match:
-"Fill each 8 steps" does not pass for "Fill each 2 steps", nor "Pattern 12" for "Pattern 1". In a menu, anchor an
+"Fill each 8 steps" does not pass for "Fill each 2 steps", nor "Pattern 12" for "Pattern 1". Letter case never
+matters (in text, element names, window titles); `automationId` alone is compared exactly. In a menu, anchor an
 item to the menu window (`windowClass` + `offset`) rather than to its text: the hovered item is repainted and may
 not be read. `index` is the occurrence's number top to bottom and left to right; `within: [x,y,w,h]` is a part of
 the element.
+
+`text` may list several wordings the app may use — versions and translations name the same item differently:
+`find: {text: ["General settings", "General preferences"]}`. The first one found wins, in the given order, so a path
+written ahead does not wait on the agent when the app says it differently. Letter case never matters. A wording that
+is a cut-down form of another one listed (`"Snare"` beside `"808 Snare"`) counts only where it is most of its line:
+otherwise, with the item missing, it would catch "AP - Future Bass Snare Reverse". Wordings of their own
+(`"Preferences"`, `"Options"`) match like any text, also inside a menu bar or a tab strip, which OCR reads as one
+line. Write full names; leave out generic words shared by many items ("808" in a list of 808 samples).
 
 The recogniser follows the query's alphabet: Cyrillic gets the Russian recogniser, Latin the English one (the
 English one turns Russian text into garbage, the Russian one reads "You" as "Уои"). `find_text` without `text`

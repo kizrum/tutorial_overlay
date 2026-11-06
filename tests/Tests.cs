@@ -954,3 +954,106 @@ public static class OcrShortWordTests
         A.Eq(0, Ocr.Find(lines, "Aud").Count == 1 ? 0 : 1, "a short query still finds its word");
     }
 }
+
+public static class TextVariantTests
+{
+    private static OcrLine L(string text)
+    {
+        var l = new OcrLine();
+        float x = 0;
+        foreach (var w in text.Split(' ')) { l.Words.Add(new OcrWord(w, new RectangleF(x, 0, 10 * w.Length, 14))); x += 10 * w.Length + 6; }
+        return l;
+    }
+
+    public static void TestOneOrSeveralWordings()
+    {
+        var one = FindSpec.Parse(A.Json("{\"text\":\"OPTIONS\"}"))!;
+        A.Eq("OPTIONS", one.Text, "single text");
+        A.Eq(1, one.Texts.Count, "one wording");
+        var many = FindSpec.Parse(A.Json("{\"text\":[\"General preferences\",\"General settings\",\" \"],\"match\":\"exact\"}"))!;
+        A.Eq("General preferences", many.Text, "first wording is the text");
+        A.Eq(2, many.Texts.Count, "blank ones dropped");
+        A.Eq("General preferences / General settings", many.TextShown, "shown in messages");
+        A.Check(one.Key != many.Key && many.Key != FindSpec.Parse(A.Json("{\"text\":\"General preferences\",\"match\":\"exact\"}"))!.Key, "keys differ");
+    }
+
+    public static void TestFirstWordingThatOccursWins()
+    {
+        var menu = new List<OcrLine> { L("MIDI settings"), L("General settings"), L("File settings") };
+        var f = FindSpec.Parse(A.Json("{\"text\":[\"General preferences\",\"General settings\"],\"match\":\"exact\"}"))!;
+        var m = Finder.MatchAny(menu, f);
+        A.Eq(1, m.Count, "found by the second wording");
+        A.Eq("General settings", m[0].Text, "the right line");
+        var both = FindSpec.Parse(A.Json("{\"text\":[\"File settings\",\"General settings\"],\"match\":\"exact\"}"))!;
+        A.Eq("File settings", Finder.MatchAny(menu, both)[0].Text, "the author's order decides");
+        var none = FindSpec.Parse(A.Json("{\"text\":[\"Preferences\",\"Options\"]}"))!;
+        A.Eq(0, Finder.MatchAny(menu, none).Count, "none occurs");
+    }
+}
+
+public static class SharedPrefixTests
+{
+    private static OcrLine L(string text)
+    {
+        var l = new OcrLine();
+        float x = 0;
+        foreach (var w in text.Split(' ')) { l.Words.Add(new OcrWord(w, new RectangleF(x, 0, 10 * w.Length, 14))); x += 10 * w.Length + 6; }
+        return l;
+    }
+
+    /// <summary>FL's browser: every item starts with "808". A missing one must not turn into a neighbour.</summary>
+    public static void TestMissingItemIsNotTakenForANeighbour()
+    {
+        var list = new List<OcrLine> { L("808 Clav"), L("808 CH"), L("808 Kick"), L("808kit_01"), L("Basic 808"), L("808 Clap"), L("808 HiHat") };
+        foreach (var q in new[] { "808 Snare", "808 Ride", "808 Crash", "808 Clop" })
+        {
+            A.Eq(0, Ocr.Find(list, q).Count, q + " (contains)");
+            A.Eq(0, Ocr.Find(list, q, "exact").Count, q + " (exact)");
+        }
+        A.Eq(1, Ocr.Find(list, "808 Clap").Count, "the real one");
+        A.Check(Ocr.Find(list, "808").Count > 1, "only the shared prefix: several lines — ambiguous");
+        A.Eq(1, Ocr.Find(list, "808 Kik", "exact").Count, "one dropped letter is an OCR slip, forgiven on purpose");
+    }
+
+    /// <summary>Wordings written ahead: a short one must not catch an item that merely contains it.</summary>
+    public static void TestAShortWordingDoesNotCatchALongerItem()
+    {
+        var list = new List<OcrLine> { L("808 Clap"), L("808 Kick"), L("AP - Future Bass Snare Reverse"), L("O Subkicker") };
+        var f = FindSpec.Parse(A.Json("{\"text\":[\"808 Snare\",\"Snare\"]}"))!;
+        A.Eq(0, Finder.MatchAny(list, f).Count, "Snare is a word inside another item, not that item");
+        var g = FindSpec.Parse(A.Json("{\"text\":[\"Sub kicker\",\"Subkicker\"]}"))!;
+        A.Eq(1, Finder.MatchAny(list, g).Count, "an icon read as O before the name still counts");
+    }
+
+    /// <summary>A menu bar or a tab strip is one OCR line: wordings of their own still find their word in it.</summary>
+    public static void TestWordingsOfTheirOwnFindAWordInAMenuBar()
+    {
+        var bar = new List<OcrLine> { L("FILE EDIT ADD PATTERNS VIEW OPTIONS TOOLS HELP"), L("MIDI Audio General File Theme") };
+        A.Eq(1, Finder.MatchAny(bar, FindSpec.Parse(A.Json("{\"text\":[\"preferences\",\"options\"]}"))!).Count, "options in the menu bar");
+        A.Eq(1, Finder.MatchAny(bar, FindSpec.Parse(A.Json("{\"text\":[\"Themes\",\"Theme\"]}"))!).Count, "Theme tab (Themes is not a word there)");
+        A.Check(Finder.IsCutDown("Snare", new List<string> { "808 Snare", "Snare" }) && !Finder.IsCutDown("options", new List<string> { "preferences", "options" }), "cut-down detection");
+    }
+}
+
+public static class CaseTests
+{
+    private static OcrLine L(string text)
+    {
+        var l = new OcrLine();
+        float x = 0;
+        foreach (var w in text.Split(' ')) { l.Words.Add(new OcrWord(w, new RectangleF(x, 0, 10 * w.Length, 14))); x += 10 * w.Length + 6; }
+        return l;
+    }
+
+    public static void TestLetterCaseNeverMatters()
+    {
+        var lines = new List<OcrLine> { L("OPTIONS"), L("General settings"), L("ЁЛКА"), L("Track 5") };
+        foreach (var (q, mode) in new[] { ("options", "contains"), ("OpTiOnS", "exact"), ("GENERAL SETTINGS", "exact"), ("ёлка", "exact"), ("елка", "contains"), ("track 5", "exact") })
+            A.Eq(1, Ocr.Find(lines, q, mode).Count, $"{q} ({mode})");
+        var f = FindSpec.Parse(A.Json("{\"text\":[\"general Preferences\",\"GENERAL settings\"]}"))!;
+        A.Eq(1, Finder.MatchAny(lines, f).Count, "variants too");
+        var save = new Resolver.ElInfo("Save As", "Button", "", "", new RectangleF(0, 0, 10, 10));
+        A.Check(Resolver.Matches(new ElementSpec { Name = "save as", Role = "button" }, save), "element name and role");
+        A.Check(Resolver.Matches(new ElementSpec { Name = "SAVE AS", NameExact = true }, save), "exact element name");
+    }
+}

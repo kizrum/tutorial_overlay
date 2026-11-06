@@ -53,7 +53,8 @@ internal sealed class ElementSpec
 internal sealed class FindSpec
 {
     public string Template = "";
-    public string? Text;              // OCR: text to look for instead of a template
+    public string? Text;              // OCR: text to look for instead of a template (the first of Texts)
+    public List<string> Texts = new(); // every wording that counts ("General settings", "General preferences"), tried in order
     public string TextMatch = "contains";   // contains | exact | regex
     public string? Lang;              // OCR language tag (default: the user's languages)
     public int Nth;                   // which occurrence, top-to-bottom then left-to-right (0 = first)
@@ -71,17 +72,25 @@ internal sealed class FindSpec
             Template = J.Str(n, "template") ?? J.Str(n, "id") ?? "",
             Axis = (J.Str(n, "axis") ?? "xy").ToLowerInvariant(),
             MaxScore = (float)(J.Num(n, "maxScore") ?? 0.08),
-            Text = J.Str(n, "text"),
+            Text = J.Get(n, "text") is JsonArray ? null : J.Str(n, "text"),
             TextMatch = (J.Str(n, "match") ?? "contains").ToLowerInvariant(),
             Lang = J.Str(n, "lang"),
             Nth = J.Int(n, "index") ?? J.Int(n, "nth") ?? 0,
         };
+        // text: one wording, or several the app may use (versions, languages) — the first one found wins
+        if (J.Arr(n, "text") is JsonArray variants)
+            f.Texts = variants.Select(J.AsStr).OfType<string>().Where(s => s.Trim().Length > 0).ToList();
+        else if (f.Text != null) f.Texts = new List<string> { f.Text };
+        f.Text = f.Texts.FirstOrDefault();
         if (J.Arr(n, "within") is JsonArray a && a.Count >= 4)
             f.Within = new RectangleF((float)(J.AsNum(a[0]) ?? 0), (float)(J.AsNum(a[1]) ?? 0), (float)(J.AsNum(a[2]) ?? 0), (float)(J.AsNum(a[3]) ?? 0));
         return f;
     }
 
-    public string Key => Text != null ? $"text:{Text}/{TextMatch}/{Lang}/{Nth}/{Within}/{Axis}" : $"{Template}/{Within}/{Axis}/{MaxScore}";
+    /// <summary>The wordings for messages: "A" or "A / B".</summary>
+    public string TextShown => string.Join(" / ", Texts);
+
+    public string Key => Text != null ? $"text:{string.Join("|", Texts)}/{TextMatch}/{Lang}/{Nth}/{Within}/{Axis}" : $"{Template}/{Within}/{Axis}/{MaxScore}";
 }
 
 /// <summary>
@@ -210,7 +219,7 @@ internal sealed class AnchorSpec
         if (Title != null) parts.Add($"title~\"{Title}\"");
         if (WindowClass != null) parts.Add($"class {WindowClass}");
         foreach (var p in Path) parts.Add("> " + p.Describe());
-        if (Find != null) parts.Add(Find.Text != null ? $"find text \"{Find.Text}\"" + (Find.Nth > 0 ? $" #{Find.Nth}" : "") : $"find template '{Find.Template}'");
+        if (Find != null) parts.Add(Find.Text != null ? $"find text \"{Find.TextShown}\"" + (Find.Nth > 0 ? $" #{Find.Nth}" : "") : $"find template '{Find.Template}'");
         return string.Join(" ", parts);
     }
 }

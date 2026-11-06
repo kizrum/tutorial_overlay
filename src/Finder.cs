@@ -183,6 +183,51 @@ internal static class Finder
         return prev is { Root: var seenIn } && seenIn != IntPtr.Zero && miss.Root == IntPtr.Zero ? miss with { Root = seenIn } : miss;
     }
 
+    /// <summary>One read for every wording: in their language, or with both recognizers when they mix scripts.</summary>
+    private static List<OcrLine> ReadFor(Bitmap shot, FindSpec f, float budget)
+    {
+        bool oneScript = f.Texts.Select(Ocr.AutoLang).Distinct().Count() <= 1;
+        return Ocr.Read(shot, f.Lang, oneScript ? f.Text : null, budget);
+    }
+
+    /// <summary>
+    /// The matches of the first wording that occurs at all (the order is the author's preference). A wording that
+    /// is a cut-down form of another one listed ("Snare" beside "808 Snare") is a fallback keyword, and such a one
+    /// counts only where it is most of its line — else it catches "AP - Future Bass Snare Reverse" when the item
+    /// itself is missing. Wordings of their own ("Preferences" / "Options") match like any text: a menu bar or a
+    /// tab strip reads as one line, with the item a small part of it.
+    /// </summary>
+    internal static List<TextMatch> MatchAny(List<OcrLine> lines, FindSpec f)
+    {
+        foreach (var t in f.Texts)
+        {
+            var m = Ocr.Find(lines, t, f.TextMatch);
+            if (IsCutDown(t, f.Texts)) m = m.Where(x => MostOfItsLine(t, x, lines)).ToList();
+            if (Log.Verbose && m.Count > 0) Log.Debug($"find text \"{t}\": " + string.Join(" | ", m.Select(x => $"{x.Text} @{x.Rect}")));
+            if (m.Count > 0) return m;
+        }
+        return new List<TextMatch>();
+    }
+
+    private static readonly char[] Spaces = { ' ', '	' };
+
+    /// <summary>Every word of <paramref name="t"/> is in another, longer wording of the list.</summary>
+    internal static bool IsCutDown(string t, List<string> all)
+    {
+        var words = t.ToLowerInvariant().Split(Spaces, StringSplitOptions.RemoveEmptyEntries);
+        return all.Any(o => o != t && o.Length > t.Length
+                            && words.All(w => o.ToLowerInvariant().Split(Spaces, StringSplitOptions.RemoveEmptyEntries).Contains(w)));
+    }
+
+    private static int Signs(string s) => s.Count(char.IsLetterOrDigit);
+
+    private static bool MostOfItsLine(string wording, TextMatch m, List<OcrLine> lines)
+    {
+        var c = new PointF(m.Rect.X + m.Rect.Width / 2, m.Rect.Y + m.Rect.Height / 2);
+        var line = lines.FirstOrDefault(l => { var b = l.Bounds; b.Inflate(2, 2); return b.Contains(c); });
+        return line == null || Signs(wording) >= 0.6 * Signs(line.Text);
+    }
+
     private static FindResult SearchIn(AnchorSpec a, FindResult? prev)
     {
         var f = a.Find!;
@@ -222,7 +267,7 @@ internal static class Finder
         {
         if (tpl == null)
         {
-            var found = Ocr.Find(Ocr.Read(shot, f.Lang, f.Text, followed != null ? 1_000_000f : 1_500_000f), f.Text!, f.TextMatch)
+            var found = MatchAny(ReadFor(shot, f, followed != null ? 1_000_000f : 1_500_000f), f)
                 .OrderBy(m => Math.Round(m.Rect.Y / 8)).ThenBy(m => m.Rect.X).ToList();
             if (followed != null && found.Count == 0)
             {
@@ -234,7 +279,7 @@ internal static class Finder
                 shotAt = DateTime.UtcNow;
                 shot = ScreenCapture.CaptureWindow(r.Root, Rectangle.Round(readArea));
                 if (shot == null) return Miss();
-                found = Ocr.Find(Ocr.Read(shot, f.Lang, f.Text, 1_500_000f), f.Text!, f.TextMatch)
+                found = MatchAny(ReadFor(shot, f, 1_500_000f), f)
                     .OrderBy(m => Math.Round(m.Rect.Y / 8)).ThenBy(m => m.Rect.X).ToList();
             }
             RectangleF m;

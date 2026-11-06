@@ -174,7 +174,7 @@ internal static partial class Engine
             try { fr = Finder.Search(a, null); }
             catch (Exception e) { return Bad((fs.Text != null ? "text search failed: " : "template search failed: ") + e.Message, "error"); }
             if (!fr.Found)
-                return Bad(fs.Text != null ? $"text \"{fs.Text}\" not visible in the element (scrolled away? different wording or language?)"
+                return Bad(fs.Text != null ? $"text \"{fs.TextShown}\" not visible in the element (scrolled away? different wording or language?)"
                                            : $"template '{fs.Template}' not visible in the element (scrolled away?)");
             if (fr.Root != IntPtr.Zero && Native.IsWindow(fr.Root))
             {

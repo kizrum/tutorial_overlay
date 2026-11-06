@@ -32,6 +32,10 @@ only fixes things.
 - Window captures of apps that are not DPI-aware (old WinForms, some plugins) on a scaled monitor: the print is
   stretched like Windows stretches the window, so it lines up with UI Automation's rectangles. Before, such
   windows came out at 2/3 size (at 150 %), and text and templates were looked for in the wrong place.
+- `find: {text: [...]}`: several wordings for one target (versions and translations name items differently); the
+  first one found wins. A cut-down wording ("Snare" beside "808 Snare") counts only where it is most of its line, so
+  with the item missing it does not catch "AP - Future Bass Snare Reverse"; wordings of their own still find their
+  word in a menu bar or tab strip. Letter case never matters.
 - `stop_tutorial` after the last step of a `keepOpen` tutorial finishes it with the end card (done, save, repeat)
   instead of hiding the card without a word; midway it still stops and hides (`outro` overrides either way).
 - `describe` and other UIA walks fetch each node's children in one call: 2–2.5× faster on deep trees (VS Code,

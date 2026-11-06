@@ -23,7 +23,9 @@ restart Claude Code. Do not try to install or download it yourself.
    and `pick(anchor)` lets the user click the spot — you get the exact offset. If `inspect` is not among the tools
    (an older TutorialOverlay), start with `describe(app)` and `screenshot(anchor)` instead.
 2. **Write the whole path ahead.** Targets in menus and dialogs that are not open yet get anchors from what you
-   know (`find: {text: 'General settings'}` or an element name); the overlay finds them when the window opens, so
+   know (`find: {text: 'General settings'}` or an element name; where versions name it differently, list the full
+   names: `text: ['General settings', 'General preferences']` — needs a TutorialOverlay with `inspect`, an older one
+   takes only one text); the overlay finds them when the window opens, so
    the lesson runs without waiting on you. If a window opens and the target is not in it, a `target_not_found` event
    brings that window's numbered contents with ready anchors: pick the right one and call `retarget` — or tell the
    user with `hint` if the path itself was wrong. Never guess the nearest item. (Without `retarget`, an older

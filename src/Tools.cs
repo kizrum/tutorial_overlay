@@ -39,7 +39,7 @@ internal static class Tools
         "{process:'FL64', window:'title substr', title:'window OR UIA pane name substr', " +
         "element:{name,role,automationId,className,match:'contains'|'exact',pick:'largest'|'first'|'smallest',index} or array (nested path), " +
         "origin:'topleft'|'center'|'topright'|'bottomleft'|'bottomright'|'top'|'bottom'|'left'|'right', offset:[dx,dy], relativeTo:'frame'|'client', hwnd, screen:true, " +
-        "find:{text, match:'contains'|'exact'|'regex', index, lang, within:[x,y,w,h]} (OCR: point = text centre; for self-drawn UIs, check wording with find_text) " +
+        "find:{text: 'x' | ['x','y'] (full names the app may use; first found wins), match:'contains'|'exact'|'regex', index, lang, within:[x,y,w,h]} (OCR: point = text centre; letter case never matters) " +
         "or find:{template, within, axis:'xy'|'x'|'y'} (point = match top-left). Marks follow found text/templates when content scrolls. " +
         "No anchor = absolute screen point (offset).";
 
