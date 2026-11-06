@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Linq;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
@@ -18,6 +19,12 @@ internal static partial class Engine
     private const int MissingAfterMs = 1500;
     /// <summary>A window counts as opened for this step if it appeared at most this long before the step started (the click that completed the previous step opened it).</summary>
     private const int OpenedBeforeStepMs = 5000;
+    /// <summary>
+    /// No window opened, but the one the target is looked for in is there (a tab of an open settings window, the
+    /// browser list): missing this long into the step, the target is reported too — longer than for a new window,
+    /// since the user may still be scrolling or switching to it.
+    /// </summary>
+    private const int ExistingAfterMs = 4000;
 
     /// <summary>When each top-level window was first seen during this tutorial (MinValue: it was there before it began).</summary>
     private static readonly Dictionary<IntPtr, DateTime> WindowSince = new();
@@ -65,12 +72,34 @@ internal static partial class Engine
                                          && at >= step.EnteredAt.AddMilliseconds(-OpenedBeforeStepMs)
                                          && (now - at).TotalMilliseconds >= MissingAfterMs)
                              .OrderByDescending(w => WindowSince[w.Hwnd]).FirstOrDefault();
-            if (win == null) continue;
-            var key = $"{m.Id}|{win.Hwnd}";
+            RectangleF? scope = null;
+            string where = "new window";
+            if (win == null)
+            {
+                // no window opened: the target is missing where it is looked for — its panel (a list, a tab page) or,
+                // when even its element is missing, its app's main window. No window at all is a wait, not a miss
+                if (!(m.Visibility.Contains("not visible") || m.Visibility == "element not found")) continue;
+                if ((now - since).TotalMilliseconds < ExistingAfterMs || (now - step.EnteredAt).TotalMilliseconds < ExistingAfterMs) continue;
+                var r = Resolver.Get(m.Anchor.WithoutFind().Key);
+                if (r is { Found: true } && Native.IsWindow(r.Root))
+                {
+                    win = windows.FirstOrDefault(w => w.Hwnd == r.Root);
+                    if (win != null && r.Rel is RectangleF rel) scope = new RectangleF(win.Frame.X + rel.X, win.Frame.Y + rel.Y, rel.Width, rel.Height);
+                }
+                else
+                {
+                    // the element itself is missing: the window the anchor names (title / class), else the app's biggest
+                    var named = Resolver.MatchingWindows(m.Anchor.WithoutFind(), windows);
+                    win = windows.Where(w => named.Contains(w.Hwnd)).OrderByDescending(w => (long)w.Frame.Width * w.Frame.Height).FirstOrDefault();
+                }
+                if (win == null) continue;
+                where = "open window";
+            }
+            var key = $"{m.Id}|{where}|{win.Hwnd}";
             if (!MissingReported.Add(key)) continue;
             step.Checking = true;     // the card says so, instead of leaving the user before a step without a mark
             _stepVersion++;
-            ReportMissing(t.Index, step, m, win, process);
+            ReportMissing(t.Index, step, m, win, process, scope, where, where == "open window" && ScrollsToFind(m.Anchor));
         }
     }
 
@@ -78,8 +107,12 @@ internal static partial class Engine
     internal static bool IsMissing(string visibility) =>
         visibility.Contains("not found") || visibility.Contains("not visible") || visibility is "searching" or "no visible window";
 
-    /// <summary>Inspects the new window off the UI thread and emits target_not_found with its numbered contents.</summary>
-    private static void ReportMissing(int index, Step step, Mark m, TopWindow win, string process)
+    /// <summary>
+    /// Inspects the window (or the panel <paramref name="scope"/> in it) off the UI thread and emits target_not_found
+    /// with its numbered contents.
+    /// </summary>
+    private static void ReportMissing(int index, Step step, Mark m, TopWindow win, string process, RectangleF? scope = null,
+                                      string where = "new window", bool scrollable = false)
     {
         var target = m.Label ?? m.Id;
         var wanted = m.Anchor.Describe();
@@ -88,7 +121,7 @@ internal static partial class Engine
         {
             var ev = new JsonObject
             {
-                ["step"] = index, ["target"] = m.Id, ["label"] = m.Label, ["anchor"] = wanted, ["reason"] = reason,
+                ["step"] = index, ["target"] = m.Id, ["label"] = m.Label, ["anchor"] = wanted, ["reason"] = reason, ["where"] = where,
                 ["window"] = new JsonObject
                 {
                     ["hwnd"] = $"0x{win.Hwnd.ToInt64():X}", ["title"] = win.Title, ["class"] = win.Class, ["rect"] = J.RectJson(win.Frame),
@@ -97,21 +130,32 @@ internal static partial class Engine
             try
             {
                 if (!Native.IsWindow(win.Hwnd)) return;   // closed meanwhile: nothing to look into
-                var (info, _) = Inspect.Run(new JsonObject
+                var args = new JsonObject
                 {
                     ["anchor"] = new JsonObject { ["process"] = process, ["hwnd"] = $"0x{win.Hwnd.ToInt64():X}" },
                     ["maxItems"] = 80, ["maxEdge"] = 512,
-                });
-                // the handle is new every time a menu opens: the anchors name the window by its class (and title)
-                if (info["anchor"] is JsonObject a)
+                };
+                // only the panel the target is looked for in (the browser, not all of FL): a shorter, truer list
+                if (scope is RectangleF sc)
+                {
+                    var fr = Native.FrameRect(win.Hwnd);
+                    args["within"] = new JsonArray(sc.X - fr.X, sc.Y - fr.Y, sc.Width, sc.Height);
+                }
+                var (info, _) = Inspect.Run(args);
+                // the handle is new every time a menu opens: the anchors name the window by its class (and title) —
+                // a title only when the class alone is ambiguous: titles change ("Settings - Files & folders" →
+                // "Settings - MIDI" with the tab), and an anchor on the old one would stop resolving
+                bool classShared = Resolver.RecentWindows(500).Count(w => w.Pid == win.Pid && w.Class == win.Class) > 1;
+                void NameWindow(JsonObject a)
                 {
                     a.Remove("hwnd");
                     a["windowClass"] = win.Class;
-                    // a title only when the class alone is ambiguous: titles change ("Settings - Files & folders" →
-                    // "Settings - MIDI" with the tab), and an anchor on the old one would stop resolving
-                    bool classShared = Resolver.RecentWindows(500).Count(w => w.Pid == win.Pid && w.Class == win.Class) > 1;
                     if (classShared && win.Title.Length > 0) a["window"] = win.Title;
                 }
+                if (info["anchor"] is JsonObject a0) NameWindow(a0);
+                if (info["items"] is JsonArray its)
+                    foreach (var it in its) if (it?["anchor"] is JsonObject ai) NameWindow(ai);
+                if (scrollable) ev["note"] = "the target is looked for in a list: it may only be scrolled out of view — check the picture before retargeting";
                 ev["candidates"] = new JsonObject
                 {
                     ["anchor"] = info["anchor"]?.DeepClone(), ["items"] = info["items"]?.DeepClone(), ["note"] = info["note"]?.DeepClone(),

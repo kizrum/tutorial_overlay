@@ -38,10 +38,14 @@
 `window_opened/closed`, `anchor_found/lost`, `target_not_found`, `target_changed`, `hook_reinstalled`, `exit`. `miss` carries `wrongButton` /
 `expectedButton` when the click hit the target with the wrong mouse button.
 
-`target_not_found`: a window of the app opened around the current step (a menu, a dialog) and a target of the step
-still does not resolve 1.5 s later. It carries the window and `candidates` — what `inspect` numbers in that window,
-with the shared `anchor` (the window named by class and title, not by its handle, which is new each time). Sent once
-per target and window, only to the agent that owns the tutorial.
+`target_not_found`: a target of the current step does not resolve where it should be. `where: "new window"` — a
+window of the app opened around the step (a menu, a dialog) and the target is still not in it 1.5 s later.
+`where: "open window"` — no window opened, but the one the target is looked for in is there, and the target has been
+missing for 4 s (a tab of an open settings window, an item of the browser list); `candidates` then cover only the
+panel it is looked for in, and a `note` warns when that is a list it may just be scrolled out of. No window at all is
+a wait, not a miss. `candidates` is what `inspect` numbers there, with the shared `anchor` (the window named by class,
+and by title only when the class is shared — titles change with tabs). Sent once per target and window, only to the
+agent that owns the tutorial; the card meanwhile says it is checking.
 
 `hit` and `miss` carry `rel`, the click's offset from the anchor point. From `miss` the agent can correct a
 calibrated offset.

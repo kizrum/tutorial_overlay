@@ -43,6 +43,17 @@ internal static partial class Engine
             StepKey = MascotKey(t),
             Scale = Native.ScaleAt(card.Focus),
         };
+        // the end card, or waiting for the next steps: nothing on screen to point at but the card itself — it walks over
+        // and points at the card (celebrating at the end) instead of staying where the last target was, over the app
+        if ((t.OutroOpen || t.State == TutorialState.Waiting) && CardRect is Rectangle cr && cr.Width > 0)
+        {
+            var at = new PointF(cr.Left + Math.Min(40f, cr.Width / 4f), cr.Top + Math.Min(40f, cr.Height / 4f));
+            m.Target = at;
+            m.TargetBounds = cr;
+            m.Scale = Native.ScaleAt(at);
+            m.StepKey += "/card";
+            return m;
+        }
         var step = t.State == TutorialState.Running && !t.OutroOpen ? t.Current : null;
         if (step == null) return m;
 

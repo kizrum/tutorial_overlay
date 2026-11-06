@@ -21,7 +21,9 @@ only fixes things.
 - Paths through menus and dialogs: when a window of the app opens and the current step's target is still not
   found 1.5 s later, a `target_not_found` event brings that window's numbered contents (the `inspect` list with
   ready anchors); `retarget(target, anchor)` swaps the target's anchor while the tutorial runs. So a whole path can
-  be written ahead from what the agent knows, and the agent only steps in when the app differs. Meanwhile the card
+  be written ahead from what the agent knows, and the agent only steps in when the app differs. Also when no window
+  opens but the target is missing for 4 s where it is looked for (a tab of an open window, a list): the candidates
+  then cover just that panel, with a note when it is a list the target may only be scrolled out of. Meanwhile the card
   says it is checking where the item is; `retarget` also takes the item's real name (`label`, `title`, `text`), so
   the card never keeps asking for an item that does not exist.
 - A text anchor that names only the app (`{process, find: {text}}`) is also looked for in the app's open menus and
@@ -38,6 +40,8 @@ only fixes things.
   word in a menu bar or tab strip. Letter case never matters.
 - `stop_tutorial` after the last step of a `keepOpen` tutorial finishes it with the end card (done, save, repeat)
   instead of hiding the card without a word; midway it still stops and hides (`outro` overrides either way).
+- The mascot at the end card (and while the card waits for more steps) walks over to the card and points at it,
+  instead of staying where the last target was, over the app's toolbar.
 - `describe` and other UIA walks fetch each node's children in one call: 2–2.5× faster on deep trees (VS Code,
   Chrome).
 - The log file records how long each tool call took.

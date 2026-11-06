@@ -26,7 +26,8 @@ restart Claude Code. Do not try to install or download it yourself.
    know (`find: {text: 'General settings'}` or an element name; where versions name it differently, list the full
    names: `text: ['General settings', 'General preferences']` — needs a TutorialOverlay with `inspect`, an older one
    takes only one text); the overlay finds them when the window opens, so
-   the lesson runs without waiting on you. If a window opens and the target is not in it, a `target_not_found` event
+   the lesson runs without waiting on you. If the target is not where it should be (a window opened without it, or
+   an open panel or list does not show it after a few seconds), a `target_not_found` event
    brings that window's numbered contents with ready anchors: pick the right one and call `retarget` — or tell the
    user with `hint` if the path itself was wrong. Never guess the nearest item. (Without `retarget`, an older
    TutorialOverlay: watch `anchor_found`/`no_effect` events, then `describe` the new window and `append_steps`.)
