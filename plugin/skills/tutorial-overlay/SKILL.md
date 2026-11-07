@@ -33,9 +33,14 @@ restart Claude Code. Do not try to install or download it yourself.
    the lesson runs without waiting on you. If the target is not where it should be (a window opened without it, or
    an open panel or list does not show it after a few seconds), a `target_not_found` event
    brings that window's numbered contents with ready anchors: pick the right one and call `retarget` — or tell the
-   user with `hint` if the path itself was wrong. Never guess the nearest item. Never invent the wording of a list
-   you have not seen (a drop-down's options, a context menu): write that step as "open the list", and when it is
-   open read it (`find_text`, `inspect`) and `append_steps` with the real item. (Without `retarget`, an older
+   user with `hint` if the path itself was wrong. Never guess the nearest item.
+   **Start with the whole lesson, not two steps.** The user waits on every `append_steps`: adding one step at a
+   time, after reading each menu, leaves them idle for most of the lesson. The app's own menus and commands you know
+   (Blender's Add → Mesh → Monkey, Object → Shade Smooth; Steam's game menu → Properties…; an editor's File → Save
+   As…) are written ahead like any target — `target_not_found` + `retarget` catches a wording that differs. Only what
+   cannot be known ahead waits: the values of a drop-down, items that depend on the user's data (their files,
+   games, presets), a dialog you have never seen. Write that step as "open the list", read it when it is open
+   (`find_text`, `inspect`), and `append_steps` everything after it in one call. (Without `retarget`, an older
    TutorialOverlay: watch `anchor_found`/`no_effect` events, then `describe` the new window and `append_steps`.)
 3. **Leave the outline to the overlay.** Give a target no `shapes` (or `{type: 'auto'}`): it is framed at its own
    size — the element, the found text, the icon, the caption at a spot, measured live. Your own shapes are for
