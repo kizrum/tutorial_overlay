@@ -92,6 +92,51 @@ internal static class Icons
     }
 
     /// <summary>
+    /// The visible extent of what lies under a point (a caption's letters, a button's frame): edges near the point,
+    /// joined across small gaps (letters of a word, parts of a frame), the group the point is in — its box, padded a
+    /// little. Null when nothing is drawn near the point, or when the group is a whole panel (bigger than max).
+    /// </summary>
+    public static Rectangle? TargetBox(byte[] gray, int w, int h, Point p, int join = 3, int max = 320, int contrast = EdgeContrast)
+    {
+        var win = Rectangle.Intersect(new Rectangle(p.X - max, p.Y - max, 2 * max, 2 * max), new Rectangle(0, 0, w, h));
+        int ww = win.Width, wh = win.Height;
+        if (ww < 3 || wh < 3) return null;
+        var edge = new bool[ww * wh];
+        for (int y = 1; y < wh - 1; y++)
+            for (int x = 1; x < ww - 1; x++)
+            {
+                int i = (win.Y + y) * w + win.X + x;
+                if (Math.Max(Math.Abs(gray[i + 1] - gray[i - 1]), Math.Abs(gray[i + w] - gray[i - w])) >= contrast) edge[y * ww + x] = true;
+            }
+        // the seed: the edge pixel nearest to the point, within a few pixels (a point between two letters still counts)
+        int px = p.X - win.X, py = p.Y - win.Y, seed = -1, bestD = int.MaxValue;
+        for (int y = Math.Max(0, py - 10); y <= Math.Min(wh - 1, py + 10); y++)
+            for (int x = Math.Max(0, px - 10); x <= Math.Min(ww - 1, px + 10); x++)
+                if (edge[y * ww + x]) { int d = (x - px) * (x - px) + (y - py) * (y - py); if (d < bestD) { bestD = d; seed = y * ww + x; } }
+        if (seed < 0) return null;
+        // flood over edges, jumping gaps up to `join` pixels
+        var seen = new bool[edge.Length];
+        var stack = new Stack<int>();
+        stack.Push(seed); seen[seed] = true;
+        int x0 = int.MaxValue, y0 = int.MaxValue, x1 = -1, y1 = -1;
+        while (stack.Count > 0)
+        {
+            int i = stack.Pop(), x = i % ww, y = i / ww;
+            if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+            if (x1 - x0 > max || y1 - y0 > max) return null;   // a panel border: not a target of its own
+            for (int ny = Math.Max(0, y - join); ny <= Math.Min(wh - 1, y + join); ny++)
+                for (int nx = Math.Max(0, x - join); nx <= Math.Min(ww - 1, x + join); nx++)
+                {
+                    int j = ny * ww + nx;
+                    if (edge[j] && !seen[j]) { seen[j] = true; stack.Push(j); }
+                }
+        }
+        var box = new Rectangle(win.X + x0, win.Y + y0, x1 - x0 + 1, y1 - y0 + 1);
+        box.Inflate(3, 3);
+        return Rectangle.Intersect(box, new Rectangle(0, 0, w, h));
+    }
+
+    /// <summary>
     /// An 8×8 picture of the box, its mean taken out, and the box's mean colour (rgb: 3 bytes a pixel, optional):
     /// what tells an icon from its look-alikes — FL's green Play triangle has the shape of a grey expand arrow.
     /// </summary>
@@ -173,5 +218,91 @@ internal static class Icons
                             if (k != i && Difference(sigs[i], boxes[i], sigs[k], boxes[k]) < SameIcon) { repeated[i] = repeated[k] = true; break; }
         }
         return Enumerable.Range(0, boxes.Count).Where(i => !repeated[i]).ToList();
+    }
+
+    /// <summary>
+    /// The control a caption sits on: a drop-down with its arrow, a tab, a button, a menu-bar item — what the user
+    /// clicks, which is often wider than the words. A control with its own background (a box above and below the
+    /// text) spreads to its borders; a caption on a flat bar or list (no box) spreads sideways to the next caption
+    /// (halfway into the gap) or the panel's edge, and a little above and below. Null when nothing bounds it (text in
+    /// a big page): then the words themselves are the target. <paramref name="t"/> is in picture pixels.
+    /// </summary>
+    internal static Rectangle? ControlBox(byte[] g, int w, int h, Rectangle t)
+    {
+        if (t.Width < 2 || t.Height < 4 || t.X < 0 || t.Y < 0 || t.Right > w || t.Bottom > h) return null;
+        int th = t.Height;
+        var ring = new List<byte>();
+        for (int x = Math.Max(0, t.X - 3); x < Math.Min(w, t.Right + 3); x++)
+        {
+            if (t.Y - 3 >= 0) ring.Add(g[(t.Y - 3) * w + x]);
+            if (t.Bottom + 2 < h) ring.Add(g[(t.Bottom + 2) * w + x]);
+        }
+        for (int y = t.Y; y < t.Bottom; y++)
+        {
+            if (t.X - 3 >= 0) ring.Add(g[y * w + t.X - 3]);
+            if (t.Right + 2 < w) ring.Add(g[y * w + t.Right + 2]);
+        }
+        if (ring.Count < 8) return null;
+        ring.Sort();
+        int bg = ring[ring.Count / 2];
+        const int Tol = 16;
+
+        // a border or another background: most of the line is off the background, and evenly so (not letters)
+        bool Edge(IEnumerable<byte> line)
+        {
+            int n = 0, off = 0; long sum = 0, sq = 0;
+            foreach (var v in line)
+            {
+                n++;
+                if (Math.Abs(v - bg) > Tol) { off++; sum += v; sq += v * v; }
+            }
+            if (n == 0 || off < n * 0.8) return false;
+            double mean = sum / (double)off, sd = Math.Sqrt(Math.Max(0, sq / (double)off - mean * mean));
+            return sd < 22;
+        }
+        bool Ink(IEnumerable<byte> line) { int n = 0, off = 0; foreach (var v in line) { n++; if (Math.Abs(v - bg) > Tol) off++; } return off > 0 && off >= n * 0.12; }
+        IEnumerable<byte> Row(int y, int x0, int x1) { for (int x = x0; x < x1; x++) yield return g[y * w + x]; }
+        IEnumerable<byte> Col(int x, int y0, int y1) { for (int y = y0; y < y1; y++) yield return g[y * w + x]; }
+
+        // above and below the words: a box of its own?
+        int capY = th * 2;
+        int top = t.Y, bot = t.Bottom;
+        bool topEdge = false, botEdge = false;
+        for (int i = 0; i < capY && top > 0; i++) { if (Edge(Row(top - 1, t.X, t.Right))) { topEdge = true; break; } top--; }
+        for (int i = 0; i < capY && bot < h; i++) { if (Edge(Row(bot, t.X, t.Right))) { botEdge = true; break; } bot++; }
+        bool boxed = topEdge && botEdge;
+        if (!boxed) { top = Math.Max(0, t.Y - th / 2); bot = Math.Min(h, t.Bottom + th / 2); }
+
+        int capX = Math.Clamp(th * 14, 120, 360);
+        int Side(int dir, out bool bounded)
+        {
+            int x = dir < 0 ? t.X : t.Right, gapAt = -1;
+            bounded = false;
+            for (int i = 0; i < capX; i++)
+            {
+                int nx = dir < 0 ? x - 1 : x;
+                if (nx < 0 || nx >= w) break;
+                if (boxed)
+                {
+                    if (Edge(Col(nx, top, bot))) { bounded = true; break; }
+                }
+                else
+                {
+                    // a flat bar: the next caption or icon (solid or not) ends this one, halfway into the gap before it
+                    bool ink = Edge(Col(nx, t.Y, t.Bottom)) || Ink(Col(nx, t.Y, t.Bottom));
+                    if (ink && gapAt >= 0 && Math.Abs(x - gapAt) >= 3) { bounded = true; return (x + gapAt) / 2; }
+                    if (!ink && gapAt < 0) gapAt = x;
+                    if (ink) gapAt = -1;
+                }
+                x += dir;
+            }
+            return x;
+        }
+        int l = Side(-1, out bool lb), r = Side(1, out bool rb);
+        if (!(lb && rb) && !boxed) return null;
+        if (!lb) l = Math.Max(0, t.X - th / 3);
+        if (!rb) r = Math.Min(w, t.Right + th / 3);
+        if (r - l < t.Width || bot - top < t.Height) return null;
+        return Rectangle.FromLTRB(l, top, r, bot);
     }
 }

@@ -6,6 +6,26 @@ only fixes things.
 
 ## [Unreleased]
 
+- A found text is framed and clicked as the control it sits on: a drop-down with its arrow, a tab, a menu-bar item
+  (up to halfway to its neighbour). A click on the arrow or beside the caption is a hit, not a miss. Text in a page,
+  with nothing around it, is still framed by its words.
+- `match: "exact"` also matches one item of a menu bar or toolbar that OCR reads as one line ("Steam View Friends").
+- A found text no longer jitters: it stays put through a read that misses it or places it a few pixels off, keeps
+  to the occurrence it was on (not the page heading with the same words), and keeps the size of its control while
+  the pointer hovers it or its neighbours. Between reads it is followed in the app's own pixels, not the screen,
+  so the overlay's frame and mascot over it no longer throw the follower off; a highlighted neighbour no longer
+  counts as scrolling.
+- "Help" on the card is answered at once by the overlay itself: what to click, and where it is or why it is not
+  marked. A hint from the agent replaces it; the card never waits on an agent that is busy or gone.
+- "Scroll" is suggested only where there is something to scroll (a pane, or an area as big as a list), not for a
+  text missing from a menu bar.
+- Text looked for in the whole app searches a menu or dialog opened during the step first, then the main window,
+  then dialogs that were already open (the menu's OPTIONS, not the "Options" heading of an open settings window).
+  `validate` searches an app's menus and dialogs too.
+- An app that stops answering UI Automation (Steam while a menu is open) no longer stalls the others: windows are
+  tracked on their own thread, each anchor waits for its app on its own, `validate` gives up after 3 s with a
+  reason, and the card says the app is not answering instead of waiting silently.
+
 - `inspect(anchor | app)`: one look instead of `describe` + `screenshot` + `find_text`. The picture comes with
   numbered frames on the UI Automation elements (and, when UIA names next to nothing, on the text OCR reads), and
   each number carries an anchor that finds exactly that element. Look-alikes get `match: exact` and `index` counted
@@ -42,6 +62,19 @@ only fixes things.
   instead of hiding the card without a word; midway it still stops and hides (`outro` overrides either way).
 - The mascot at the end card (and while the card waits for more steps) walks over to the card and points at it,
   instead of staying where the last target was, over the app's toolbar.
+- Targets are framed at their own size by default (`shapes` left out, or `{type: "auto"}`): the element, the found
+  text, or the visible thing itself — a template's icon or the caption at a spot, measured from the window's
+  pixels (and re-measured while the lesson runs). Always a rectangle: no ring around a tall mixer name, no frame
+  the size of a template's margin. `validate` warns when a hand-made ring or frame does not fit its target.
+- A template that fits two places almost equally (a strip captured while selected, another strip selected now)
+  counts as not found instead of marking the wrong one.
+- A panel named "Title - detail" ("Mixer - Master", which becomes "Mixer - Insert 5" with the selection) is
+  anchored by its stable part ("Mixer -").
+- `anchor_at(app, at)`: the agent points at a spot on the inspect picture — anything without a number — and gets a
+  checked anchor: the UIA element under it, its text, a template grown until it occurs once (or the n-th of
+  identical look-alikes), else an offset marked fragile. No pixel measuring by the agent. On the local accuracy set
+  it closes every remaining miss: a dim "Slot 1", vertical mixer names, the tempo number.
+- `find: {template, index}`: the n-th good match of a template in reading order, as for text.
 - `inspect` numbers icons that have no text and no UIA name (FL's Play / Stop / Record), each with a template anchor
   cut from the picture. Found from edges alone (own code, about 50 ms for a whole FL window); a mark that occurs
   more than once (step buttons, knobs) gets no number — told apart by shape, ink colour and size.

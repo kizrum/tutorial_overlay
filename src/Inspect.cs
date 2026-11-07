@@ -42,6 +42,10 @@ internal static class Inspect
     /// <summary>0 = something to click or type into, 1 = a caption or picture, 2 = a container.</summary>
     internal static int Priority(string role) => Interactive.Contains(role) ? 0 : role is "Text" or "Image" ? 1 : 2;
 
+    /// <summary>The last picture inspect handed out per app (lower-case process): where it lies on screen and its scale,
+    /// so anchor_at takes points on that picture as they are.</summary>
+    internal static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (Rectangle area, float scale)> Pictures = new();
+
     public static (JsonObject info, byte[]? png) Run(JsonNode args)
     {
         var total = Stopwatch.StartNew();
@@ -195,7 +199,7 @@ internal static class Inspect
                         JsonObject? el = null;
                         if (scopeIdx >= 0)
                         {
-                            el = Disambiguate(nodes, scopeIdx);
+                            el = ContainerSegment(nodes, scopeIdx);
                             anchor["element"] = basePath.Count == 0 ? el.DeepClone() : new JsonArray(basePath.Select(n => n.DeepClone()).Append(el.DeepClone()).ToArray());
                         }
                         var find = new JsonObject { ["text"] = query };
@@ -263,7 +267,7 @@ internal static class Inspect
                     JsonObject? el = null;
                     if (ci >= 0)
                     {
-                        el = Disambiguate(nodes, ci);
+                        el = ContainerSegment(nodes, ci);
                         anchor["element"] = basePath.Count == 0 ? el.DeepClone() : new JsonArray(basePath.Select(n => n.DeepClone()).Append(el.DeepClone()).ToArray());
                     }
                     // no search to check it: the template is cut from this very spot (a perfect match here), and every
@@ -277,6 +281,7 @@ internal static class Inspect
 
             int maxEdge = J.Int(args, "maxEdge") ?? 1024;
             var png = Annotate(shot, area, items, maxEdge, out float scale);
+            if (J.Str(baseAnchor, "process") is string pname) Pictures[pname.ToLowerInvariant()] = (area, scale);
             // every item's anchor is the shared one plus {name, role} (or find:{text}); only what differs is listed,
             // so numbering everything stays affordable. A nested base path or within: each item carries its own anchor.
             bool composite = basePath.Count > 0 || J.Has(args, "within");
@@ -498,6 +503,33 @@ internal static class Inspect
         var idSeg = new JsonObject { ["automationId"] = t.AutomationId, ["role"] = role };
         if (byId.Count > 1) idSeg["index"] = Math.Max(0, byId.IndexOf(target));
         return idSeg;
+    }
+
+    /// <summary>
+    /// The segment for a panel a text / template / spot is looked for in. A panel named "Title - detail" ("Mixer -
+    /// Master") changes the detail with the app's state ("Mixer - Insert 5" once another strip is selected): when the
+    /// "Title -" part alone names one panel, that is what the anchor keeps.
+    /// </summary>
+    internal static JsonObject ContainerSegment(IReadOnlyList<Node> nodes, int idx)
+    {
+        var n = nodes[idx].Info;
+        int dash = n.Name.IndexOf(" - ", StringComparison.Ordinal);
+        if (dash > 0)
+        {
+            var stem = n.Name[..(dash + 2)];
+            var role = n.Role.Length > 0 ? n.Role : null;
+            var spec = new ElementSpec { Name = stem, Role = role };
+            var hits = new List<int>();
+            for (int i = 0; i < nodes.Count; i++) if (Resolver.Matches(spec, nodes[i].Info)) hits.Add(i);
+            int at = hits.IndexOf(idx);
+            if (at >= 0)
+            {
+                var seg = new JsonObject { ["name"] = stem, ["role"] = role };
+                if (hits.Count > 1) seg["index"] = at;   // several "Mixer - …" panes: the same one by its place in the tree
+                return seg;
+            }
+        }
+        return Disambiguate(nodes, idx);
     }
 
     /// <summary>

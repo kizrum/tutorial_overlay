@@ -391,6 +391,7 @@ internal static partial class Engine
         var s = t.Steps[idx];
         s.ResetRuntime();
         s.EnteredAt = DateTime.UtcNow;
+        Finder.StepSince = s.EnteredAt;
         // coming back must not bounce straight forward again because the step's goal is already true
         s.Review = back;
         _stepVersion++;
@@ -625,6 +626,7 @@ internal static partial class Engine
             MarkCount = marks.Count;
             var anchorList = anchors.ToList();
             Finder.SetWanted(anchorList);
+            Finder.SetMeasured(marks.Where(m => !m.Anchor.IsScreen && m.Anchor.Find == null && m.Anchor.HasPoint && m.Shapes.Any(x => x.Type == "auto")).Select(m => m.Anchor));
             Resolver.SetWanted(anchorList.Select(a => a.Find != null ? a.WithoutFind() : a),
                 t is { Active: true } && t.Defaults.Process != null ? new[] { t.Defaults.Process } : Array.Empty<string>());
 
@@ -634,6 +636,13 @@ internal static partial class Engine
             if (!hold.SequenceEqual(InputHook.HoldWatched)) InputHook.HoldWatched = hold;
             int fgPid = ForegroundPid();
             foreach (var m in marks) ComputeMark(m, step != null && step.Targets.Contains(m) ? t : null, fgPid, now);
+            if (Log.Verbose)
+                foreach (var m in marks)
+                {
+                    var g = m.Geo;
+                    string state = m.Visibility + (g != null ? $" @{g.A.P.X:0},{g.A.P.Y:0}" + (g.A.Visible is RectangleF v ? $" box {v.Width:0}x{v.Height:0}" : "") : "");
+                    if (!SeenState.TryGetValue(m.Id, out var was) || was != state) { SeenState[m.Id] = state; Log.Debug($"mark {m.Id}: {state}"); }
+                }
             if (step is { Sequence: true }) ApplySequence(step, now);
             WatchMissing(t, step, now);
             var visible = marks.Where(m => m.Geo != null).ToList();
@@ -776,6 +785,7 @@ internal static partial class Engine
     }
 
     private static IntPtr _lastAppFgWindow;
+    private static readonly Dictionary<string, string> SeenState = new();   // verbose log: a mark's visibility as it changes
 
     /// <summary>
     /// The foreground window, except that a screenshot tool in front does not count: while the user snips the
@@ -796,6 +806,9 @@ internal static partial class Engine
     {
         var fg = AppForegroundWindow();
         if (fg == IntPtr.Zero) return null;
+        // the window a target is looked for in is never in the way, even while its mark is out of sight for a moment
+        if (s.Targets.Any(m => !m.Satisfied && Resolver.Get((m.Anchor.Find != null ? m.Anchor.WithoutFind() : m.Anchor).Key) is { Found: true } wr && wr.Root == fg))
+            return null;
         var roots = s.Targets.Where(m => m.Geo != null && !m.Satisfied).Select(m => m.Geo!.A.Root).Where(r => r != IntPtr.Zero).ToHashSet();
         int[] pids = s.Targets.Where(m => m.Geo != null).SelectMany(m => m.Geo!.A.Pids).ToArray();
         if (roots.Count == 0 && _tut?.Defaults is { Process: not null } d && AnchorNow(d, out _) is AnchorGeo main0)
@@ -996,6 +1009,9 @@ internal static partial class Engine
             Scale = Native.ScaleAt(new PointF(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2)),
         };
         if (a.Path.Count > 0 && a.HasPoint) geo.View = bounds;   // a point inside a pane: it can scroll out of view
+        // a spot (an offset): the visible thing there, as last measured, is what an "auto" shape frames
+        if (a.Find == null && a.HasPoint && Finder.VisibleAtSpot(a) is RectangleF spot)
+            geo.Visible = new RectangleF(frame.X + spot.X, frame.Y + spot.Y, spot.Width, spot.Height);
         if (a.Find != null)
         {
             var fr = Finder.Get(a.Key);
@@ -1017,6 +1033,8 @@ internal static partial class Engine
             // the found piece itself (hit is its centre): what a shape without coordinates frames
             if (fr.Size.Width > 0 && fr.Size.Height > 0)
                 geo.Found = new RectangleF(hit.X - fr.Size.Width / 2, hit.Y - fr.Size.Height / 2, fr.Size.Width, fr.Size.Height);
+            if (fr.Found && fr.Visible is RectangleF vis) geo.Visible = new RectangleF(frame.X + vis.X, frame.Y + vis.Y, vis.Width, vis.Height);
+            else if (fr.Box is RectangleF bx) geo.Visible = new RectangleF(hit.X + bx.X, hit.Y + bx.Y, bx.Width, bx.Height);
             float px = a.Find.Axis == "y" ? o.X : hit.X, py = a.Find.Axis == "x" ? o.Y : hit.Y;
             geo.P = new PointF(px + a.Dx, py + a.Dy);
             // the area searched is the area it can scroll out of
@@ -1215,7 +1233,10 @@ internal static partial class Engine
 
     /// <summary>The area a find anchor is looked for in (the element, or its "within" part), on screen.</summary>
     /// <summary>A find anchor whose search area is a scrollable part (an element or a part of it), not a whole window.</summary>
-    internal static bool ScrollsToFind(AnchorSpec a) => a.Find != null && (a.Path.Count > 0 || a.Find.Within != null);
+    // a pane (a UIA path), or a part of a window big enough to be a list (an app's own browser); a strip such as
+    // a menu bar or toolbar ("within" 300x60) does not scroll
+    internal static bool ScrollsToFind(AnchorSpec a) => a.Find != null
+        && (a.Path.Count > 0 || a.Find.Within is RectangleF w && Math.Min(w.Width, w.Height) >= 120);
 
     private static RectangleF? FindArea(AnchorSpec a)
     {
@@ -1700,6 +1721,19 @@ internal static partial class Engine
 
     // =========================================================== help
 
+    /// <summary>The card's own answer to "help": what to click, and where it is or why it is not marked.</summary>
+    private static string LocalHint(Step s, bool listening)
+    {
+        var t = Settings.Current.Text;
+        var open = s.Targets.Where(m => !m.Satisfied).ToList();
+        var m0 = open.FirstOrDefault(m => m.Visibility == "visible") ?? open.FirstOrDefault();
+        string name = m0?.Label ?? s.Title ?? "";
+        string text = m0 is { Visibility: "visible" } || open.Count == 0
+            ? (open.Count == 0 ? s.Text ?? s.Title ?? "" : string.Format(t.HelpVisible, name))
+            : string.Format(t.HelpHidden, name, TargetIssue(s) ?? t.IssueMissing);
+        return listening ? text + " " + t.HelpAgentToo : text;
+    }
+
     /// <summary>Why the user can't see this step's targets (null when at least one is visible).</summary>
     private static string? TargetIssue(Step s)
     {
@@ -1715,11 +1749,14 @@ internal static partial class Engine
             "scroll-down" => string.Format(t.ScrollIssue, t.ScrollDown.ToLowerInvariant()),
             "scroll-left" => string.Format(t.ScrollIssue, t.ScrollLeft.ToLowerInvariant()),
             "scroll-right" => string.Format(t.ScrollIssue, t.ScrollRight.ToLowerInvariant()),
-            "scroll-unknown" or "template not visible" or "text not visible" => t.ScrollFind,
+            "scroll-unknown" => t.ScrollFind,
+            // not seen: "scroll" only where there is something to scroll, otherwise it is just not on screen
+            "template not visible" or "text not visible" => open[0].ScrollHint != null ? t.ScrollFind : t.IssueMissing,
             "occluded" => t.IssueOccluded,
             "inactive" => t.IssueInactive,
             "offscreen" => t.IssueOffscreen,
             "process not running" => t.IssueNotRunning,
+            "not answering" => t.IssueNotAnswering,
             "elevated" => t.IssueElevated,
             "resolving" or "searching" => null,
             _ => t.IssueMissing,
@@ -1742,6 +1779,12 @@ internal static partial class Engine
             var s = t is { State: TutorialState.Running } ? t.Current : null;
             if (s == null) return;
             s.HelpPending = true;
+            // the card answers at once with what the overlay knows itself: the user is never left waiting on an
+            // agent that is thinking, gone, or was never there; a hint from the agent replaces it
+            bool listening = t!.Owner != null && McpServer.Lease.Holder == t.Owner;
+            s.Hint = LocalHint(s, listening);
+            s.HintTitle = Settings.Current.Text.HelpTitle;
+            s.HighlightUntil = DateTime.UtcNow.AddSeconds(6); s.NextPing = default;
             s.Sketch = sketch is { Empty: false } ? sketch.Strokes.ToList() : null;
             if (reason == "cant_find") { s.HighlightUntil = DateTime.UtcNow.AddSeconds(6); s.NextPing = default; }
             Native.GetCursorPos(out var cur);

@@ -46,7 +46,7 @@ internal static class Tools
     private const string SameAnchor = "anchor, same format as draw.anchor";
 
     private const string ShapesDesc =
-        "coords rel. to anchor point, physical px: circle{x,y,r} (no x/y: ring around element), rect{x,y,w,h,pad,radius} (no w/h: frame element), " +
+        "auto (DEFAULT: leave shapes out — the target framed at its own size, measured live), coords rel. to anchor point, physical px: circle{x,y,r} (no x/y: ring around element), rect{x,y,w,h,pad,radius} (no w/h: frame element), " +
         "arrow{from:[x,y]|'nw'|'n'…, to, length}, badge{text}, label{text} (auto-placed), info{title,text}, check{}, " +
         "checkbox{x,y,w,h} (✓ when target done), button{text,id,action:'done'|'next'|'back'|'skip'|'stop'|'undo'|'dismiss',style} (real clickable window → 'button' event), " +
         "path{points:[[x,y],…], smooth} (trajectory to follow: dashed, direction arrows, a running light), dim{opacity}. Common: color ('#RRGGBB'|accent|red|orange|yellow|green|teal|blue|purple|white), thickness, size, target:false.";
@@ -95,6 +95,9 @@ internal static class Tools
             Obj(("anchor", T("object", SameAnchor)), ("app", T("string", "process name, instead of anchor")), ("within", T("array", "[x,y,w,h] part of the element")),
                 ("ocr", T("boolean", "default: when UIA names fewer than 8 buttons/captions")), ("lang", T("string", "OCR language")),
                 ("maxItems", T("integer", "safety stop, default all")), ("maxEdge", T("integer", $"image long edge, default {DefaultMaxEdge}")))),
+        Tool("anchor_at", "Point at something on the last inspect picture (no number on it: a dim caption, a vertical name, a number in a box) and get a checked anchor: the element / text under it, else a template that occurs once, else a fragile offset. Pass several points at once.",
+            Obj(("app", T("string", "process name")), ("at", T("array", "[x,y] or [[x,y],…] on the inspect picture")), ("space", T("string", "'image' (default) | 'screen' for screen pixels")),
+                ("anchor", T("object", "instead of app: " + SameAnchor)))),
         Tool("screenshot", "Image of an anchor's rect or a screen area, without the overlay's drawings, plus image→screen mapping. " +
             "Prefer an element anchor over the whole window: image tokens grow with size.",
             Obj(("anchor", T("object", SameAnchor)), ("rect", T("array", "[x,y,w,h] screen rect")), ("pad", T("integer", "px around the anchor rect")),
@@ -158,6 +161,7 @@ internal static class Tools
         ["status"] = ("Tutorial status", true, false, true),
         ["describe"] = ("Describe an app's UI", true, false, true),
         ["inspect"] = ("Inspect an app with numbered elements", true, false, true),
+        ["anchor_at"] = ("Anchor for a pointed spot", false, false, true),
         ["screenshot"] = ("Screenshot", true, false, true),
         ["template"] = ("Remember a UI picture", false, false, true),
         ["hint"] = ("Show a hint", false, false, true),
@@ -225,6 +229,7 @@ internal static class Tools
                 "status" => Text(Engine.Status()),
                 "describe" => TextRaw(await Task.Run(() => Describe.Run(args, ct), ct)),
                 "inspect" => AreaResult(await Task.Run(() => Inspect.Run(args), ct)),
+                "anchor_at" => AnchorAtResult(await Task.Run(() => AnchorAt.Run(args), ct)),
                 "screenshot" => await Task.Run(() => Screenshot(args), ct),
                 "events" => await EventsTool(args, ct),
                 "pick" => Text(await Engine.Pick(args, ct)),
@@ -275,6 +280,13 @@ internal static class Tools
         ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = "error: " + msg }),
         ["isError"] = true,
     };
+
+    private static JsonObject AnchorAtResult((JsonObject info, List<byte[]> pngs) r)
+    {
+        var content = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = Json(r.info) });
+        foreach (var png in r.pngs) content.Add(new JsonObject { ["type"] = "image", ["data"] = Convert.ToBase64String(png), ["mimeType"] = "image/png" });
+        return new JsonObject { ["content"] = content };
+    }
 
     private static JsonObject AreaResult((JsonObject info, byte[]? png) r)
     {

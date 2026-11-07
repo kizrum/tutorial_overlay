@@ -19,8 +19,10 @@ restart Claude Code. Do not try to install or download it yourself.
 1. **Look first.** `inspect(app)` returns a picture with numbered frames and a ready anchor for every number —
    UIA elements, and for apps that draw their own interface (FL Studio, games, many audio and 3D tools) the text OCR
    reads there and icons without text (numbered by what you see — they have no name; their anchor is a template). Use the anchor of the number you want as is. Inspect a smaller element (or `within`) when the picture
-   is too reduced to read. For what has no number, `describe(app)` gives the UIA tree, `find_text` searches a caption,
-   and `pick(anchor)` lets the user click the spot — you get the exact offset. If `inspect` is not among the tools
+   is too reduced to read. For what you see but has no number (a dim caption, a vertical name, a number in a box),
+   call `anchor_at(app, at: [x, y])` with the spot on that picture — several spots in one call: it returns a checked
+   anchor and says how sturdy it is (element / text / template, or a fragile offset). Do not measure pixels yourself.
+   Without `anchor_at` (an older TutorialOverlay): `find_text` for a caption, or `pick(anchor)` to let the user click. If `inspect` is not among the tools
    (an older TutorialOverlay), start with `describe(app)` and `screenshot(anchor)` instead.
 2. **Write the whole path ahead.** Targets in menus and dialogs that are not open yet get anchors from what you
    know (`find: {text: 'General settings'}` or an element name; where versions name it differently, list the full
@@ -29,20 +31,32 @@ restart Claude Code. Do not try to install or download it yourself.
    the lesson runs without waiting on you. If the target is not where it should be (a window opened without it, or
    an open panel or list does not show it after a few seconds), a `target_not_found` event
    brings that window's numbered contents with ready anchors: pick the right one and call `retarget` — or tell the
-   user with `hint` if the path itself was wrong. Never guess the nearest item. (Without `retarget`, an older
+   user with `hint` if the path itself was wrong. Never guess the nearest item. Never invent the wording of a list
+   you have not seen (a drop-down's options, a context menu): write that step as "open the list", and when it is
+   open read it (`find_text`, `inspect`) and `append_steps` with the real item. (Without `retarget`, an older
    TutorialOverlay: watch `anchor_found`/`no_effect` events, then `describe` the new window and `append_steps`.)
-3. **One small action per step**, in the user's words: what to click and where it is.
-4. **Teach, not just click.** Put the reason in each step's `why`: what the tool does, why this way, the usual
+3. **Leave the outline to the overlay.** Give a target no `shapes` (or `{type: 'auto'}`): it is framed at its own
+   size — the element, the found text, the icon, the caption at a spot, measured live. Your own shapes are for
+   arrows, labels and notes, not for the outline; `validate` warns when a hand-made ring or frame does not fit the
+   target. (An older TutorialOverlay has no `auto`: frame elements and texts with `rect` and no size.) A caption on
+   a bigger control (a tab, a drop-down with its arrow, a menu-bar item) is framed and clicked as that control
+   (`validate` shows it as `visible`). (An older TutorialOverlay frames only the words: there, give a `rect` the
+   size of the control, or a click on the arrow beside the text is a miss.)
+4. **One small action per step**, in the user's words: what to click and where it is.
+5. **Teach, not just click.** Put the reason in each step's `why`: what the tool does, why this way, the usual
    mistake. Keep `say` (the mascot's line) under 60 characters.
-5. **Say when a step is done.** No `until`: done when all targets are clicked. Otherwise pick the condition that
+6. **Say when a step is done.** No `until`: done when all targets are clicked. Otherwise pick the condition that
    matches the result: `appear` for a window that opens, `uia` for a checkbox or toggle state, `pixel` for a cell
    that lights up, `key` for a shortcut, `drag`, `scroll`, `trace`. Use `opens` on a target that must open a window.
-6. **Check before starting:** `validate(spec)` resolves every anchor. Fix errors; warnings on later steps often
-   mean a window an earlier step opens.
-7. **Start and follow:** `start_tutorial(spec)`, then `events(since, timeoutMs)` to see hits, misses, `no_effect`
-   and `help`. For a long lesson use `keepOpen: true` and `append_steps`.
-8. **Help:** on a `help` event, answer with `hint(text)` right in the card; explain the cause, not only the click.
-9. **Finish:** with `keepOpen`, when no more steps will come, call `stop_tutorial` after the last step: the user
+7. **Check before starting:** `validate(spec)` resolves every anchor. Fix errors; warnings on later steps often
+   mean a window an earlier step opens. Never start a step you have not validated, even a quick test one.
+8. **Start and follow:** `start_tutorial(spec)`, then `events(since, timeoutMs)` to see hits, misses, `no_effect`
+   and `help`. For a long lesson use `keepOpen: true` and `append_steps`. While the lesson runs, keep an `events`
+   long-poll going all the time and do nothing slow in between (no builds, no restarts, no long reading): the user
+   is waiting on you. A miss right beside the target that did what the step wanted (the list opened, the page
+   changed): check it and `complete_step` instead of leaving the user stuck.
+9. **Help:** on a `help` event, answer with `hint(text)` right in the card; explain the cause, not only the click.
+10. **Finish:** with `keepOpen`, when no more steps will come, call `stop_tutorial` after the last step: the user
    gets the end card (done, save, repeat) instead of a card that waits. Never stop a lesson without telling the user
    why. (An older TutorialOverlay only hides the card on `stop_tutorial`: say "that's all" with `hint` first.) Offer
    to save the tutorial (the end card does too), then call `release`.

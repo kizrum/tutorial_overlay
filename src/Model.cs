@@ -327,7 +327,7 @@ internal sealed class ShapeSpec
     public List<PointF>? Points;     // path: points relative to the anchor point
     public bool Smooth = true;       // path: a curve through the points (false: straight segments)
 
-    public bool IsTargetDefault => Type is "circle" or "rect" or "checkbox";
+    public bool IsTargetDefault => Type is "circle" or "rect" or "checkbox" or "auto";
     public bool IsTarget => Target ?? IsTargetDefault;
 
     public static ShapeSpec Parse(JsonNode n)
@@ -336,6 +336,7 @@ internal sealed class ShapeSpec
         t = t switch
         {
             "frame" or "box" or "rectangle" or "border" or "outline" => "rect",
+            "fit" or "target" => "auto",
             "number" or "step" or "num" => "badge",
             "text" or "caption" or "hint" or "tooltip" => "label",
             "darken" or "shade" or "spotlight" => "dim",
@@ -452,7 +453,8 @@ internal sealed class Mark
             // sensible default: frame around a UI element, ring around a bare point
             // a point (an offset into an element) gets a ring; an element or a found text / template, a frame round it
             bool hasBounds = !m.Anchor.HasPoint && (m.Anchor.Path.Count > 0 || m.Anchor.HasBounds);
-            m.Shapes.Add(new ShapeSpec { Type = hasBounds ? "rect" : "circle" });
+            // no shapes: the target framed at its own size (an element, a found text, the visible thing at a spot)
+            m.Shapes.Add(new ShapeSpec { Type = "auto", Pad = 3 });
             if (J.Str(n, "number") is string num) m.Shapes.Add(new ShapeSpec { Type = "badge", Text = num });
             if ((J.Str(n, "hint") ?? J.Str(n, "caption")) is string hint) m.Shapes.Add(new ShapeSpec { Type = "label", Text = hint });
             if (J.Bool(n, "arrow") == true) m.Shapes.Add(new ShapeSpec { Type = "arrow" });

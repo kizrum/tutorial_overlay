@@ -432,6 +432,26 @@ internal static unsafe class Ocr
 
     // =========================================================== matching
 
+    /// <summary>
+    /// Runs of words of a line set apart by gaps over half the text height (a word space is about a third of
+    /// it): the separate items of a menu bar or toolbar that OCR joins into one line.
+    /// </summary>
+    internal static IEnumerable<(int from, int to)> Items(OcrLine line)
+    {
+        int start = 0;
+        for (int i = 1; i <= line.Words.Count; i++)
+        {
+            if (i < line.Words.Count)
+            {
+                var a = line.Words[i - 1].Rect; var b = line.Words[i].Rect;
+                float h = Math.Max(a.Height, b.Height);
+                if (b.X - a.Right <= h * 0.55f) continue;
+            }
+            yield return (start, i);
+            start = i;
+        }
+    }
+
     private static string Norm(string s) => Regex.Replace(s.ToLowerInvariant().Replace('ё', 'е'), @"\s+", " ").Trim();
 
     /// <summary>
@@ -480,7 +500,18 @@ internal static unsafe class Ocr
             if (match == "exact")
             {
                 int d = Distance(text, q, tol + 1);
-                if (d <= tol) res.Add(new TextMatch(line.Text, line.Bounds, d / (float)q.Length));
+                if (d <= tol) { res.Add(new TextMatch(line.Text, line.Bounds, d / (float)q.Length)); continue; }
+                // a menu bar or a toolbar is read as one line ("Steam View Friends Games Help"): its items, set apart
+                // by gaps wider than a word space, each count as a whole line of their own
+                foreach (var (from, to) in Items(line))
+                {
+                    if (from == 0 && to == line.Words.Count) continue;
+                    var it = string.Join(" ", line.Words.Skip(from).Take(to - from).Select(w => Norm(w.Text)));
+                    int di = Distance(it, q, tol + 1);
+                    if (di <= tol)
+                        res.Add(new TextMatch(string.Join(" ", line.Words.Skip(from).Take(to - from).Select(w => w.Text)),
+                            OcrLine.Union(line.Words.Skip(from).Take(to - from).Select(w => w.Rect)), di / (float)q.Length));
+                }
                 continue;
             }
             int at = text.IndexOf(q, StringComparison.Ordinal);

@@ -81,7 +81,7 @@ internal sealed class Template
 /// <summary>Where a template was last found, relative to its window's frame (so marks follow window moves).</summary>
 /// <summary>Where a template / text was last found; PrevRel is the sighting before LastRel (which way it was moving).</summary>
 /// <summary>Size: of the found text / template piece (what a shape without coordinates frames); kept while it is out of view.</summary>
-internal sealed record FindResult(bool Found, PointF Rel, float Score, PointF? LastRel, DateTime At, PointF? PrevRel = null, DateTime LastSeenAt = default, bool Moving = false, string? Went = null, SizeF Size = default, IntPtr Root = default);
+internal sealed record FindResult(bool Found, PointF Rel, float Score, PointF? LastRel, DateTime At, PointF? PrevRel = null, DateTime LastSeenAt = default, bool Moving = false, string? Went = null, SizeF Size = default, IntPtr Root = default, RectangleF? Visible = null, RectangleF? Box = null);
 
 /// <summary>
 /// Visual anchors: finds templates inside the anchor's element using the window's own pixels (PrintWindow),
@@ -92,6 +92,8 @@ internal static class Finder
 {
     public static readonly ConcurrentDictionary<string, Template> Templates = new();
     private static readonly ConcurrentDictionary<string, FindResult> Results = new();
+    /// <summary>The biggest control measured around a text, and where (window-relative) it was.</summary>
+    private static readonly ConcurrentDictionary<string, (PointF at, RectangleF box)> Boxes = new();
     private static readonly ConcurrentDictionary<string, DateTime> TextSearchedAt = new();
     /// <summary>The app is not in front (its marks are usually hidden): templates are looked for only this often.</summary>
     private const int TemplateIdleMs = 1000;
@@ -150,6 +152,13 @@ internal static class Finder
                 try { Results[a.Key] = Search(a, Get(a.Key)); }
                 catch (Exception e) { Log.Debug("finder: " + e.Message); }
             }
+            // spots framed at their own size: re-measured now and then while their app is in front
+            foreach (var a in _measured)
+            {
+                if (!AppInFront(a)) continue;
+                if (Measured.TryGetValue(MeasureKey(a), out var mm) && (DateTime.UtcNow - mm.at).TotalMilliseconds < MeasureEveryMs) continue;
+                try { MeasureSpot(a); } catch (Exception e) { Log.Debug("measure: " + e.Message); }
+            }
             var keys = _wanted.Select(a => a.Key).ToHashSet();
             foreach (var k in LastLook.Keys.Where(k => !keys.Contains(k)).ToList()) LastLook.TryRemove(k, out _);
             Wake.WaitOne(_wanted.Length == 0 ? 500 : 180);
@@ -167,20 +176,99 @@ internal static class Finder
         if (a.Find?.Text == null || a.Process == null || a.Window != null || a.Title != null || a.WindowClass != null || a.Hwnd != null || a.Path.Count > 0)
             return SearchIn(a, prev);
         var pids = Resolver.Pids(a.Process);
-        var popups = Resolver.Popups.Where(w => pids.Contains(w.Pid) && Native.IsWindowVisible(w.Hwnd)).Select(w => w.Hwnd).ToList();
+        // the app's windows but its largest per process (as Resolver.Popups, but also for an app no lesson watches:
+        // validate before the start)
+        var popups = Resolver.RecentWindows(400)
+            .Where(w => pids.Contains(w.Pid) && w.Frame.Width > 1 && w.Frame.Height > 1 && !Native.IsIconic(w.Hwnd))
+            .GroupBy(w => w.Pid)
+            .SelectMany(g => g.OrderByDescending(w => (long)w.Frame.Width * w.Frame.Height).Skip(1))
+            .Where(w => Native.IsWindowVisible(w.Hwnd)).Select(w => w.Hwnd).ToList();
         if (popups.Count == 0) return SearchIn(a, prev);
-        if (prev is { Found: true, Root: var was } && was != IntPtr.Zero && popups.Remove(was)) popups.Insert(0, was);
-        bool mainFirst = prev is { Found: true } && prev.Root == IntPtr.Zero;
-        FindResult? main = mainFirst ? SearchIn(a, prev) : null;
-        if (main is { Found: true }) return main;
-        foreach (var h in popups)
+        // a menu or dialog opened during this step (by the click the step asks for, or the one that ended the
+        // previous step) comes first: that is where the user is looking. Then the main window, and only then a dialog
+        // that was already open — its "Options" heading is not the menu bar's OPTIONS
+        var fromStep = StepSince.AddMilliseconds(-OpenedBeforeStepMs);
+        bool Fresh(IntPtr h) => Resolver.Since.TryGetValue(h, out var at) && at >= fromStep;
+        var fresh = popups.Where(Fresh).ToList();
+        var stale = popups.Where(h => !Fresh(h)).ToList();
+        if (prev is { Found: true, Root: var was } && was != IntPtr.Zero && fresh.Remove(was)) fresh.Insert(0, was);
+        foreach (var h in fresh)
         {
             var r = SearchIn(a.WithHwnd(h), null);
             if (r.Found) return r with { Root = h };
         }
-        var miss = main ?? SearchIn(a, prev);
+        var main = SearchIn(a, prev is { Root: var pr } && pr == IntPtr.Zero ? prev : null);
+        if (main.Found) return main;
+        foreach (var h in stale)
+        {
+            var r = SearchIn(a.WithHwnd(h), null);
+            if (r.Found) return r with { Root = h };
+        }
+        var miss = main;
         // last seen in a menu: a miss still belongs to that window (its last position is relative to it)
         return prev is { Root: var seenIn } && seenIn != IntPtr.Zero && miss.Root == IntPtr.Zero ? miss with { Root = seenIn } : miss;
+    }
+
+    /// <summary>How long a text found a moment ago stays put through reads that miss it.</summary>
+    private const int HoldMs = 1200;
+
+    /// <summary>When the current step began (MaxValue: no lesson running — then the main window comes first).</summary>
+    public static DateTime StepSince = DateTime.MaxValue;
+    private const int OpenedBeforeStepMs = 5000;
+
+    /// <summary>A template fits another place (half a template or more away) almost as well as the best one.</summary>
+    private const float AmbiguousMargin = 0.012f;
+
+    private static bool Ambiguous(Bitmap shot, Template tpl, int bx, int by, float best, float maxScore)
+    {
+        foreach (var c in MatchRanked(shot, tpl))
+        {
+            if (Math.Abs(c.x - bx) < tpl.FW / 2 && Math.Abs(c.y - by) < tpl.FH / 2) continue;   // the best place itself
+            if (c.score <= maxScore && c.score - best < AmbiguousMargin) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// The visible thing at a spot of a picture (a template's icon, a caption under a pointed spot), relative to the
+    /// window frame (dx, dy: where the picture's corner lies in it): what a shape of its own size frames.
+    /// </summary>
+    internal static RectangleF? VisibleAt(Bitmap pic, Point at, float dx, float dy)
+    {
+        var gray = Template.GrayFull(pic);
+        var box = Icons.TargetBox(gray, pic.Width, pic.Height, at) ?? Icons.TargetBox(gray, pic.Width, pic.Height, at, contrast: 15);
+        return box is Rectangle b ? new RectangleF(b.X + dx, b.Y + dy, b.Width, b.Height) : null;
+    }
+
+    private static volatile AnchorSpec[] _measured = Array.Empty<AnchorSpec>();
+    private static readonly ConcurrentDictionary<string, (RectangleF rel, DateTime at)> Measured = new();
+    private const int MeasureEveryMs = 1500;
+
+    /// <summary>Spots (offset anchors) whose marks frame the visible thing there: measured now and then.</summary>
+    public static void SetMeasured(IEnumerable<AnchorSpec> anchors) =>
+        _measured = anchors.GroupBy(MeasureKey).Select(g => g.First()).ToArray();
+
+    private static string MeasureKey(AnchorSpec a) => a.Key + "|" + a.Origin + "|" + a.Dx + "," + a.Dy;
+
+    /// <summary>The visible thing at an offset anchor's spot, relative to its window frame, when measured.</summary>
+    public static RectangleF? VisibleAtSpot(AnchorSpec a) => Measured.TryGetValue(MeasureKey(a), out var m) ? m.rel : null;
+
+    /// <summary>Measures the thing at an offset anchor's spot from the window's own pixels (validate uses it too).</summary>
+    public static RectangleF? MeasureSpot(AnchorSpec a)
+    {
+        var r = Resolver.Get(a.Key) ?? Resolver.ResolveNow(a);
+        if (!r.Found || !Native.IsWindow(r.Root) || Native.IsIconic(r.Root)) return null;
+        var frame = Native.FrameRect(r.Root);
+        RectangleF b = r.Rel is RectangleF rel ? new RectangleF(frame.X + rel.X, frame.Y + rel.Y, rel.Width, rel.Height) : a.Client ? Native.ClientScreenRect(r.Root) : frame;
+        var o = a.OriginOf(b);
+        var p = new PointF(o.X + a.Dx, o.Y + a.Dy);
+        var around = Rectangle.Intersect(Rectangle.Round(new RectangleF(p.X - 200, p.Y - 200, 400, 400)), frame);
+        if (around.Width < 8 || around.Height < 8) return null;
+        using var shot = ScreenCapture.CaptureWindow(r.Root, around);
+        if (shot == null) return null;
+        var vis = VisibleAt(shot, new Point((int)Math.Round(p.X - around.X), (int)Math.Round(p.Y - around.Y)), around.X - frame.X, around.Y - frame.Y);
+        if (vis is RectangleF v) Measured[MeasureKey(a)] = (v, DateTime.UtcNow);
+        return vis;
     }
 
     /// <summary>
@@ -296,19 +384,55 @@ internal static class Finder
             }
             else
             {
-                // text: the centre of the n-th occurrence, reading order
+                // one read that missed it (a highlighted tab read as "In бате" once) is not a reason to drop or move
+                // the mark: what was found a moment ago stays for a little while
+                if (found.Count <= f.Nth && prev is { Found: true } && !moving && (DateTime.UtcNow - prev.At).TotalMilliseconds < HoldMs)
+                    return prev;
                 if (found.Count <= f.Nth) { Tracks.TryRemove(a.Key, out _); return Miss(); }
                 m = found[f.Nth].Rect;
+                // seen a moment ago: the same occurrence, not whichever comes first in this read (the page's heading
+                // "In Game" above the tab "In Game")
+                if (prev is { Found: true } && found.Count > 1)
+                {
+                    var was = new PointF(frame.X + prev.Rel.X - readArea.X, frame.Y + prev.Rel.Y - readArea.Y);
+                    var near = found.OrderBy(x => Math.Abs(x.Rect.X + x.Rect.Width / 2 - was.X) + Math.Abs(x.Rect.Y + x.Rect.Height / 2 - was.Y)).First();
+                    if (Math.Abs(near.Rect.X + near.Rect.Width / 2 - was.X) + Math.Abs(near.Rect.Y + near.Rect.Height / 2 - was.Y) < near.Rect.Height * 3)
+                        m = near.Rect;
+                }
             }
             var c = new PointF(readArea.X + m.X + m.Width / 2, readArea.Y + m.Y + m.Height / 2);
             // the tracker moved it since this shot was taken: its position is newer than ours
             if (Tracks.TryGetValue(a.Key, out var live) && live.MovedAt > shotAt && prev is { Found: true }) return prev;
             StartTracking(a.Key, shot, m, readArea, area, r.Root);
-            return new FindResult(true, new PointF(c.X - frame.X, c.Y - frame.Y), 0, last, DateTime.UtcNow, Size: m.Size);
+            // the control the words sit on (a tab, a drop-down with its arrow): what is framed and clicked,
+            // relative to the words' centre so it moves with them while they are followed
+            RectangleF? box = null;
+            try
+            {
+                var tr = Rectangle.Round(m);
+                if (Icons.ControlBox(Template.GrayFull(shot), shot.Width, shot.Height, tr) is Rectangle cb)
+                    box = new RectangleF(cb.X - (m.X + m.Width / 2), cb.Y - (m.Y + m.Height / 2), cb.Width, cb.Height);
+            }
+            catch { }
+            // the same place as a moment ago: the frame keeps the biggest control measured there. Hovered, a tab
+            // shows its box; left alone it is a flat row — the frame must not jump between the two
+            // (remembered per place, so it also outlives a moment the word was not seen)
+            var here0 = new PointF(c.X - frame.X, c.Y - frame.Y);
+            // OCR places the same words a few pixels apart from one read to the next (up to most of a line): within
+            // a line's height of where it was, it is the same place — the mark does not twitch with every read
+            // (scrolling is followed by the tracker, which moves it for real)
+            float same = Math.Max(4, m.Height * 0.9f);
+            if (prev is { Found: true } && Math.Abs(prev.Rel.X - here0.X) <= same && Math.Abs(prev.Rel.Y - here0.Y) <= same)
+                here0 = prev.Rel;
+            if (Boxes.TryGetValue(a.Key, out var kept) && Math.Abs(kept.at.X - here0.X) <= same && Math.Abs(kept.at.Y - here0.Y) <= same
+                && (box is not RectangleF nb || nb.Width * nb.Height < kept.box.Width * kept.box.Height))
+                box = kept.box;
+            if (box is RectangleF keep) Boxes[a.Key] = (here0, keep);
+            return new FindResult(true, here0, 0, last, DateTime.UtcNow, Size: m.Size, Box: box);
         }
         // where it was a moment ago, first: a search around it costs a few milliseconds, the whole window ~200 ms —
         // and a template target is looked for on every pass while its app is in front
-        if (prev is { Found: true } && prev.Root == IntPtr.Zero)
+        if (prev is { Found: true } && prev.Root == IntPtr.Zero && f.Nth == 0)
         {
             var was = new PointF(frame.X + prev.Rel.X - area.X, frame.Y + prev.Rel.Y - area.Y);
             var near = Rectangle.Intersect(Rectangle.Round(new RectangleF(was.X - tpl.FW - 48, was.Y - tpl.FH - 48, 2 * tpl.FW + 96, 2 * tpl.FH + 96)),
@@ -322,9 +446,21 @@ internal static class Finder
                 if (ps <= f.MaxScore)
                 {
                     var hitNear = new PointF(area.X + near.X + px + tpl.FW / 2f, area.Y + near.Y + py + tpl.FH / 2f);
-                    return new FindResult(true, new PointF(hitNear.X - frame.X, hitNear.Y - frame.Y), ps, last, DateTime.UtcNow, Size: new SizeF(tpl.FW, tpl.FH));
+                    return new FindResult(true, new PointF(hitNear.X - frame.X, hitNear.Y - frame.Y), ps, last, DateTime.UtcNow, Size: new SizeF(tpl.FW, tpl.FH),
+                                          Visible: VisibleAt(part, new Point(px + tpl.FW / 2, py + tpl.FH / 2), area.X + near.X - frame.X, area.Y + near.Y - frame.Y));
                 }
             }
+        }
+        // one of several look-alikes (a mixer strip): the n-th good match in reading order, like a text's index
+        if (f.Nth > 0)
+        {
+            var good = MatchRanked(shot, tpl, f.Nth + 12).Where(c => c.score <= f.MaxScore)
+                .OrderBy(c => Math.Round(c.y / 8.0)).ThenBy(c => c.x).ToList();
+            if (good.Count <= f.Nth) return Miss();
+            var g = good[f.Nth];
+            var hitN = new PointF(area.X + g.x + tpl.FW / 2f, area.Y + g.y + tpl.FH / 2f);
+            return new FindResult(true, new PointF(hitN.X - frame.X, hitN.Y - frame.Y), g.score, last, DateTime.UtcNow, Size: new SizeF(tpl.FW, tpl.FH),
+                                  Visible: VisibleAt(shot, new Point(g.x + tpl.FW / 2, g.y + tpl.FH / 2), area.X - frame.X, area.Y - frame.Y));
         }
         var img = Template.Gray(shot, out int iw, out int ih);
         // the same picture of the same place (relative to the window) as last time: the answer is the same too
@@ -336,6 +472,13 @@ internal static class Finder
             return look.res.Found ? look.res with { LastRel = last, At = DateTime.UtcNow } : Miss();
         long fullAt = Environment.TickCount64;
         var (bx, by, score) = Match(img, iw, ih, tpl, Template.GrayFull(shot), shot.Width, shot.Height);
+        // a near tie between two places means the picture fits both (a strip captured while selected, and another
+        // strip selected now): a mark there could be on the wrong one, so it counts as not found
+        if (score <= f.MaxScore && Ambiguous(shot, tpl, bx, by, score, f.MaxScore))
+        {
+            if (Log.Verbose) Log.Debug($"template {f.Template}: two places fit almost equally — not trusted");
+            score = 1;
+        }
         if (Log.Verbose) Log.Debug($"template {f.Template}: whole area {shot.Width}x{shot.Height} in {Environment.TickCount64 - fullAt} ms, score {score:0.000}");
         FindResult res;
         if (score > f.MaxScore) res = Miss();
@@ -344,7 +487,8 @@ internal static class Finder
             // the centre of the match (full-size pixels), like a found text's: a ring without coordinates lands on it,
             // and a piece cut from the very edge of its pane does not count as "scrolled past the edge"
             var hit = new PointF(area.X + bx + tpl.FW / 2f, area.Y + by + tpl.FH / 2f);
-            res = new FindResult(true, new PointF(hit.X - frame.X, hit.Y - frame.Y), score, last, DateTime.UtcNow, Size: new SizeF(tpl.FW, tpl.FH));
+            res = new FindResult(true, new PointF(hit.X - frame.X, hit.Y - frame.Y), score, last, DateTime.UtcNow, Size: new SizeF(tpl.FW, tpl.FH),
+                                 Visible: VisibleAt(shot, new Point(bx + tpl.FW / 2, by + tpl.FH / 2), area.X - frame.X, area.Y - frame.Y));
         }
         LastLook[a.Key] = (hash, tpl, place, res);
         return res;
@@ -457,8 +601,12 @@ internal static class Finder
         // look around the last place: far up and down (scrolling), a little sideways
         int my = Math.Max(160, tr.H * 6), mx = Math.Max(40, tr.W / 3);
         var region = Rectangle.Intersect(Rectangle.Inflate(tr.Screen, mx, my), Rectangle.Round(tr.View));
+        region.Intersect(Native.FrameRect(tr.Root));
         if (region.Width < tr.W || region.Height < tr.H) return;
-        using var shot = ScreenCapture.Capture(region);
+        // the app's own pixels, not the screen: our frame and mascot drawn over the word (unless hidden from
+        // capture) would not match the word's picture, and the tracker would chase its own reflection
+        using var shot = ScreenCapture.CaptureWindow(tr.Root, region, 30);
+        if (shot == null || shot.Width != region.Width || shot.Height != region.Height) return;
         var img = Template.GrayFull(shot);
         int iw = shot.Width, ih = shot.Height;
         int lx = tr.Screen.X - region.X, ly = tr.Screen.Y - region.Y;
@@ -477,7 +625,8 @@ internal static class Finder
             return n == 0 ? 1 : sad / (float)(n * 255);
         }
         // still where it was: only keep an eye on whether the content scrolls past it
-        if (Score(lx, ly, 1) < TrackMaxScore * 0.5f) { WatchContent(tr, img, iw, ih, region, ly, false); return; }
+        float here = Score(lx, ly, 1);
+        if (here < TrackMaxScore * 0.5f) { WatchContent(tr, img, iw, ih, region, ly, false); return; }
         WatchContent(tr, img, iw, ih, region, ly, true);
         int bx = -1, by = -1;
         float best = float.MaxValue;
@@ -494,6 +643,14 @@ internal static class Finder
         // neighbourhood only if that finds nothing good
         Scan(lx - 4, lx + 4);
         if (best > TrackMaxScore * 1.3f) Scan(0, iw - tr.W);
+        // nothing fits better, and the old place still looks like the word on another background (the pointer
+        // hovers the tab and highlights it, or a neighbour): it is there — OCR checks it, the mark stays meanwhile.
+        // Scrolled away, the old place shows something else entirely and this does not hold
+        if (best > TrackMaxScore && here < TrackMaxScore * 2.5f)
+        {
+            tr.RestUntil = DateTime.UtcNow.AddMilliseconds(RestMs);
+            return;
+        }
         if (best > TrackMaxScore * 1.3f) { FollowFar(key, tr, cur); return; }
         if (bx < 0) return;
         int fx = bx, fy = by;
@@ -504,8 +661,15 @@ internal static class Finder
                 float v = Score(x, y, 1);
                 if (v < best) { best = v; fx = x; fy = y; }
             }
-        if (best > TrackMaxScore) { Lost(key, tr, cur); return; }
+        if (best > TrackMaxScore) { if (here >= TrackMaxScore * 2.5f) Lost(key, tr, cur); else tr.RestUntil = DateTime.UtcNow.AddMilliseconds(RestMs); return; }
         var moved = new Rectangle(region.X + fx, region.Y + fy, tr.W, tr.H);
+        // the old place only looks a little different (the pointer hovers the tab, it got selected): a spot that
+        // fits only somewhat better is a neighbouring row, not the word gone there — stay, OCR decides
+        if (moved.Location != tr.Screen.Location && here <= TrackMaxScore && best > here * 0.6f)
+        {
+            tr.RestUntil = DateTime.UtcNow.AddMilliseconds(RestMs);
+            return;
+        }
         if (moved.Location == tr.Screen.Location)
         {
             // it is where it was, only looks a little different (hovered, selected, redrawn): the full search found
@@ -519,7 +683,8 @@ internal static class Finder
         tr.MovedAt = DateTime.UtcNow;
         var frame = Native.FrameRect(tr.Root);
         var c = new PointF(moved.X + moved.Width / 2f, moved.Y + moved.Height / 2f);
-        Results[key] = new FindResult(true, new PointF(c.X - frame.X, c.Y - frame.Y), cur.Score, cur.Rel, DateTime.UtcNow, Size: cur.Size);
+        // the rest of what was found (the control's box, the window) moves along: only the place changes
+        Results[key] = cur with { Rel = new PointF(c.X - frame.X, c.Y - frame.Y), LastRel = cur.Rel, At = DateTime.UtcNow };
     }
 
     /// <summary>
@@ -528,8 +693,10 @@ internal static class Finder
     private static void FollowFar(string key, Track tr, FindResult cur)
     {
         var col = Rectangle.Intersect(new Rectangle(tr.Screen.X - 6, (int)tr.View.Y, tr.W + 12, (int)tr.View.Height), Rectangle.Round(tr.View));
+        col.Intersect(Native.FrameRect(tr.Root));
         if (col.Width < tr.W || col.Height < tr.H) { Lost(key, tr, cur); return; }
-        using var shot = ScreenCapture.Capture(col);
+        using var shot = ScreenCapture.CaptureWindow(tr.Root, col, 30);
+        if (shot == null || shot.Width != col.Width || shot.Height != col.Height) return;
         var img = Template.GrayFull(shot);
         int iw = shot.Width, ih = shot.Height;
         float Score(int x, int y, int step)
@@ -567,7 +734,8 @@ internal static class Finder
         tr.MovedAt = DateTime.UtcNow;
         var frame = Native.FrameRect(tr.Root);
         var c = new PointF(moved.X + moved.Width / 2f, moved.Y + moved.Height / 2f);
-        Results[key] = new FindResult(true, new PointF(c.X - frame.X, c.Y - frame.Y), cur.Score, cur.Rel, DateTime.UtcNow, Size: cur.Size);
+        // the rest of what was found (the control's box, the window) moves along: only the place changes
+        Results[key] = cur with { Rel = new PointF(c.X - frame.X, c.Y - frame.Y), LastRel = cur.Rel, At = DateTime.UtcNow };
     }
 
     /// <summary>
@@ -693,6 +861,60 @@ internal static class Finder
         }
         long n = (long)t.FW * t.FH;
         return (bx, by, best == long.MaxValue ? 1f : (float)(best / (double)(n * 255)));
+    }
+
+    /// <summary>
+    /// Every candidate the search weighs, each refined on its own and scored (0 identical … 1 opposite), best first:
+    /// how much worse the runner-up is tells whether a template is unique in the picture (anchor_at).
+    /// </summary>
+    internal static List<(int x, int y, float score)> MatchRanked(Bitmap picture, Template t, int candidates = Candidates)
+    {
+        var img = Template.Gray(picture, out int iw, out int ih);
+        var full = Template.GrayFull(picture);
+        int fw = picture.Width, fh = picture.Height;
+        int mw = iw - t.W + 1, mh = ih - t.H + 1;
+        var res = new List<(int x, int y, float score)>();
+        if (mw <= 0 || mh <= 0) return res;
+        var map = new long[mw * mh];
+        unsafe
+        {
+            fixed (byte* pi = img, pt = t.Px)
+                for (int y = 0; y < mh; y++)
+                    for (int x = 0; x < mw; x++)
+                    {
+                        long sad = 0;
+                        for (int ty = 0; ty < t.H; ty++) sad += Sad(pi + (y + ty) * iw + x, pt + ty * t.W, t.W);
+                        map[y * mw + x] = sad;
+                    }
+        }
+        var taken = new bool[map.Length];
+        int rx = Math.Max(1, t.W / 2), ry = Math.Max(1, t.H / 2);
+        long n = (long)t.FW * t.FH;
+        for (int k = 0; k < candidates; k++)
+        {
+            int bi = -1;
+            for (int i = 0; i < map.Length; i++)
+                if (!taken[i] && (bi < 0 || map[i] < map[bi])) bi = i;
+            if (bi < 0) break;
+            int cx = bi % mw, cy = bi / mw;
+            for (int y = Math.Max(0, cy - ry); y <= Math.Min(mh - 1, cy + ry); y++)
+                for (int x = Math.Max(0, cx - rx); x <= Math.Min(mw - 1, cx + rx); x++) taken[y * mw + x] = true;
+            long best = long.MaxValue;
+            int bx = 0, by = 0;
+            unsafe
+            {
+                fixed (byte* pf = full, ptf = t.Full)
+                    for (int y = Math.Max(0, cy * 2 - Refine); y <= Math.Min(fh - t.FH, cy * 2 + Refine); y++)
+                        for (int x = Math.Max(0, cx * 2 - Refine); x <= Math.Min(fw - t.FW, cx * 2 + Refine); x++)
+                        {
+                            long sad = 0;
+                            for (int ty = 0; ty < t.FH && sad < best; ty++) sad += Sad(pf + (y + ty) * fw + x, ptf + ty * t.FW, t.FW);
+                            if (sad < best) { best = sad; bx = x; by = y; }
+                        }
+            }
+            res.Add((bx, by, best == long.MaxValue ? 1f : (float)(best / (double)(n * 255))));
+        }
+        return res.OrderBy(c => c.score).ToList();
     }
 
     /// <summary>

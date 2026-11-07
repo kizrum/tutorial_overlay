@@ -67,6 +67,8 @@ internal static partial class Engine
             var process = m.Anchor.Process ?? t.Defaults.Process;
             if (process == null) continue;
             var pids = Resolver.Pids(process);
+            // only while the user is in that app: elsewhere its text is not even searched for (and nobody looks)
+            if (!pids.Contains(ForegroundPid())) { MissingSince.Remove(m.Id); continue; }
             // the newest window of the app that opened around this step and has been there long enough to be searched
             var win = windows.Where(w => pids.Contains(w.Pid) && WindowSince.TryGetValue(w.Hwnd, out var at)
                                          && at >= step.EnteredAt.AddMilliseconds(-OpenedBeforeStepMs)
@@ -79,6 +81,10 @@ internal static partial class Engine
                 // no window opened: the target is missing where it is looked for — its panel (a list, a tab page) or,
                 // when even its element is missing, its app's main window. No window at all is a wait, not a miss
                 if (!(m.Visibility.Contains("not visible") || m.Visibility == "element not found")) continue;
+                // a text named only by its app is written ahead for a menu or dialog not open yet: its absence from
+                // the open windows is a wait, not a miss (it is reported when a window opens without it)
+                var an = m.Anchor;
+                if (an.Find != null && an.Path.Count == 0 && an.Window == null && an.Title == null && an.WindowClass == null && an.Hwnd == null) continue;
                 if ((now - since).TotalMilliseconds < ExistingAfterMs || (now - step.EnteredAt).TotalMilliseconds < ExistingAfterMs) continue;
                 var r = Resolver.Get(m.Anchor.WithoutFind().Key);
                 if (r is { Found: true } && Native.IsWindow(r.Root))
@@ -105,7 +111,7 @@ internal static partial class Engine
 
     /// <summary>The anchor does not resolve (as opposed to: resolved, but covered / inactive / scrolled out of view).</summary>
     internal static bool IsMissing(string visibility) =>
-        visibility.Contains("not found") || visibility.Contains("not visible") || visibility is "searching" or "no visible window";
+        visibility.Contains("not found") || visibility.Contains("not visible") || visibility is "no visible window";
 
     /// <summary>
     /// Inspects the window (or the panel <paramref name="scope"/> in it) off the UI thread and emits target_not_found

@@ -76,7 +76,13 @@ English one turns Russian text into garbage, the Russian one reads "You" as "Ð£Ð
 reads with both and keeps the fitting variant for each line. `lang` sets the recogniser explicitly. Recognitions run
 one at a time: the Windows engine cannot take two at once. `find_text` without `text` shows how OCR read an area.
 
-Templates (`find: {template}`) work the same way: the anchor point is the centre of the found piece, and `offset`
+**Shapes default to `auto`.** A target with no `shapes` is framed at its own size: an element by its rectangle, a
+found text by its words, a template or a spot by the visible thing there (measured from the window's pixels, and
+re-measured while the lesson runs, so the frame follows a caption that grows). Hand-made shapes are for arrows,
+labels and notes; `validate` adds a `shapeNote` when a ring or frame given by hand does not fit the target.
+
+Templates (`find: {template}`) work the same way, `index` included (the n-th of identical look-alikes in reading order,
+such as one of FL's mixer strips): the anchor point is the centre of the found piece, and `offset`
 counts from it. They are searched in two passes: a quick one on a half-size picture picks 8 candidates, an exact one
 at full resolution chooses among them, so similar buttons on neighbouring rows ("808 Kick" and "808 Snare") are not
 confused.

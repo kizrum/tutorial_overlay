@@ -51,11 +51,33 @@ internal static class Resolver
     /// </summary>
     public static volatile TopWindow[] Popups = Array.Empty<TopWindow>();
 
+    /// <summary>When each watched window was first seen (MinValue: already open when watching began).</summary>
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<IntPtr, DateTime> Since = new();
+
     public static void Start()
     {
         _thread = new Thread(Loop) { IsBackground = true, Name = "anchor-resolver" };
         _thread.SetApartmentState(ApartmentState.MTA);
         _thread.Start();
+        // windows are tracked on a thread of their own: a UIA call into a slow app (Chromium's tree while a menu
+        // opens) can block the resolver for half a minute, and window_opened / the popups searched for text must
+        // not wait for it
+        new Thread(WindowLoop) { IsBackground = true, Name = "window-tracker" }.Start();
+    }
+
+    private static void WindowLoop()
+    {
+        while (!_stop)
+        {
+            try
+            {
+                var windows = EnumTopWindows();
+                _recent = (windows, Environment.TickCount64);
+                TrackWindows(windows, new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase));
+            }
+            catch (Exception e) { Log.Warn("window tracker: " + e.Message); }
+            Thread.Sleep(140);
+        }
     }
 
     public static void Stop() { _stop = true; Wake.Set(); }
@@ -84,6 +106,30 @@ internal static class Resolver
 
     private static readonly Dictionary<string, DateTime> LastFlip = new();
 
+    private static readonly ConcurrentDictionary<string, (System.Threading.Tasks.Task<AnchorResult> task, long since)> InFlight = new();
+    private const int CycleWaitMs = 300, NotAnsweringMs = 8000;
+
+    /// <summary>
+    /// An anchor with a UIA path, resolved on a worker: an app that stops answering UI Automation (Steam while its
+    /// menu is open, for half a minute) holds up only its own anchors, not the others. Null while the app is still
+    /// being waited for; an anchor never answered within <see cref="NotAnsweringMs"/> is "not answering" (the card says so).
+    /// </summary>
+    private static AnchorResult? ResolveInCycle(AnchorSpec a, List<TopWindow> windows)
+    {
+        var job = InFlight.GetOrAdd(a.Key, _ => (System.Threading.Tasks.Task.Factory.StartNew(() =>
+            Resolve(a, windows, new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase), useCache: true),
+            System.Threading.CancellationToken.None, System.Threading.Tasks.TaskCreationOptions.LongRunning,
+            System.Threading.Tasks.TaskScheduler.Default), Environment.TickCount64));   // a thread of its own: a hung call must not starve the pool
+        if (job.task.Wait(CycleWaitMs))
+        {
+            InFlight.TryRemove(a.Key, out _);
+            return job.task.IsFaulted ? AnchorResult.Missing("error: " + job.task.Exception?.InnerException?.Message, Array.Empty<int>()) : job.task.Result;
+        }
+        // a slow app (Steam takes 2-4 s per walk) is not a silent one: what was found last stays until the answer
+        // comes; only an anchor never answered for that long is "not answering"
+        return Get(a.Key) == null && Environment.TickCount64 - job.since >= NotAnsweringMs ? AnchorResult.Missing("not answering", Array.Empty<int>()) : null;
+    }
+
     private static void Cycle()
     {
         var wanted = _wanted;
@@ -95,9 +141,11 @@ internal static class Resolver
         foreach (var a in wanted)
         {
             liveKeys.Add(a.Key);
-            AnchorResult r;
-            try { r = Resolve(a, windows, pidCache, useCache: true); }
-            catch (Exception e) { r = AnchorResult.Missing("error: " + e.Message, Array.Empty<int>()); }
+            AnchorResult? got;
+            try { got = a.Path.Count == 0 ? Resolve(a, windows, pidCache, useCache: true) : ResolveInCycle(a, windows); }
+            catch (Exception e) { got = AnchorResult.Missing("error: " + e.Message, Array.Empty<int>()); }
+            if (got == null) continue;   // still waiting on the app: keep what was known
+            var r = got;
             var prev = Get(a.Key);
             Results[a.Key] = r;
             // at most one found/lost per anchor in 3 s: scrolling a virtualised list back and forth makes elements
@@ -114,7 +162,6 @@ internal static class Resolver
         foreach (var k in Results.Keys.Where(k => !liveKeys.Contains(k)).ToList()) Results.TryRemove(k, out _);
         lock (Cache) foreach (var k in Cache.Keys.Where(k => !liveKeys.Contains(k)).ToList()) Cache.Remove(k);
 
-        TrackWindows(windows, pidCache);
     }
 
     /// <summary>Emit window_opened / window_closed for top-level windows of watched processes.</summary>
@@ -122,7 +169,7 @@ internal static class Resolver
     {
         var procs = _watchedProcesses;
         var key = string.Join(",", procs);
-        if (key != _watchKey) { _watchKey = key; _windowsBaseline = false; KnownWindows.Clear(); }
+        if (key != _watchKey) { _watchKey = key; _windowsBaseline = false; KnownWindows.Clear(); Since.Clear(); }
         if (procs.Length == 0) { Popups = Array.Empty<TopWindow>(); return; }
         var pids = new Dictionary<int, string>();
         foreach (var p in procs) foreach (var pid in Pids(p, pidCache)) pids[pid] = p;
@@ -134,6 +181,8 @@ internal static class Resolver
             foreach (var w in KnownWindows.Values.Where(w => !now.ContainsKey(w.Hwnd)))
                 Events.Emit("window_closed", WinJson(w, pids.GetValueOrDefault(w.Pid, "?")));
         }
+        foreach (var h in now.Keys) if (!Since.ContainsKey(h)) Since[h] = _windowsBaseline ? DateTime.UtcNow : DateTime.MinValue;
+        foreach (var h in Since.Keys) if (!now.ContainsKey(h)) Since.TryRemove(h, out _);
         KnownWindows.Clear();
         foreach (var kv in now) KnownWindows[kv.Key] = kv.Value;
         _windowsBaseline = true;
@@ -241,6 +290,31 @@ internal static class Resolver
 
     /// <summary>One-shot synchronous resolution (screenshot / describe) without touching the cache.</summary>
     public static AnchorResult ResolveNow(AnchorSpec a) => Resolve(a, EnumTopWindows(), new(StringComparer.OrdinalIgnoreCase), useCache: false);
+
+    private static readonly ConcurrentDictionary<string, System.Threading.Tasks.Task<AnchorResult>> Slow = new();
+
+    /// <summary>
+    /// <see cref="ResolveNow"/>, but given up after <paramref name="ms"/>: an app can stop answering UI Automation for
+    /// a long time (Steam while its menu is open: 30 s and more per call). The call keeps running on its own thread;
+    /// asking again for the same anchor waits for that one instead of starting another.
+    /// </summary>
+    public static AnchorResult ResolveWithin(AnchorSpec a, int ms)
+    {
+        var task = Slow.GetOrAdd(a.Key, _ =>
+        {
+            var tcs = new System.Threading.Tasks.TaskCompletionSource<AnchorResult>();
+            var th = new Thread(() =>
+            {
+                try { tcs.SetResult(ResolveNow(a)); }
+                catch (Exception e) { tcs.SetResult(AnchorResult.Missing("error: " + e.Message, Array.Empty<int>())); }
+            }) { IsBackground = true, Name = "resolve-bounded" };
+            th.SetApartmentState(ApartmentState.MTA);
+            th.Start();
+            return tcs.Task;
+        });
+        if (task.Wait(ms)) { Slow.TryRemove(new KeyValuePair<string, System.Threading.Tasks.Task<AnchorResult>>(a.Key, task)); return task.Result; }
+        return AnchorResult.Missing($"the app did not answer UI Automation within {ms / 1000.0:0.#} s (busy: a menu or dialog open?) — validate again", Array.Empty<int>());
+    }
 
     private static AnchorResult Resolve(AnchorSpec a, List<TopWindow> all, Dictionary<string, int[]> pidCache, bool useCache)
     {

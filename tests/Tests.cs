@@ -358,6 +358,14 @@ public static class OcrTests
         A.Eq(1, Ocr.Find(Lines("Fill each Z steps"), "Fill each 2 steps").Count, "Z read for 2 is forgiven");
         A.Eq(0, Ocr.Find(Lines("Pattern 12"), "Pattern 1", "exact").Count, "an extra digit is a different line");
         A.Eq(1, Ocr.Find(Lines("Pattern 1"), "Pattern l", "exact").Count, "l read for 1");
+        // a menu bar read as one line: items 10 px apart (a word space here is 6 px)
+        var bar = new OcrLine();
+        int bx = 0;
+        foreach (var w in new[] { "Steam", "View", "Friends", "Games", "Help" }) { bar.Words.Add(new OcrWord(w, new RectangleF(bx, 0, w.Length * 8, 14))); bx += w.Length * 8 + 10; }
+        var hit = Ocr.Find(new List<OcrLine> { bar }, "Steam", "exact");
+        A.Eq(1, hit.Count, "an item of a menu bar matches exactly");
+        A.Check(hit[0].Rect.Width == 40, "framed on the item alone");
+        A.Eq(0, Ocr.Find(Lines("Audio settings"), "Audio", "exact").Count, "a word of a phrase is still not the whole line");
         A.Eq(1, Ocr.Find(Lines("Мaстер"), "Мастер").Count, "Latin a read for Cyrillic а");
     }
 
@@ -692,10 +700,11 @@ public static class LayoutTests
     }
 
     /// <summary>A point inside an element (an offset) gets a ring, not a 40 px square.</summary>
-    public static void TestPointInElementGetsRing()
+    /// <summary>A spot gets a frame of the visible thing there (measured live); unmeasured, a small square at the spot.</summary>
+    public static void TestPointInElementGetsAFrameAtTheSpot()
     {
         var p = Shape("""{"process": "FL64", "element": {"name": "Mixer"}, "offset": [224, 273]}""");
-        A.Eq(PrimKind.Circle, p.Kind, "default shape of a point");
+        A.Eq(PrimKind.Rect, p.Kind, "default shape of a point: a frame, never a ring around a tall caption");
     }
 }
 
@@ -914,10 +923,10 @@ public static class MissingTargetTests
 {
     public static void TestOnlyUnresolvedAnchorsCountAsMissing()
     {
-        foreach (var v in new[] { "element not found", "window not found", "text not visible", "template not visible", "searching", "no visible window" })
+        foreach (var v in new[] { "element not found", "window not found", "text not visible", "template not visible", "no visible window" })
             A.Check(Engine.IsMissing(v), v);
         // resolved but not shown right now: the window is there, the target too — nothing to report
-        foreach (var v in new[] { "visible", "occluded", "inactive", "offscreen", "scroll-down", "later", "resolving", "minimized" })
+        foreach (var v in new[] { "visible", "occluded", "inactive", "offscreen", "scroll-down", "later", "resolving", "minimized", "searching" })
             A.Check(!Engine.IsMissing(v), v);
     }
 }
@@ -931,6 +940,8 @@ public static class ScrollHintTests
         var inPart = AnchorSpec.Parse(A.Json("{\"process\":\"FL64\",\"find\":{\"text\":\"Track 5\",\"within\":[0,100,300,800]}}"), null);
         A.Check(!Engine.ScrollsToFind(loose), "menu item looked for in the whole app: no wheel");
         A.Check(Engine.ScrollsToFind(inList) && Engine.ScrollsToFind(inPart), "inside a list or part: scroll hint as before");
+        var strip = AnchorSpec.Parse(A.Json("{\"process\":\"steamwebhelper\",\"find\":{\"text\":\"Steam\",\"within\":[0,0,300,60]}}"), null);
+        A.Check(!Engine.ScrollsToFind(strip), "a menu-bar strip does not scroll");
     }
 }
 
@@ -1060,6 +1071,43 @@ public static class CaseTests
 
 public static class IconTests
 {
+    // a picture: background 30, a box of 70 (a drop-down) with "text" ink 220 and an arrow
+    private static byte[] Pic(int w, int h, byte bg) { var g = new byte[w * h]; Array.Fill(g, bg); return g; }
+    private static void Fill(byte[] g, int w, Rectangle r, byte v) { for (int y = r.Y; y < r.Bottom; y++) for (int x = r.X; x < r.Right; x++) g[y * w + x] = v; }
+
+    public static void TestControlBoxTakesTheDropDownWithItsArrow()
+    {
+        int w = 400, h = 120;
+        var g = Pic(w, h, 30);
+        Fill(g, w, new Rectangle(200, 40, 110, 44), 70);              // the drop-down box
+        var text = new Rectangle(230, 53, 32, 18);
+        for (int x = text.X; x < text.Right; x += 3) Fill(g, w, new Rectangle(x, text.Y, 1, text.Height), 220);   // letters
+        Fill(g, w, new Rectangle(285, 58, 8, 6), 220);                 // the arrow
+        var box = Icons.ControlBox(g, w, h, text);
+        A.Check(box is Rectangle b && b.X <= 202 && b.Right >= 300 && b.Y <= 42 && b.Bottom >= 82, $"the whole box, arrow included: {box}");
+    }
+
+    public static void TestControlBoxOnAFlatBarStopsAtTheNextCaption()
+    {
+        int w = 400, h = 60;
+        var g = Pic(w, h, 30);
+        var steam = new Rectangle(40, 20, 50, 14);
+        var view = new Rectangle(110, 20, 40, 14);
+        foreach (var t in new[] { steam, view }) for (int x = t.X; x < t.Right; x += 3) Fill(g, w, new Rectangle(x, t.Y, 1, t.Height), 220);
+        Fill(g, w, new Rectangle(10, 18, 18, 18), 220);                // the app icon left of "Steam"
+        var box = Icons.ControlBox(g, w, h, steam);
+        A.Check(box is Rectangle b && b.X > 28 && b.X < 40 && b.Right > 90 && b.Right < 110, $"from the icon's gap to the next caption's gap: {box}");
+    }
+
+    public static void TestControlBoxNotForTextInAPage()
+    {
+        int w = 900, h = 300;
+        var g = Pic(w, h, 30);
+        var text = new Rectangle(400, 140, 60, 16);
+        for (int x = text.X; x < text.Right; x += 3) Fill(g, w, new Rectangle(x, text.Y, 1, text.Height), 220);
+        A.Check(Icons.ControlBox(g, w, h, text) == null, "nothing around it: the words are the target");
+    }
+
     // a dark picture with marks drawn on it: gray and rgb buffers like inspect's
     private static (byte[] gray, byte[] rgb, int w, int h) Canvas(int w, int h, Action<Action<int, int, byte, byte, byte>> draw)
     {
@@ -1112,5 +1160,61 @@ public static class IconTests
             px(400, 250, 200, 200, 200);                                                                // a speck
         });
         A.Eq(0, Icons.FindBlobs(gray, w, h).Count, "no icons");
+    }
+}
+
+public static class TemplateRankTests
+{
+    private static Bitmap Picture()
+    {
+        var b = new Bitmap(400, 120);
+        using var g = Graphics.FromImage(b);
+        g.Clear(Color.FromArgb(30, 30, 30));
+        using var light = new SolidBrush(Color.FromArgb(220, 220, 220));
+        for (int k = 0; k < 3; k++) g.FillRectangle(light, 40 + k * 100, 40, 20, 20);   // three identical strips
+        g.FillEllipse(light, 350, 40, 24, 24);                                          // something else
+        return b;
+    }
+
+    public static void TestRankedMatchesListLookAlikesBestFirst()
+    {
+        using var pic = Picture();
+        using var piece = pic.Clone(new Rectangle(140 - 6, 40 - 6, 32, 32), pic.PixelFormat);   // the middle strip
+        var ranked = Finder.MatchRanked(pic, Template.From(piece), 12);
+        var same = ranked.Where(c => c.score <= 0.02f).OrderBy(c => c.x).ToList();
+        A.Eq(3, same.Count, "all three strips are perfect matches");
+        A.Check(Math.Abs(same[1].x - 134) <= 2, "the middle one is among them, in reading order second");
+        A.Check(ranked.First(c => c.score > 0.02f).score > 0.05f, "anything else is clearly worse");
+    }
+}
+
+public static class AutoShapeTests
+{
+    private static Mark Target(string json) => Mark.Parse(A.Json(json), null, "t");
+
+    public static void TestNoShapesMeansFramedAtItsOwnSize()
+    {
+        var m = Target("{\"anchor\":{\"process\":\"FL64\",\"find\":{\"template\":\"auto-1\"}}}");
+        A.Eq("auto", m.Shapes[0].Type, "default shape");
+        A.Eq("auto", Target("{\"anchor\":{\"process\":\"FL64\"},\"shapes\":[{\"type\":\"fit\"}]}").Shapes[0].Type, "fit is auto");
+    }
+
+    public static void TestMisfittingShapesAreReported()
+    {
+        var tall = new System.Text.Json.Nodes.JsonObject { ["visible"] = new System.Text.Json.Nodes.JsonArray(712, 723, 22, 53) };
+        A.Check(Engine.ShapeMisfit(Target("{\"anchor\":{\"process\":\"FL64\"},\"shapes\":[{\"type\":\"circle\",\"r\":16}]}"), tall) is string s1 && s1.Contains("ring"), "ring around a tall caption");
+        A.Check(Engine.ShapeMisfit(Target("{\"anchor\":{\"process\":\"FL64\"},\"shapes\":[{\"type\":\"rect\",\"w\":90,\"h\":90}]}"), tall) is string s2 && s2.Contains("x the target"), "a frame far bigger than the target");
+        A.Eq(null, Engine.ShapeMisfit(Target("{\"anchor\":{\"process\":\"FL64\"}}"), tall), "auto always fits");
+        A.Eq(null, Engine.ShapeMisfit(Target("{\"anchor\":{\"process\":\"FL64\"},\"shapes\":[{\"type\":\"rect\",\"w\":24,\"h\":56}]}"), tall), "a fitting frame");
+    }
+
+    public static void TestPanelNameKeepsItsStablePart()
+    {
+        Inspect.Node N(string name) => new(new Resolver.ElInfo(name, "Pane", "", "", new RectangleF(0, 0, 100, 100)), 1);
+        var nodes = new List<Inspect.Node> { N("Mixer - Master"), N("Browser"), N("Mixer - Master") };
+        var seg = Inspect.ContainerSegment(nodes, 2);
+        A.Eq("Mixer -", J.Str(seg, "name"), "the detail after the dash is dropped");
+        A.Eq(1, J.Int(seg, "index"), "the same pane among the 'Mixer -' ones");
+        A.Eq("Browser", J.Str(Inspect.ContainerSegment(nodes, 1), "name"), "a plain name stays");
     }
 }

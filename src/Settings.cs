@@ -152,10 +152,13 @@ internal sealed class Loc
         KeyStop = "Завершить туториал", KeyNone = "нет", SetSave = "Сохранить", SetDefaults = "По умолчанию",
         SetRestartAsk = "Порт изменён на {0}. Перезапустить сервер сейчас?\n\nАгенту придётся подключиться заново по новому адресу.",
         SetAfterTutorial = "Сохранено. Цвет и язык применятся после текущего туториала.", SetSaveFailed = "Не удалось сохранить настройки: {0}";
+    public string HelpTitle = "Подсказка", HelpVisible = "Нажмите «{0}» — он обведён рамкой, сейчас подсвечиваю.",
+        HelpHidden = "Нужно нажать «{0}». {1}", HelpAgentToo = "Ассистент тоже посмотрит и подскажет подробнее.";
     public string HelpSent = "Передал ассистенту — сейчас подскажу.", Highlighting = "Подсвечиваю, куда нажать…", Checking = "Уточняю, где этот пункт…";
     public string IssueMinimized = "Окно свёрнуто — разверните его.", IssueOccluded = "Нужное место закрыто другим окном.",
         IssueInactive = "Переключитесь в нужное приложение.", IssueMissing = "Не нахожу нужный элемент на экране.",
         IssueOffscreen = "Нужное место за пределами экрана.", IssueNotRunning = "Приложение не запущено.",
+        IssueNotAnswering = "Приложение сейчас не отвечает — закройте открытое меню (Esc), я найду нужное место.",
         IssueElevated = "Программа запущена от имени администратора — запустите TutorialOverlay так же, иначе я не вижу ваших кликов в ней.";
 
     public static readonly Loc Ru = new();
@@ -213,10 +216,13 @@ internal sealed class Loc
         KeyStop = "Stop tutorial", KeyNone = "none", SetSave = "Save", SetDefaults = "Defaults",
         SetRestartAsk = "The port is now {0}. Restart the server now?\n\nThe agent will have to reconnect to the new address.",
         SetAfterTutorial = "Saved. Colour and language apply after the current tutorial.", SetSaveFailed = "Could not save settings: {0}",
+        HelpTitle = "Hint", HelpVisible = "Click «{0}» — it is framed, highlighting it now.",
+        HelpHidden = "Click «{0}». {1}", HelpAgentToo = "The assistant will look too and say more.",
         HelpSent = "Told the assistant — a hint is coming.", Highlighting = "Highlighting where to click…", Checking = "Checking where this item is…",
         IssueMinimized = "The window is minimized — restore it.", IssueOccluded = "Another window covers the spot.",
         IssueInactive = "Switch to the app.", IssueMissing = "Can't find the element on screen.",
         IssueOffscreen = "The spot is off screen.", IssueNotRunning = "The app is not running.",
+        IssueNotAnswering = "The app is not answering right now — close the open menu (Esc) and I'll find the spot.",
         IssueElevated = "The app runs as administrator — start TutorialOverlay as administrator too, or I can't see your clicks in it.",
     };
 

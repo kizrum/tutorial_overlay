@@ -17,6 +17,7 @@ internal sealed class AnchorGeo
     public bool FromLastKnown;        // the visual anchor is out of view; P is where it was last seen
     public string? GoneDir;           // which edge it most likely went past (up/down/left/right), when out of view
     public RectangleF? Found;         // a find anchor: the found text / template piece on screen
+    public RectangleF? Visible;       // the visible thing itself (a template's icon, the caption at a spot): what "auto" frames
 }
 
 internal enum PrimKind { Circle, Rect, Arrow, Badge, Label, Info, Check, Checkbox, Stroke, Path, Wheel }
@@ -169,6 +170,22 @@ internal static class Layout
                     var p = new Prim { Kind = PrimKind.Circle, A = c, R = r, Color = ColorOf(sp, Palette.Accent), Width = Stroke(sp), Scale = s, AutoSize = sp.R == null, Glow = !Thin(sp) };
                     geo.Prims.Add(p);
                     if (sp.IsTarget) { geo.Hits.Add(new HitArea { Circle = true, C = c, R = r }); firstTarget ??= p; AddTargetBounds(new RectangleF(c.X - r, c.Y - r, 2 * r, 2 * r)); }
+                    break;
+                }
+                case "auto":
+                {
+                    // the target at its own size: the visible thing when measured, else what the anchor names, else a
+                    // small square at the spot - always a rectangle, so a tall caption is not ringed by a circle
+                    var bb = ag.Visible ?? Wrap();
+                    RectangleF r = bb is RectangleF v ? v : new RectangleF(ag.P.X - 14 * s, ag.P.Y - 14 * s, 28 * s, 28 * s);
+                    r.Inflate(sp.Pad * s, sp.Pad * s);
+                    var p = new Prim
+                    {
+                        Kind = PrimKind.Rect, Rect = r, Color = ColorOf(sp, Palette.Accent), Width = Stroke(sp),
+                        Radius = Math.Max(sp.Radius, 4) * s, Scale = s, Glow = !Thin(sp),
+                    };
+                    geo.Prims.Add(p);
+                    if (sp.IsTarget) { geo.Hits.Add(new HitArea { Rect = r }); firstTarget ??= p; AddTargetBounds(r); }
                     break;
                 }
                 case "rect":

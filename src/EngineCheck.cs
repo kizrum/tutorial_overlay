@@ -28,6 +28,32 @@ internal static partial class Engine
         finally { _resolved = null; _found = null; }
     }
 
+    /// <summary>
+    /// A shape given by hand that does not fit the target it marks: a ring around a tall or wide target (a vertical
+    /// mixer name), a frame several times the target's size, or much smaller. Null when it fits, or when the target's
+    /// size is not known. "auto" (the default) always fits.
+    /// </summary>
+    internal static string? ShapeMisfit(Mark m, JsonObject check)
+    {
+        if (J.Arr(check, "visible") is not JsonArray v || v.Count < 4) return null;
+        float tw = (float)(J.AsNum(v[2]) ?? 0), th = (float)(J.AsNum(v[3]) ?? 0);
+        if (tw < 2 || th < 2) return null;
+        string size = $"{tw:0}x{th:0}";
+        foreach (var sp in m.Shapes)
+        {
+            if (!sp.IsTarget) continue;
+            float aspect = Math.Max(tw, th) / Math.Min(tw, th);
+            if (sp.Type == "circle" && aspect > 1.8f)
+                return $"a ring around a target {size} (tall or wide): leave shapes out (or type 'auto') and it is framed at its own size";
+            float area = tw * th;
+            float? shapeArea = sp.Type == "circle" && sp.R is float r ? 4 * r * r
+                             : sp.Type is "rect" or "checkbox" && sp.W is float w && sp.H is float h ? w * h : null;
+            if (shapeArea is float sa && (sa > 3 * area || sa < area / 3))
+                return $"the shape is {sa / area:0.#}x the target's size ({size}): leave shapes out (or type 'auto') and it is framed at its own size";
+        }
+        return null;
+    }
+
     private static JsonObject ValidateCore(JsonNode args)
     {
         var spec = J.Unwrap(J.Get(args, "spec")) ?? (J.Has(args, "steps") ? args : null);
@@ -86,6 +112,7 @@ internal static partial class Engine
                 var r = CheckAnchor(m.Anchor);
                 r["name"] = m.Label ?? m.Id;
                 if (m.Check?.Anchor is AnchorSpec ca) r["checkAnchor"] = CheckAnchor(ca);
+                if (ShapeMisfit(m, r) is string misfit) { r["shapeNote"] = misfit; warnings++; }
                 Count(r);
                 targets.Add(r);
             }
@@ -167,7 +194,7 @@ internal static partial class Engine
         try
         {
             var wf = a.WithoutFind();
-            if (_resolved == null || !_resolved.TryGetValue(wf.Key, out r!)) { r = Resolver.ResolveNow(wf); if (_resolved != null) _resolved[wf.Key] = r; }
+            if (_resolved == null || !_resolved.TryGetValue(wf.Key, out r!)) { r = Resolver.ResolveWithin(wf, 3000); if (_resolved != null) _resolved[wf.Key] = r; }
         }
         catch (Exception e) when (Resolver.IsGone(e) || e is InvalidOperationException) { return Bad("element vanished while reading it: " + e.Message); }
         if (!r.Found) return Bad(r.Reason == "process not running" ? "process not running" : "not found: " + r.Reason, r.Reason == "process not running" ? "error" : "warning");
@@ -208,8 +235,15 @@ internal static partial class Engine
             float px = fs.Axis == "y" ? origin.X : hit.X, py = fs.Axis == "x" ? origin.Y : hit.Y;
             ag.P = new PointF(px + a.Dx, py + a.Dy);
             o["matchScore"] = Math.Round(fr.Score, 3);
+            var vf = fr.Root != IntPtr.Zero && Native.IsWindow(fr.Root) ? Native.FrameRect(fr.Root) : frame;
+            if (fr.Visible is RectangleF fv) o["visible"] = J.RectJson(new RectangleF(vf.X + fv.X, vf.Y + fv.Y, fv.Width, fv.Height));
+            else if (fr.Box is RectangleF fb) o["visible"] = J.RectJson(new RectangleF(vf.X + fr.Rel.X + fb.X, vf.Y + fr.Rel.Y + fb.Y, fb.Width, fb.Height));
+            else if (fr.Size.Width > 0) o["visible"] = J.RectJson(new RectangleF(hit.X - fr.Size.Width / 2, hit.Y - fr.Size.Height / 2, fr.Size.Width, fr.Size.Height));
         }
         o["point"] = J.PtJson(ag.P);
+        if (a.Find == null && !a.HasPoint) o["visible"] = J.RectJson(bounds);
+        else if (a.Find == null && a.HasPoint && Finder.MeasureSpot(a) is RectangleF spot)
+            o["visible"] = J.RectJson(new RectangleF(frame.X + spot.X, frame.Y + spot.Y, spot.Width, spot.Height));
         if (!OnAnyMonitor(ag.P)) return Bad("point is off screen (offset too large, or the window is partly off screen)");
         if (a.Path.Count > 0 && a.HasPoint && a.Find == null && !RectangleF.Inflate(bounds, 2, 2).Contains(ag.P))
             o["note"] = "the point lies outside its element — check the offset";
