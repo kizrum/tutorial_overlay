@@ -11,7 +11,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>12</LangVersion>
     <!-- the version: shown in the tray, settings and MCP serverInfo, stamped on the exe, names the release zip -->
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <Product>TutorialOverlay</Product>
     <Copyright>Copyright (c) 2026 Nick. MIT License.</Copyright>
     <!-- keep the version plain, without "+<commit>" appended -->

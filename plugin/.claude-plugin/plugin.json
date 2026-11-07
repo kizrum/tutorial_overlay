@@ -1,7 +1,7 @@
 {
   "name": "tutorial-overlay",
   "displayName": "TutorialOverlay",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Step-by-step tutorials drawn right on top of any Windows app: Claude highlights the buttons, the overlay sees what you clicked and moves on by itself.",
   "author": { "name": "kizrum", "url": "https://github.com/kizrum" },
   "homepage": "https://github.com/kizrum/tutorial_overlay",

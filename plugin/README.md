@@ -20,7 +20,8 @@ press "?" on the card when you are stuck and Claude answers right there.
 Then install the plugin in Claude Code:
 
 ```
-/plugin install tutorial-overlay --marketplace kizrum/tutorial_overlay
+/plugin marketplace add kizrum/tutorial_overlay
+/plugin install tutorial-overlay@tutorial-overlay
 ```
 
 The plugin starts the program for you when Claude needs it; it then stays in the tray until you quit it from the tray menu.

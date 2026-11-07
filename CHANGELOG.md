@@ -6,6 +6,8 @@ only fixes things.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-07
+
 - The plugin has a `Stop` hook: while a lesson its session started is running and the user acted in it in the last
   15 minutes, the agent is asked to keep polling `events` instead of ending its turn, so Help and Keep learning are
   answered. It reads the new `%LOCALAPPDATA%\TutorialOverlay\lesson.json` (state, title, step, the user's last
@@ -179,6 +181,7 @@ The first public release.
 - The tutorial library: saved tutorials run again from the tray menu, without the agent.
 - A self-contained single-file exe: no .NET install needed to run it.
 
-[Unreleased]: https://github.com/kizrum/tutorial_overlay/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/kizrum/tutorial_overlay/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/kizrum/tutorial_overlay/releases/tag/v0.4.0
 [0.3.0]: https://github.com/kizrum/tutorial_overlay/releases/tag/v0.3.0
 [0.2.0]: https://github.com/kizrum/tutorial_overlay/releases/tag/v0.2.0
