@@ -30,6 +30,7 @@ internal sealed class CardModel
     public PointF Focus;                 // where the user is looking (picks the monitor)
     public RectangleF? AppFrame;
     public int StepVersion;
+    public object? Lesson;               // the tutorial shown: what the card remembers (an open "why") lasts for one lesson
 }
 
 /// <summary>
@@ -455,11 +456,18 @@ internal static partial class Engine
     /// </summary>
     private static readonly TimeSpan WaitForSteps = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// The same wait when the request went unheard: the user has to go to the chat and write to the agent first, and
+    /// the agent then writes the lesson. The card says so, and "Finish" ends the wait at any time.
+    /// </summary>
+    private static readonly TimeSpan WaitForUnheard = TimeSpan.FromMinutes(10);
+
     private static void CheckWaiting(Tutorial t, DateTime now)
     {
         long ticks = System.Threading.Interlocked.Read(ref McpServer.LastRequestTicks);
         var last = ticks == 0 ? t.WaitingSince : new DateTime(Math.Max(ticks, t.WaitingSince.Ticks), DateTimeKind.Utc);
-        if (now - last < WaitForSteps) return;
+        if (t.WaitUnheard && Events.Listening(ListenGrace)) t.WaitUnheard = false;   // the agent is back
+        if (now - last < (t.WaitUnheard ? WaitForUnheard : WaitForSteps)) return;
         FinishNow(t, "no_more_steps");
         _stepVersion++;
     }
@@ -1825,6 +1833,7 @@ internal static partial class Engine
     private static void BuildCard(CardModel card, Tutorial? t, int fgPid)
     {
         card.StepVersion = _stepVersion;
+        card.Lesson = t;
         if (t is { OutroOpen: true })
         {
             BuildOutroCard(card, t, fgPid);
@@ -1854,6 +1863,7 @@ internal static partial class Engine
             // the user is never left before a spinner with no way on: finish now, straight to the end card
             if (t.State == TutorialState.Waiting)
                 card.Extra = new List<CardButton> { new("wait_finish", Settings.Current.Text.WaitFinish, "primary", "wait_finish") };
+            if (t.State == TutorialState.Waiting && t.WaitUnheard) card.Hint = Settings.Current.Text.ContinueUnheard;
         }
         else
         {
@@ -1959,7 +1969,7 @@ internal static partial class Engine
     // =========================================================== help
 
     /// <summary>The card's own answer to "help": what to click, and where it is or why it is not marked.</summary>
-    private static string LocalHint(Step s, bool listening)
+    private static string LocalHint(Step s, string agent)
     {
         var t = Settings.Current.Text;
         var open = s.Targets.Where(m => !m.Satisfied).ToList();
@@ -1968,7 +1978,13 @@ internal static partial class Engine
         string text = m0 is { Visibility: "visible" } || open.Count == 0
             ? (open.Count == 0 ? s.Text ?? s.Title ?? "" : string.Format(t.HelpVisible, name))
             : string.Format(t.HelpHidden, name, TargetIssue(s) ?? t.IssueMissing);
-        return listening ? text + " " + t.HelpAgentToo : text;
+        // say honestly whether more help is coming: an agent whose turn is over hears the card only via the chat
+        return agent switch
+        {
+            "listening" => text + " " + t.HelpAgentToo,
+            "idle" => text + " " + t.HelpAgentIdle,
+            _ => text,
+        };
     }
 
     /// <summary>Why the user can't see this step's targets (null when at least one is visible).</summary>
@@ -2016,6 +2032,33 @@ internal static partial class Engine
         };
     }
 
+    /// <summary>
+    /// Is the agent that runs this lesson there to answer the card? "listening": it polls events right now;
+    /// "idle": it is connected but polls nothing (its turn is over: only the user's chat message wakes it);
+    /// "gone": no agent holds the server for this lesson (a replay from the library, a client that left).
+    /// </summary>
+    private static string AgentState(Tutorial t) =>
+        t.Owner == null || McpServer.Lease.Holder != t.Owner ? "gone" : Events.Listening(ListenGrace) ? "listening" : "idle";
+
+    /// <summary>What lesson.json says (see <see cref="Instances.LessonFile"/>): built under the lock, written outside it.</summary>
+    public static JsonObject LessonInfo()
+    {
+        lock (Sync)
+        {
+            var t = _tut;
+            var o = new JsonObject { ["pid"] = Environment.ProcessId };
+            if (t == null) { o["state"] = "none"; return o; }
+            o["state"] = t.OutroOpen ? "outro" : t.StateName;
+            o["title"] = t.Title;
+            o["step"] = t.Index + 1;
+            o["total"] = t.Steps.Count;
+            long u = System.Threading.Interlocked.Read(ref Events.LastUserTicks);
+            if (u != 0) o["lastUserAction"] = new DateTime(u, DateTimeKind.Utc).ToString("yyyy-MM-ddTHH:mm:ssZ");
+            o["agent"] = AgentState(t) == "gone" ? "gone" : "connected";
+            return o;
+        }
+    }
+
     /// <summary>The user says they can't find the target / don't understand the step.</summary>
     /// <param name="sketch">areas the user circled with the pencil; disposed here</param>
     public static void RequestHelp(string reason, string source, string? text = null, Sketch? sketch = null)
@@ -2034,8 +2077,8 @@ internal static partial class Engine
             s.HelpPending = true;
             // the card answers at once with what the overlay knows itself: the user is never left waiting on an
             // agent that is thinking, gone, or was never there; a hint from the agent replaces it
-            bool listening = t!.Owner != null && McpServer.Lease.Holder == t.Owner;
-            s.Hint = LocalHint(s, listening);
+            var agent = AgentState(t!);
+            s.Hint = LocalHint(s, agent);
             s.HintTitle = Settings.Current.Text.HelpTitle;
             s.HighlightUntil = DateTime.UtcNow.AddSeconds(6); s.NextPing = default;
             s.Sketch = sketch is { Empty: false } ? sketch.Strokes.ToList() : null;
@@ -2045,6 +2088,7 @@ internal static partial class Engine
             Events.Emit("help", new()
             {
                 ["reason"] = reason, ["source"] = source, ["text"] = text, ["step"] = t!.Index, ["id"] = s.Id, ["title"] = s.Title,
+                ["heard"] = agent == "listening",
                 ["sketch"] = drawn,
                 ["targets"] = new JsonArray(s.Targets.Select(m => (JsonNode)MarkJson(m)).ToArray()),
                 ["issue"] = TargetIssue(s),

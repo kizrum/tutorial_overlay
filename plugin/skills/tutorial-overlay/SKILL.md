@@ -71,7 +71,10 @@ restart Claude Code. Do not try to install or download it yourself.
 8. **Start and follow:** `start_tutorial(spec)`, then `events(since, timeoutMs)` to see hits, misses, `no_effect`
    and `help`. For a long lesson use `keepOpen: true` and `append_steps`. While the lesson runs, keep an `events`
    long-poll going all the time and do nothing slow in between (no builds, no restarts, no long reading): the user
-   is waiting on you. A miss right beside the target that did what the step wanted (the list opened, the page
+   is waiting on you. **Do not end your turn while the lesson runs** — the card's buttons ("Help", "Keep learning")
+   reach you only through `events`, and the user's chat messages still arrive between your calls. If your turn did
+   end, on the user's next message call `events` first: a `help` or `continue_requested` may be waiting
+   (`heard: false` means the card told the user to write to you). A miss right beside the target that did what the step wanted (the list opened, the page
    changed): check it and `complete_step` instead of leaving the user stuck.
 9. **Help:** on a `help` event, answer with `hint(text)` right in the card; explain the cause, not only the click.
 10. **Finish:** with `keepOpen`, when no more steps will come, call `stop_tutorial` after the last step: the user

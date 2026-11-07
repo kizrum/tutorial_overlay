@@ -32,6 +32,12 @@ Update with `winget upgrade Kizrum.TutorialOverlay`.
   tutorials, read the interface of the app being taught and ask you questions; each tool is annotated as read-only
   or not.
 - A skill, `tutorial-overlay`, that tells Claude how to build good tutorials with these tools.
+- A `Stop` hook (`hooks/stop-guard.ps1`, Windows PowerShell). The card's buttons — Help, Keep learning — reach Claude
+  only while it waits for events; if it ended its turn mid-lesson, nobody would answer them. So while a lesson this
+  session started is running and you are active in it, the hook asks Claude to keep listening instead of stopping.
+  It lets Claude stop as soon as the lesson ends, when you have done nothing in it for 15 minutes, when the lesson
+  belongs to another session, or when anything is unclear (an older TutorialOverlay without `lesson.json`, an error).
+  You can always interrupt Claude or ask it to stop.
 
 Source code of the program: [github.com/kizrum/tutorial_overlay](https://github.com/kizrum/tutorial_overlay) (C#,
 MIT license, no third-party packages).
@@ -46,7 +52,8 @@ MIT license, no third-party packages).
   example "the target was clicked"), never a record of your input.
 - **Sends:** nothing to the internet. Tool results — UI trees, recognised text, screenshots of the areas Claude
   asks for — go to Claude as part of your conversation, like any other tool result.
-- **Stores on your computer:** settings, the key, saved tutorials, UI pictures used as anchors and help sketches in
+- **Stores on your computer:** settings, the key, the running lesson's title and step (`lesson.json`, for the
+  hook above), saved tutorials, UI pictures used as anchors and help sketches in
   `%LOCALAPPDATA%\TutorialOverlay`, and a log there (`logs\overlay.log`, at most 4 files of 2 MB). Help sketches
   are kept for 14 days at most. Delete the folder to remove everything.
 

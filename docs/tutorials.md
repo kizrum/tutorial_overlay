@@ -16,8 +16,10 @@ Clickable (separate windows that do not take the focus from the app):
 
 - `button` — a button anywhere on screen: `{text, id, action: done|next|back|skip|stop|undo|dismiss, style}`;
   sends the `button` event;
-- **the step card** — "STEP n / N", progress, title, text, a checklist of targets, "Back", "↶" (undo the last hit),
-  "Skip", "Done", "✕" (stop) and the step's own buttons (`buttons`).
+- **the step card** — "Step n of N" with a short progress strip beside it, title, text, a folded "Why" (click to
+  open; it stays open for the rest of the lesson), a checklist of targets, quiet "Back", "↶" (undo the last hit,
+  shown only after one) and "Skip" icons, "Help", "Done", "✕" (stop) and the step's own buttons (`buttons`). A
+  problem that blocks the step is shown at the top of the card.
 
 The default shape (a target without `shapes`): an anchor's element gets a frame round it; a found text or
 template (`find`) gets a frame the size of the found piece; a point inside an element (`offset`) gets a ring. A
@@ -26,7 +28,9 @@ frame of the right size round a point is given explicitly: `{"type": "rect", "x"
 
 Layout without overlaps: rings of neighbouring targets shrink, labels, info boxes and buttons without explicit
 `x,y` find free room around the target (a label goes to the arrow's tail), and the card keeps clear of everything
-drawn. The card can be dragged with the mouse; it then stays where it was put.
+drawn. When only its height changes (the "Why" opens, a hint arrives) it keeps the edge nearest the screen edge: in a
+bottom corner it grows upward, so its buttons stay under the cursor. The card can be dragged with the mouse; it then
+stays where it was put.
 
 ## Anchors
 
@@ -316,8 +320,8 @@ steps[0].targets[1].shapes[0].type: unknown shape 'circel' (did you mean 'circle
 
 ## Helping the user
 
-The card has a **"?"** button (hotkey **Ctrl+Alt+H**). It opens two choices: **"I can't find where to click"** and
-**"I don't get what to do"**.
+The card has a **"Help"** button (hotkey **Ctrl+Alt+H**). It opens the choices **"I can't find where to click"**,
+**"I don't get what to do"** and **"Something else"** (the user describes it in their own words).
 
 - The agent gets the `help` event: the reason; for each target whether it is visible and why not (`visible`,
   `occluded`, `minimized`, `inactive`, `element not found`…) and where it is on screen; the step's latest misses; the

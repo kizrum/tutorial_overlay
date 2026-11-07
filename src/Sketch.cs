@@ -174,7 +174,7 @@ internal sealed class SketchPad : Form
 
         var loc = Settings.Current.Text;
         float k = _k;
-        using (var path = Theme.Rounded(_bar, 12 * k))
+        using (var path = Theme.Rounded(_bar, 8 * k))
         {
             using (var b = new SolidBrush(Palette.Ink)) g.FillPath(b, path);
             using var pen = new Pen(Palette.Accent, 1.5f * k);
@@ -190,15 +190,8 @@ internal sealed class SketchPad : Form
         Pill(g, _doneRect, loc.Done, true, _hover == "done", true);
     }
 
-    private void Pill(Graphics g, RectangleF r, string text, bool primary, bool hover, bool enabled)
-    {
-        using var path = Theme.Rounded(r, r.Height / 2);
-        var fill = primary ? (hover ? Color.FromArgb(255, 255, 110, 135) : Palette.Accent) : (hover && enabled ? Palette.InkHover : Palette.InkRaised);
-        using (var b = new SolidBrush(fill)) g.FillPath(b, path);
-        if (!primary) using (var pen = new Pen(Palette.Line, 1 * _k)) g.DrawPath(pen, path);
-        using var tb = new SolidBrush(primary ? Palette.Ink : enabled ? Palette.Text : Palette.TextDim);
-        g.DrawString(text, Theme.Font(13.5f * _k, true), tb, r, Theme.Center);
-    }
+    private void Pill(Graphics g, RectangleF r, string text, bool primary, bool hover, bool enabled) =>
+        Theme.OutlineButton(g, r, text, primary ? "primary" : "secondary", hover, enabled, _k);
 
     private void InvalidateBar() => Invalidate(Rectangle.Ceiling(RectangleF.Inflate(_bar, 2, 2)));
 

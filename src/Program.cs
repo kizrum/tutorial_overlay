@@ -304,12 +304,14 @@ internal static class Program
 
         var timer = new System.Windows.Forms.Timer { Interval = 30 };
         var perf = new FramePerf();
+        int lessonTick = 0;
         timer.Tick += (_, _) =>
         {
             try
             {
                 long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
                 var frame = Engine.Tick();
+                if (++lessonTick % 10 == 0) Instances.WriteLesson(Engine.LessonInfo());   // ~3 times a second
                 long t1 = System.Diagnostics.Stopwatch.GetTimestamp();
                 if (frame.Changed) overlay.Present(frame.Scene);
                 long t2 = System.Diagnostics.Stopwatch.GetTimestamp();

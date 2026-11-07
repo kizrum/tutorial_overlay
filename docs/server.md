@@ -37,6 +37,27 @@ session and could get in each other's way).
 Any session may open a notification stream, but only the holder gets events. Streams opening and closing, `DELETE`
 and requests refused for a missing key are logged. Events: `client_connected` / `client_released`.
 
+**lesson.json.** Next to `server.json` the server keeps `%LOCALAPPDATA%\TutorialOverlay\lesson.json`: what runs now,
+as seen from outside the MCP connection (no key, no lease), rewritten about three times a second when it changes and
+removed with `server.json`:
+
+```json
+{"pid": 47544, "state": "running", "title": "…", "step": 2, "total": 5,
+ "lastUserAction": "2026-11-07T21:41:34Z", "agent": "connected"}
+```
+
+`state` is `none`, `running`, `waiting` (keepOpen, waiting for `append_steps`), `outro`, `stopped`, `done`;
+`lastUserAction` is the start of the lesson or the user's last click, key, help request or button in it; `agent` is
+`gone` when no agent holds the server for this lesson (a replay from the library, a client that left). The plugin's
+`Stop` hook (`plugin/hooks/stop-guard.ps1`) reads it: while a lesson the session started (its last TutorialOverlay
+call in the transcript is `start_tutorial` or `append_steps`) is `running` or `waiting` and the user acted in the last
+15 minutes, ending the turn is refused with a reminder to keep calling `events`. Any doubt lets the turn end.
+
+**Is the agent listening?** An agent follows the lesson while an `events` long-poll is waiting or one ended less
+than 20 s ago. One whose turn is over polls nothing, and the card says so instead of promising an answer: Help gives
+its local hint and adds "write to the assistant in the chat" (the `help` event carries `heard: false`); "Keep
+learning" says the same and waits up to 10 minutes instead of 30 s (`continue_requested` with `heard: false`).
+
 **Stopping.** `--stop` asks the running server to quit the same way as "Quit" in its menu: the icon leaves the tray
 and `server.json` is deleted. On a restart from the settings window the old process's icon is removed before the
 new one starts.

@@ -22,6 +22,9 @@ internal static partial class Engine
         return ticks != 0 && DateTime.UtcNow - new DateTime(ticks, DateTimeKind.Utc) < AgentRecent;
     }
 
+    /// <summary>How long after its last events poll an agent still counts as following the lesson.</summary>
+    internal static readonly TimeSpan ListenGrace = TimeSpan.FromSeconds(20);
+
     private static void BuildOutroCard(CardModel card, Tutorial t, int fgPid)
     {
         if (t.HideWhenInactive && t.Defaults.Process != null && !AppActive(Array.Empty<int>(), t.Defaults.Process, fgPid)) return;
@@ -86,9 +89,13 @@ internal static partial class Engine
                 t.OutroOpen = false;
                 t.State = TutorialState.Waiting;
                 t.WaitingSince = DateTime.UtcNow;
+                // nobody polls events (the agent's turn is over): the card says to write to it in the chat, and
+                // waits long enough for that message to wake the agent
+                t.WaitUnheard = !Events.Listening(ListenGrace);
                 Events.Emit("continue_requested", new()
                 {
                     ["title"] = t.Title, ["completed"] = t.Steps.Count, ["app"] = t.Defaults.Process, ["savedAs"] = t.SavedAs,
+                    ["heard"] = !t.WaitUnheard,
                     ["advice"] = "the user wants to keep learning: append_steps with the next lesson (they continue on this card)",
                 });
                 break;

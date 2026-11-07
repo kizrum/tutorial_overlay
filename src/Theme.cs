@@ -137,6 +137,40 @@ internal static class Theme
         return p;
     }
 
+    /// <summary>
+    /// The "outline" button of our windows (card, question, help, sketch bar): a 6 px rounded frame, filled only on
+    /// hover or when it shows a state. Returns the colour for its text and icon.
+    /// </summary>
+    public static Color OutlineButton(Graphics g, RectangleF r, string style, bool hover, bool enabled, float s)
+    {
+        hover &= enabled;
+        var accent = Palette.Accent;
+        Color edge, fg, fill = Color.Transparent;
+        switch (style)
+        {
+            case "primary": edge = accent; fg = accent; if (hover) fill = Palette.WithAlpha(accent, 0.14f); break;
+            case "success": edge = Palette.Success; fg = Palette.Success; break;
+            case "active": edge = accent; fg = Palette.Text; fill = Palette.WithAlpha(accent, hover ? 0.18f : 0.10f); break;
+            case "danger": edge = Palette.Named["red"]; fg = Palette.Named["red"]; if (hover) fill = Palette.WithAlpha(Palette.Named["red"], 0.12f); break;
+            case "ghost": edge = Color.Transparent; fg = Palette.TextDim; if (hover) { fill = Palette.InkRaised; fg = Palette.Text; } break;
+            default: edge = hover ? Palette.TextDim : Palette.Line; fg = Palette.Text; if (hover) fill = Palette.InkRaised; break;
+        }
+        if (!enabled) { edge = Palette.WithAlpha(edge, 0.45f); fg = Palette.WithAlpha(fg, 0.45f); }
+        using var path = Rounded(r, 6 * s);
+        if (fill.A > 0) using (var b = new SolidBrush(fill)) g.FillPath(b, path);
+        if (edge.A > 0) using (var pen = new Pen(edge, 1 * s)) g.DrawPath(pen, path);
+        return fg;
+    }
+
+    /// <summary>An outline button with its caption centred (trimmed with "…" when it does not fit).</summary>
+    public static void OutlineButton(Graphics g, RectangleF r, string text, string style, bool hover, bool enabled, float s)
+    {
+        var fg = OutlineButton(g, r, style, hover, enabled, s);
+        using var tb = new SolidBrush(fg);
+        using var fmt = new StringFormat(Center) { Trimming = StringTrimming.EllipsisCharacter };
+        g.DrawString(text, Font(13.5f * s, true), tb, RectangleF.Inflate(r, -10 * s, 0), fmt);
+    }
+
     public static void Quality(Graphics g)
     {
         g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -216,5 +250,42 @@ internal static class Theme
     {
         IconChevron(g, new PointF(c.X - s * 0.16f, c.Y), s, false, color, w);
         IconChevron(g, new PointF(c.X + s * 0.20f, c.Y), s, false, color, w);
+    }
+
+    /// <summary>A chevron pointing up or down (the tip is the middle vertex).</summary>
+    public static void IconChevronV(Graphics g, PointF c, float s, bool up, Color color, float w)
+    {
+        using var pen = new Pen(color, w) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+        float dy = up ? -s * 0.25f : s * 0.25f;
+        g.DrawLines(pen, new[] { new PointF(c.X - s * 0.45f, c.Y - dy), new PointF(c.X, c.Y + dy), new PointF(c.X + s * 0.45f, c.Y - dy) });
+    }
+
+    /// <summary>A warning triangle with an exclamation mark.</summary>
+    public static void IconWarn(Graphics g, PointF c, float s, Color color, float w)
+    {
+        using var pen = new Pen(color, w) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+        g.DrawPolygon(pen, new[] { new PointF(c.X, c.Y - s * 0.44f), new PointF(c.X + s * 0.48f, c.Y + s * 0.40f), new PointF(c.X - s * 0.48f, c.Y + s * 0.40f) });
+        g.DrawLine(pen, c.X, c.Y - s * 0.10f, c.X, c.Y + s * 0.12f);
+        using var b = new SolidBrush(color);
+        float d = w * 1.2f;
+        g.FillEllipse(b, c.X - d / 2, c.Y + s * 0.27f - d / 2, d, d);
+    }
+
+    /// <summary>A speech bubble: a message from the assistant.</summary>
+    public static void IconMessage(Graphics g, PointF c, float s, Color color, float w)
+    {
+        using var pen = new Pen(color, w) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+        float l = c.X - s * 0.44f, r = c.X + s * 0.44f, t = c.Y - s * 0.38f, b = c.Y + s * 0.22f;
+        g.DrawPolygon(pen, new[] { new PointF(l, t), new PointF(r, t), new PointF(r, b), new PointF(c.X - s * 0.05f, b), new PointF(l, c.Y + s * 0.44f), new PointF(l, t) });
+    }
+
+    /// <summary>A magnifying glass: "I can't find it".</summary>
+    public static void IconSearch(Graphics g, PointF c, float s, Color color, float w)
+    {
+        using var pen = new Pen(color, w) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        float r = s * 0.28f;
+        var o = new PointF(c.X - s * 0.08f, c.Y - s * 0.08f);
+        g.DrawEllipse(pen, o.X - r, o.Y - r, 2 * r, 2 * r);
+        g.DrawLine(pen, o.X + r * 0.72f, o.Y + r * 0.72f, c.X + s * 0.42f, c.Y + s * 0.42f);
     }
 }

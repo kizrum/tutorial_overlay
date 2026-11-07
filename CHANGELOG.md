@@ -6,6 +6,24 @@ only fixes things.
 
 ## [Unreleased]
 
+- The plugin has a `Stop` hook: while a lesson its session started is running and the user acted in it in the last
+  15 minutes, the agent is asked to keep polling `events` instead of ending its turn, so Help and Keep learning are
+  answered. It reads the new `%LOCALAPPDATA%\TutorialOverlay\lesson.json` (state, title, step, the user's last
+  action, whether an agent holds the lesson) and does nothing with a TutorialOverlay that does not write it.
+- Help tells the truth about the assistant: when no agent follows the events, the card gives its own hint and says to
+  write to the assistant in the chat instead of "the assistant will look too"; the `help` event carries `heard`.
+- "Keep learning" pressed while no agent follows the events (its turn is over) no longer gives up after 30 s: the
+  card says to write "continue" to the assistant in the chat and waits up to 10 minutes. `continue_requested` carries
+  `heard: false` then, and the skill tells the agent to keep its events long-poll going for the whole lesson and to
+  read `events` first when the user writes again.
+- The step card has a new, quieter look: outlines instead of filled tiles; "Step 3 of 8" with a short progress strip
+  next to the close cross instead of a row of its own; the step's text in full brightness; one accent. "Why" is folded
+  to one line and unrolls on a click, staying open for the rest of the lesson. Back and Skip are small icons (their
+  name and hotkey show in the bottom line on hover), Undo appears only when there is something to undo, Help and Done
+  sit at the right. A problem that blocks the step is shown at the top.
+  The assistant's question, "Something else" and the sketch bar use the same outline buttons.
+- A card whose height changes keeps the edge nearest the screen edge: in a bottom corner it grows upward instead of
+  running off the screen and jumping to a new place, and it no longer stays raised after shrinking back.
 - `validate` warns (`repeated`) when a text target without `index` is on screen more than once, and lists where:
   the mark goes to the first in reading order, which may not be the one the step means.
 - `find.in` names the window a text lives in (`"main"`, or `{title, class}`): it is looked for there only, and with

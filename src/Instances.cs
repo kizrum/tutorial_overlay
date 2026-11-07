@@ -16,6 +16,38 @@ internal static class Instances
 
     public static string File => Path.Combine(Files.AppDir, "server.json");
 
+    /// <summary>
+    /// lesson.json: the running lesson as seen from outside the MCP connection (no key, no lease). The plugin's Stop
+    /// hook reads it to keep the agent that runs a lesson from ending its turn while the user is in it.
+    /// </summary>
+    public static string LessonFile => Path.Combine(Files.AppDir, "lesson.json");
+
+    private static string _lessonWritten = "";
+
+    /// <summary>Writes lesson.json when what it says has changed (called from the UI tick, outside the engine lock).</summary>
+    public static void WriteLesson(JsonObject lesson)
+    {
+        var text = lesson.ToJsonString();
+        if (text == _lessonWritten) return;
+        try
+        {
+            var tmp = LessonFile + ".tmp";
+            System.IO.File.WriteAllText(tmp, text);
+            System.IO.File.Move(tmp, LessonFile, true);
+            _lessonWritten = text;
+        }
+        catch (Exception e) { Log.Debug("lesson.json: " + e.Message); }
+    }
+
+    public static void RemoveLesson(int pid)
+    {
+        try
+        {
+            if (System.IO.File.Exists(LessonFile) && J.Int(JsonNode.Parse(System.IO.File.ReadAllText(LessonFile)), "pid") == pid) System.IO.File.Delete(LessonFile);
+        }
+        catch { }
+    }
+
     private const string QuitEventName = "TutorialOverlay.Quit";
 
     /// <summary>The running server, if any (a server.json of a process that is gone is removed on the way).</summary>
@@ -112,6 +144,7 @@ internal static class Instances
             if (System.IO.File.Exists(File) && J.Int(JsonNode.Parse(System.IO.File.ReadAllText(File)), "pid") == pid) System.IO.File.Delete(File);
         }
         catch { }
+        RemoveLesson(pid);
         return 0;
     }
 

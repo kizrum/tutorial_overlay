@@ -104,6 +104,7 @@ internal sealed class Loc
     public string PickTitle = "Укажите точку", PickText = "Кликните в нужное место. Esc — отмена.", PickCount = "Точка {0} из {1}";
     public string Review = "Повтор шага — нажмите «Готово», чтобы продолжить.";
     public string Why = "Почему так";
+    public string HeadStep = "Шаг {0}", HeadOf = "из {0}", HeadWaiting = "Ожидание", HeadOutro = "Готово";
     public string ScrollUp = "Прокрутите вверх", ScrollDown = "Прокрутите вниз", ScrollLeft = "Прокрутите влево", ScrollRight = "Прокрутите вправо";
     public string ScrollIssue = "Нужное место за краем окна — {0}.", ScrollFind = "Прокрутите окно, чтобы показать нужное место.",
         ScrollHere = "Покрутите здесь — я найду «{0}»", ScrollHereAny = "Покрутите здесь — я найду нужное место",
@@ -153,7 +154,9 @@ internal sealed class Loc
         SetRestartAsk = "Порт изменён на {0}. Перезапустить сервер сейчас?\n\nАгенту придётся подключиться заново по новому адресу.",
         SetAfterTutorial = "Сохранено. Цвет и язык применятся после текущего туториала.", SetSaveFailed = "Не удалось сохранить настройки: {0}";
     public string HelpTitle = "Подсказка", HelpVisible = "Нажмите «{0}» — он обведён рамкой, сейчас подсвечиваю.",
-        HelpHidden = "Нужно нажать «{0}». {1}", HelpAgentToo = "Ассистент тоже посмотрит и подскажет подробнее.";
+        HelpHidden = "Нужно нажать «{0}». {1}", HelpAgentToo = "Ассистент тоже посмотрит и подскажет подробнее.",
+        HelpAgentIdle = "Ассистент сейчас не следит за уроком: чтобы он ответил, напишите ему в чат «помоги» — шаг и ваш вопрос он увидит.";
+    public string ContinueUnheard = "Ассистент сейчас не следит за уроком. Напишите ему в чат «продолжай» — он увидит, что вы нажали эту кнопку, и подготовит следующий урок.";
     public string HelpSent = "Передал ассистенту — сейчас подскажу.", Highlighting = "Подсвечиваю, куда нажать…", Checking = "Уточняю, где этот пункт…";
     public string IssueMinimized = "Окно свёрнуто — разверните его.", IssueOccluded = "Нужное место закрыто другим окном.",
         IssueInactive = "Переключитесь в нужное приложение.", IssueMissing = "Не нахожу нужный элемент на экране.",
@@ -176,6 +179,7 @@ internal sealed class Loc
         PickTitle = "Pick a point", PickText = "Click the spot. Esc cancels.", PickCount = "Point {0} of {1}",
         Review = "Repeating this step — press Done to continue.",
         Why = "Why",
+        HeadStep = "Step {0}", HeadOf = "of {0}", HeadWaiting = "Waiting", HeadOutro = "Done",
         ScrollUp = "Scroll up", ScrollDown = "Scroll down", ScrollLeft = "Scroll left", ScrollRight = "Scroll right",
         ScrollIssue = "The spot is outside the window — {0}.", ScrollFind = "Scroll the window to bring the spot into view.",
         ScrollHere = "Scroll here — I'll spot “{0}”", ScrollHereAny = "Scroll here — I'll spot the place",
@@ -222,6 +226,8 @@ internal sealed class Loc
         SetAfterTutorial = "Saved. Colour and language apply after the current tutorial.", SetSaveFailed = "Could not save settings: {0}",
         HelpTitle = "Hint", HelpVisible = "Click «{0}» — it is framed, highlighting it now.",
         HelpHidden = "Click «{0}». {1}", HelpAgentToo = "The assistant will look too and say more.",
+        HelpAgentIdle = "The assistant isn't following the lesson right now: to get its answer, write \"help\" to it in the chat — it will see the step and your question.",
+        ContinueUnheard = "The assistant isn't following the lesson right now. Write \"continue\" to it in the chat: it will see you pressed this button and prepare the next lesson.",
         HelpSent = "Told the assistant — a hint is coming.", Highlighting = "Highlighting where to click…", Checking = "Checking where this item is…",
         IssueMinimized = "The window is minimized — restore it.", IssueOccluded = "Another window covers the spot.",
         IssueInactive = "Switch to the app.", IssueMissing = "Can't find the element on screen.",

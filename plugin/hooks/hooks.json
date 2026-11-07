@@ -1,0 +1,16 @@
+{
+  "description": "Keeps the agent that runs a TutorialOverlay lesson from ending its turn while the user is in it, so the card's Help and Keep learning buttons are answered.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.ps1\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

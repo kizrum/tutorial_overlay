@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Text.Json.Nodes;
 using System.Windows.Forms;
@@ -98,7 +97,7 @@ internal sealed class AskWindow : Form
             _fieldRect = new RectangleF(pad, y, inner, 64 * s);
             _box = new TextBox
             {
-                Multiline = true, BorderStyle = BorderStyle.None, BackColor = Palette.InkRaised, ForeColor = Palette.Text,
+                Multiline = true, BorderStyle = BorderStyle.None, BackColor = Palette.Ink, ForeColor = Palette.Text,
                 Font = Theme.Font(14.5f * s), ScrollBars = ScrollBars.None, PlaceholderText = placeholder ?? "",
                 Bounds = Rectangle.Round(RectangleF.Inflate(_fieldRect, -10 * s, -8 * s)),
             };
@@ -189,13 +188,13 @@ internal sealed class AskWindow : Form
         float s = _s, w = ClientSize.Width, h = ClientSize.Height, pad = 18 * s;
         var loc = Settings.Current.Text;
         g.Clear(Palette.Ink);
-        using (var b = new LinearGradientBrush(new RectangleF(0, 0, w, 3 * s), Palette.Accent, Palette.Named["purple"], 0f))
-            g.FillRectangle(b, 0, 0, w, 3 * s);
         using (var pen = new Pen(Palette.Line, 1)) g.DrawRectangle(pen, 0, 0, w - 1, h - 1);
 
-        Theme.IconQuestion(g, new PointF(pad + 8 * s, 24 * s), 16 * s, Palette.Accent, 2f * s);
-        using (var ab = new SolidBrush(Palette.Accent))
-            g.DrawString(_title.ToUpperInvariant(), Theme.Font(11.5f * s, true), ab, new RectangleF(pad + 22 * s, 16 * s, w - pad * 2 - 60 * s, 18 * s), Theme.Wrap);
+        // header in the card's manner: an icon that says "from the assistant", the title, the cross
+        Theme.IconMessage(g, new PointF(pad + 8 * s, 24 * s), 16 * s, Palette.Named["blue"], 1.7f * s);
+        using (var ab = new SolidBrush(Palette.TextDim))
+            g.DrawString(_title, Theme.Font(13 * s, true), ab, new RectangleF(pad + 24 * s, 15 * s, w - pad * 2 - 64 * s, 20 * s), Theme.Wrap);
+        if (_hover == "close") using (var hb = new SolidBrush(Palette.InkHover)) g.FillEllipse(hb, _closeRect);
         Theme.IconCross(g, new PointF(_closeRect.X + _closeRect.Width / 2, _closeRect.Y + _closeRect.Height / 2), 14 * s,
                         _hover == "close" ? Palette.Text : Palette.TextDim, 1.8f * s);
         using (var tb = new SolidBrush(Palette.Text))
@@ -205,12 +204,9 @@ internal sealed class AskWindow : Form
 
         if (_input)
         {
-            using (var path = Theme.Rounded(_fieldRect, 8 * s))
-            {
-                using (var b = new SolidBrush(Palette.InkRaised)) g.FillPath(b, path);
-                using var pen = new Pen(_box!.Focused ? Palette.Accent : Palette.Line, 1.2f * s);
+            using (var path = Theme.Rounded(_fieldRect, 6 * s))
+            using (var pen = new Pen(_box!.Focused ? Palette.Accent : Palette.Line, 1.2f * s))
                 g.DrawPath(pen, path);
-            }
             DrawPill(g, _sendRect, loc.Send, "primary", _hover == "send");
             using var hb = new SolidBrush(Palette.WithAlpha(Palette.TextDim, 0.8f));
             g.DrawString(loc.AskHint, Theme.Font(11 * s), hb, new RectangleF(pad, _sendRect.Y, _sendRect.X - pad - 8 * s, _sendRect.Height),
@@ -218,16 +214,8 @@ internal sealed class AskWindow : Form
         }
     }
 
-    private void DrawPill(Graphics g, RectangleF r, string text, string style, bool hover)
-    {
-        bool primary = style == "primary";
-        using var path = Theme.Rounded(r, r.Height / 2);
-        var fill = primary ? (hover ? Color.FromArgb(255, 255, 110, 135) : Palette.Accent) : (hover ? Palette.InkHover : Palette.InkRaised);
-        using (var b = new SolidBrush(fill)) g.FillPath(b, path);
-        if (!primary) using (var pen = new Pen(hover ? Palette.Accent : Palette.Line, 1 * _s)) g.DrawPath(pen, path);
-        using var tb = new SolidBrush(primary ? Palette.Ink : Palette.Text);
-        g.DrawString(text, Theme.Font(13.5f * _s, true), tb, RectangleF.Inflate(r, -10 * _s, 0), new StringFormat(Theme.Center) { Trimming = StringTrimming.EllipsisCharacter });
-    }
+    private void DrawPill(Graphics g, RectangleF r, string text, string style, bool hover) =>
+        Theme.OutlineButton(g, r, text, style, hover, true, _s);
 
     private string HitTest(Point p)
     {

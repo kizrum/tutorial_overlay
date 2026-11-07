@@ -817,6 +817,7 @@ internal sealed class Tutorial
     public bool OutroOpen;               // finished, the end card is showing
     public DateTime? AdvanceAt;          // step completed, waiting for the short "✓" moment
     public DateTime WaitingSince;        // when the card started waiting for append_steps
+    public bool WaitUnheard;             // "keep learning" pressed while no agent was following events
     public string? CompletedHow;
 
     public Step? Current => Index >= 0 && Index < Steps.Count ? Steps[Index] : null;

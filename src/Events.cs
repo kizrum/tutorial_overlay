@@ -57,8 +57,18 @@ internal static class Events
     }
 
     /// <summary>Publishes an event. The fields of <paramref name="data"/> are moved into the event (data is left empty).</summary>
+    /// <summary>Events that mean the user did something in the lesson (clicked, pressed, asked).</summary>
+    private static readonly HashSet<string> UserEvents = new()
+    {
+        "tutorial_started", "hit", "miss", "key_matched", "button", "help", "outro", "continue_requested", "step_completed", "drag_done", "trace_done", "scroll_done",
+    };
+
+    /// <summary>UTC ticks of the user's last action in a lesson (0: none yet).</summary>
+    public static long LastUserTicks;
+
     public static void Emit(string type, JsonObject? data = null)
     {
+        if (UserEvents.Contains(type)) Interlocked.Exchange(ref LastUserTicks, DateTime.UtcNow.Ticks);
         JsonObject ev;
         TaskCompletionSource pulse;
         lock (Lock)
@@ -110,22 +120,50 @@ internal static class Events
 
     public static List<JsonObject> Since(long seq, int max = 200) => Since(seq, out _, max);
 
+    private static int _listeners;
+    private static long _lastListenTicks;
+
+    /// <summary>
+    /// An agent follows the lesson: a long-poll is waiting now, or one ended a moment ago (the agent is between two
+    /// polls, reacting to what the last one brought). An agent whose turn has ended polls nothing — what the user
+    /// asks on the card then reaches it only with the user's next chat message.
+    /// </summary>
+    public static bool Listening(TimeSpan grace)
+    {
+        if (Volatile.Read(ref _listeners) > 0) return true;
+        long t = Interlocked.Read(ref _lastListenTicks);
+        return t != 0 && DateTime.UtcNow.Ticks - t < grace.Ticks;
+    }
+
     /// <summary>Long-poll: returns as soon as there is at least one event after <paramref name="seq"/>.</summary>
     public static async Task<(List<JsonObject> list, bool gap)> WaitSince(long seq, int timeoutMs, CancellationToken ct)
     {
-        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
-        while (true)
+        bool poll = timeoutMs > 0;
+        if (poll) Interlocked.Increment(ref _listeners);
+        try
         {
-            Task wait;
-            lock (Lock)
+            var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            while (true)
             {
-                if (_seq > seq || seq > _seq) return (Since(seq, out var gap), gap);
-                wait = _pulse.Task;
+                Task wait;
+                lock (Lock)
+                {
+                    if (_seq > seq || seq > _seq) return (Since(seq, out var gap), gap);
+                    wait = _pulse.Task;
+                }
+                var left = deadline - DateTime.UtcNow;
+                if (left <= TimeSpan.Zero) return (new List<JsonObject>(), false);
+                await Task.WhenAny(wait, Task.Delay(left, ct));
+                ct.ThrowIfCancellationRequested();
             }
-            var left = deadline - DateTime.UtcNow;
-            if (left <= TimeSpan.Zero) return (new List<JsonObject>(), false);
-            await Task.WhenAny(wait, Task.Delay(left, ct));
-            ct.ThrowIfCancellationRequested();
+        }
+        finally
+        {
+            if (poll)
+            {
+                Interlocked.Exchange(ref _lastListenTicks, DateTime.UtcNow.Ticks);
+                Interlocked.Decrement(ref _listeners);
+            }
         }
     }
 
