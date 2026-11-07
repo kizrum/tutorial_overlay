@@ -409,6 +409,7 @@ internal static partial class Engine
         var t = _tut!;
         var s = t.Current!;
         t.CompletedHow = how;
+        s.DoneHow = how;
         Events.Emit("step_completed", new() { ["index"] = t.Index, ["id"] = s.Id, ["title"] = s.Title, ["how"] = how });
         int delay = immediate ? 0 : s.AdvanceDelayMs ?? t.AdvanceDelayMs;
         t.AdvanceAt = DateTime.UtcNow.AddMilliseconds(delay);
@@ -610,11 +611,67 @@ internal static partial class Engine
         {
             if (m.Satisfied || !Pinnable(m.Anchor) || Finder.Get(m.Anchor.Key) is not { Found: true } fr || fr.Root == IntPtr.Zero) continue;
             bool openedByPrevious = Resolver.Since.TryGetValue(fr.Root, out var opened)
-                                    && opened <= s.EnteredAt && opened >= s.EnteredAt.AddMilliseconds(-Finder.OpenedBeforeStepMs);
+                                    // the click that ended the last step opens it a moment before or just after the
+                                    // step begins (Blender's file view came 39 ms late and went unpinned)
+                                    && opened <= s.EnteredAt.AddMilliseconds(OpenedAfterStepMs) && opened >= s.EnteredAt.AddMilliseconds(-Finder.OpenedBeforeStepMs);
             bool previousOnesWindow = Finder.ContinueIn is { } ci && ci.InMatches(CleanTitle(Native.WindowTitle(fr.Root)), Native.ClassName(fr.Root));
             if (!openedByPrevious && !previousOnesWindow) continue;
             PinToItsWindow(m, t, s, openedByPrevious ? "opened by the previous step" : "the previous step's window");
+            if (openedByPrevious) m.PinnedToOpened = true;
         }
+    }
+
+    private const int GoneBackMs = 1500, MaxAutoBackDepth = 2, AutoBackAgainSec = 60;
+
+    /// <summary>
+    /// The step's target was on screen and is gone — not scrolled, not covered, not another app: the menu or window
+    /// the previous step's click opened has closed (a wrong item picked, Esc, a click beside it). Nothing on this step
+    /// can be done until it is open again, so the lesson goes back to the step that opens it and says why. Entered
+    /// that way, a step whose own target is gone too goes back again — down to what is on screen.
+    /// </summary>
+    private static void BackIfContainerGone(Tutorial t, Step s, DateTime now)
+    {
+        if (t.Index <= 0) return;
+        var req = s.Targets.Where(m => !m.Satisfied && !m.Optional).ToList();
+        if (req.Count == 0) return;
+        if (req.Any(m => m.Geo != null || m.Visibility == "visible")) { s.SeenThisVisit = true; s.LostSince = null; return; }
+        // Going back on its own must never trap the user, so it is narrow:
+        // only a target known to live in something that comes and goes — a menu (inMenu), the popup the previous
+        // step's click opened, a window of its own (find.in). A button of the main window that OCR misses for a
+        // moment never sends anyone back.
+        bool transient = s.InMenu || req.Any(m => m.PinnedToOpened || m.Anchor.Find is { HasIn: true, InMain: false });
+        if (!transient) { s.LostSince = null; return; }
+        // gone for real: its window closed, or its words are not at its place any more (the same word, only
+        // unreadable — a new theme, a tooltip — is not gone)
+        bool gone = req.All(m => m.Visibility is "closed" || m.Visibility.StartsWith("closed:")
+                                 || m.Visibility is "text not visible" or "template not visible" && Finder.Get(m.Anchor.Key)?.InkLeft != true);
+        // seen and then gone — never "not found yet": a menu item OCR cannot read looks just like a closed menu, and
+        // sending the user back for that would loop. Entered by going back, up to two steps deep
+        bool known = s.SeenThisVisit || s.CameBackAuto && s.AutoBackDepth < MaxAutoBackDepth;
+        var prev = t.Steps[t.Index - 1];
+        bool opener = prev.DoneHow is "targets" or "key";
+        if (!gone || !known || !opener) { s.LostSince = null; return; }
+        s.LostSince ??= now;
+        if ((now - s.LostSince.Value).TotalMilliseconds < GoneBackMs) return;
+        string what = req[0].Label ?? req[0].Id, by = prev.Targets.FirstOrDefault() is { } pm ? pm.Label ?? pm.Id : prev.Title;
+        var loc = Settings.Current.Text;
+        // once per minute from a step: sent back, the user came forward and it is gone again — maybe it is not
+        // gone at all and only unreadable. Say what to do instead of going round; Done and Skip still move on
+        if (now - s.AutoBackAt < TimeSpan.FromSeconds(AutoBackAgainSec))
+        {
+            if (s.Hint == null) { s.Hint = string.Format(loc.IssueOpenPrevious, what, by); s.HintTitle = loc.ReopenTitle; _stepVersion++; }
+            return;
+        }
+        s.AutoBackAt = now;
+        Events.Emit("step_back", new() { ["from"] = t.Index, ["to"] = t.Index - 1, ["source"] = "auto", ["reason"] = "target_gone", ["target"] = what });
+        int depth = s.CameBackAuto ? s.AutoBackDepth + 1 : 1;
+        Enter(t.Index - 1, "auto");
+        var p = t.Current!;
+        p.CameBackAuto = true;
+        p.AutoBackDepth = depth;
+        p.Hint = string.Format(loc.ReopenText, what, by);
+        p.HintTitle = loc.ReopenTitle;
+        _stepVersion++;
     }
 
     /// <summary>The window (find.in, not main) of the nearest earlier step's target, if it has one.</summary>
@@ -628,6 +685,8 @@ internal static partial class Engine
         }
         return null;
     }
+
+    private const int OpenedAfterStepMs = 1500;
 
     /// <summary>A text named only by its app, without find.in: the kind a window can be learned for.</summary>
     private static bool Pinnable(AnchorSpec a) =>
@@ -712,6 +771,7 @@ internal static partial class Engine
             int fgPid = ForegroundPid();
             if (step != null && t != null && !step.Review) PinToOpenedWindow(step, t);
             foreach (var m in marks) ComputeMark(m, step != null && step.Targets.Contains(m) ? t : null, fgPid, now);
+            if (step != null && t is { State: TutorialState.Running, AdvanceAt: null } && ReferenceEquals(t.Current, step)) BackIfContainerGone(t, step, now);
             if (Recorder.Enabled)
                 foreach (var m in marks)
                     if (!RecordedState.TryGetValue(m.Id, out var was) || was != m.Visibility)
@@ -783,7 +843,9 @@ internal static partial class Engine
             if (step != null && t!.AdvanceAt == null) AddDialogVisuals(step, sc, f.Card.Avoid);
             CheckOpens(marks, step, now);
             AddPickVisuals(sc, f.Card.Avoid);
-            if (step?.Sketch is { } sketch) AddSketchVisuals(sketch, sc, f.Card.Avoid);
+            // the user's circling, shown back while the help is fresh: it has done its job once seen, and left on
+            // screen until a slow agent answers it covered the very menu the user was asking about
+            if (step?.Sketch is { } sketch && (now - step.SketchAt).TotalSeconds < SketchShownSeconds) AddSketchVisuals(sketch, sc, f.Card.Avoid);
             // a dialog the app waits on comes first: scrolling the pane behind it does nothing until it is answered
             if (step == null || BlockingDialogWindow(step) == null) AddScrollVisuals(marks, sc, f.Card.Avoid, fgPid);
             if (step?.HighlightUntil is DateTime hu)
@@ -907,7 +969,25 @@ internal static partial class Engine
         return fg;
     }
 
+    /// <summary>A dialog found in the way on this step: it stays in the way while it is open, wherever focus goes.</summary>
+    private static (Step step, IntPtr hwnd)? _stickyDialog;
+
     private static (IntPtr hwnd, string title, Rectangle frame)? ComputeBlockingDialog(Step s)
+    {
+        // Blender hands focus to the window under the pointer: with the pointer off the dialog, the main window was
+        // "in front" for a moment, the card dropped "close it first" and the target's mark came up behind the dialog
+        if (_stickyDialog is { } sd && ReferenceEquals(sd.step, s))
+        {
+            if (Native.IsWindow(sd.hwnd) && Native.IsWindowVisible(sd.hwnd) && !Native.IsIconic(sd.hwnd))
+                return (sd.hwnd, CleanTitle(Native.WindowTitle(sd.hwnd)), Native.FrameRect(sd.hwnd));
+            _stickyDialog = null;
+        }
+        var found = ComputeBlockingDialogNow(s);
+        if (found is { } f) _stickyDialog = (s, f.hwnd);
+        return found;
+    }
+
+    private static (IntPtr hwnd, string title, Rectangle frame)? ComputeBlockingDialogNow(Step s)
     {
         var fg = AppForegroundWindow();
         if (fg == IntPtr.Zero) return null;
@@ -1189,11 +1269,14 @@ internal static partial class Engine
                     // a still text by the top or bottom edge may have scrolled out — inside a pane or a list. Looked
                     // for in a whole window, the edge is the window's own: its button bar does not scroll, and
                     // "scroll down" drew the wheel hint and the mascot over the very button ("Save preset…")
-                    bool pane = ScrollsToFind(a);
+                    // a pane is an element of its own: a part cut out with find.within is often just where a menu
+                    // or a row of buttons is, and a menu closing is not a scroll ("Render Image" asked to scroll up)
+                    bool pane = ScrollsToFind(a) && a.Path.Count > 0;
                     geo.GoneDir = pane ? GoneDirection(lr, fr.PrevRel, frame, geo.View.Value, false) : null;
                     // it was still and is now unreadable (selected, hovered, repainted in a new theme): not scrolled
                     // away, so keep the mark where it was — in a whole window for longer, nothing there moves it
-                    if (geo.GoneDir == null && gone < (pane ? 3 : 20)) geo.FromLastKnown = false;
+                    // longer only while words are still there (a repainted button); a closed menu leaves background
+                    if (geo.GoneDir == null && gone < (pane || !fr.InkLeft ? 3 : 20)) geo.FromLastKnown = false;
                 }
             }
         }
@@ -1229,13 +1312,24 @@ internal static partial class Engine
         }
         var geo = Layout.Build(m, ag, m.Satisfied);
         m.ScrollHint = null;
+        // not seen for a while and gone nowhere we know of: not on screen now. No mark at its old place (the item of
+        // a menu that closed) and no scroll hint either — the card says it cannot see it
+        if (ag.FromLastKnown && ag.GoneDir == null && m.Anchor.Find != null)
+        {
+            m.Geo = null;
+            m.Visibility = m.Anchor.Find.Text != null ? "text not visible" : "template not visible";
+            return;
+        }
         // Out of view only if the point clicked (the anchor point) is out too: a frame drawn to one side of its point
         // (a bar in the playlist, from the point to the right) can reach past the pane's edge while the point itself,
         // where the user clicks, is in plain view. Judging by the frame alone hid such a target behind a scroll hint
         // and its clicks went uncounted.
         if (ag.View is RectangleF view && OutsideView(geo.Center, view, ag.Scale, ag.FromLastKnown) is string seenDir
             && (ag.FromLastKnown || OutsideView(ag.P, view, ag.Scale, false) != null)
-            && (seenDir != "unknown" || ag.GoneDir == null ? seenDir : ag.GoneDir) is string dir0)
+            // known only by where it was last seen: a scroll hint needs evidence that it went somewhere (it was moving,
+            // or the content scrolled past it). Without that it is just not on screen now — a menu that closed, a
+            // window opened over it — and "scroll here" sent the user scrolling for an item in a closed menu
+            && (ag.FromLastKnown ? ag.GoneDir : seenDir) is string dir0)
         {
             string dir = dir0 == "unknown" ? "any" : dir0;      // not seen and no idea which way: just "scroll here"
             // the target scrolled out of the pane: point at the edge it went past
@@ -1384,7 +1478,13 @@ internal static partial class Engine
         RectangleF b = r.Rel is RectangleF rel ? new RectangleF(frame.X + rel.X, frame.Y + rel.Y, rel.Width, rel.Height) : frame;
         var area = a.Find.Within is RectangleF w ? new RectangleF(b.X + w.X, b.Y + w.Y, w.Width, w.Height) : b;
         area.Intersect(b);
-        return area.Width < 40 || area.Height < 40 ? null : area;
+        if (area.Width < 40 || area.Height < 40) return null;
+        // only where the user can scroll it now: its window in front and nothing over the area. Another window opened
+        // by mistake (Blender's render window, a dialog) is what needs closing — a wheel drawn there sent them
+        // scrolling something they could not even see
+        var mid = new PointF(area.X + area.Width / 2, area.Y + area.Height / 2);
+        if (Native.HitWindow(mid).root != r.Root || GetForegroundWindow() != r.Root) return null;
+        return area;
     }
 
     /// <summary>Where the wheel stands: just inside the edge the target went past, in line with the target.</summary>
@@ -1872,6 +1972,19 @@ internal static partial class Engine
     }
 
     /// <summary>Why the user can't see this step's targets (null when at least one is visible).</summary>
+    /// <summary>
+    /// The name of what the step before this one clicked: a target not on screen is most often in the menu or window
+    /// that click opens (Blender draws its menus inside its window, so a closed one cannot be told from a missing item).
+    /// </summary>
+    private static string? PreviousTargetName(Step s)
+    {
+        if (_tut is not { } tut) return null;
+        int i = tut.Steps.IndexOf(s);
+        if (i <= 0) return null;
+        var m = tut.Steps[i - 1].Targets.FirstOrDefault();
+        return m == null ? null : m.Label ?? m.Id;
+    }
+
     private static string? TargetIssue(Step s)
     {
         if (BlockingDialog(s) is string dialog) return string.Format(Settings.Current.Text.IssueDialog, dialog);
@@ -1888,7 +2001,8 @@ internal static partial class Engine
             "scroll-right" => string.Format(t.ScrollIssue, t.ScrollRight.ToLowerInvariant()),
             "scroll-unknown" => t.ScrollFind,
             // not seen: "scroll" only where there is something to scroll, otherwise it is just not on screen
-            "template not visible" or "text not visible" => open[0].ScrollHint != null ? t.ScrollFind : t.IssueMissing,
+            "template not visible" or "text not visible" => open[0].ScrollHint != null ? t.ScrollFind
+                : PreviousTargetName(s) is string prev ? string.Format(t.IssueOpenPrevious, open[0].Label ?? open[0].Id, prev) : t.IssueMissing,
             "occluded" => t.IssueOccluded,
             "inactive" => t.IssueInactive,
             "offscreen" => t.IssueOffscreen,
@@ -1925,6 +2039,7 @@ internal static partial class Engine
             s.HintTitle = Settings.Current.Text.HelpTitle;
             s.HighlightUntil = DateTime.UtcNow.AddSeconds(6); s.NextPing = default;
             s.Sketch = sketch is { Empty: false } ? sketch.Strokes.ToList() : null;
+            s.SketchAt = DateTime.UtcNow;
             if (reason == "cant_find") { s.HighlightUntil = DateTime.UtcNow.AddSeconds(6); s.NextPing = default; }
             Native.GetCursorPos(out var cur);
             Events.Emit("help", new()
@@ -1998,6 +2113,8 @@ internal static partial class Engine
             avoid.Add(b);
         }
     }
+
+    private const double SketchShownSeconds = 6;
 
     /// <summary>The agent's answer on the card (cleared when the step changes).</summary>
     public static JsonObject SetHint(JsonNode args)

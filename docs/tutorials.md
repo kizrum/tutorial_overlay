@@ -73,6 +73,17 @@ window. When the user clicks a text that has no `in`, the overlay adds it from t
 "Theme settings" item of a menu for the Theme tab of the settings, a dialog's "Options" heading for the menu bar's
 OPTIONS.
 
+A step whose targets live in a menu or popup the previous step opens can say so with `inMenu: true` (useful where
+the menu is drawn inside the app's window, as in Blender, so no window comes and goes). When such a menu is closed —
+a wrong item picked, Esc, a click beside it — the step cannot be done, and the lesson goes back to the step that
+opens it, with "It closed — open it again". The same holds for a target in a window of its own (`find.in`) and one
+learned to live in the popup the previous step's click opened. Going back on its own is kept narrow so it can never
+trap the user: only such targets; only after the target was on screen during the step and is gone for good (its
+window closed, or its words are not at its place any more — a word only repainted or under a tooltip is not gone);
+at most two steps back; and once a minute per step — gone again soon after, the card says what to reopen instead.
+A plain target that OCR misses for a moment, and steps that are actions (keys, drags, scrolling), never go back.
+Done and Skip always move on.
+
 Several occurrences in one window, no `index`: a whole caption comes before the same words inside a longer one ("Dark"
 before "Dark orange", the "Ports" tab before "Ports.cs"), then the one in the author's letter case ("BassDrum" before
 "Bassdrum 22"), then reading order. `index` counts in reading order alone. A text only matches from the start of a

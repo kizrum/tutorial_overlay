@@ -49,7 +49,12 @@ restart Claude Code. Do not try to install or download it yourself.
    a bigger control (a tab, a drop-down with its arrow, a menu-bar item) is framed and clicked as that control
    (`validate` shows it as `visible`). (An older TutorialOverlay frames only the words: there, give a `rect` the
    size of the control, or a click on the arrow beside the text is a miss.)
-4. **One small action per step**, in the user's words: what to click and where it is.
+4. **One small action per step**, in the user's words: what to click and where it is. Know each step's role as you
+   write it: it opens a menu or window, it acts inside one, it is an action (keys, drag, scroll), or a setting in a
+   window that stays. A step whose target is in a menu the previous step opens gets `inMenu: true`; a target in a
+   window gets `find.in`, and the click that must open a window gets `opens`. Then a menu or window closed by a
+   wrong click sends the lesson back to the step that opens it, by itself, with a card saying so — the user is never
+   left on "click Render Image" with the menu gone.
 5. **Teach, not just click.** Put the reason in each step's `why`: what the tool does, why this way, the usual
    mistake. Keep `say` (the mascot's line) under 60 characters.
 6. **Say when a step is done.** No `until`: done when all targets are clicked. Otherwise pick the condition that

@@ -29,7 +29,7 @@ internal static class SpecLint
     private static readonly HashSet<string> Grid = Set("from", "step", "dx", "dy", "rows", "cols", "cells", "w", "h");
     private static readonly HashSet<string> Step = Union(Mark, Set("id", "title", "text", "description", "body", "why", "explain", "because", "say",
         "untilMode", "toggle", "dim", "advanceDelayMs", "numbered", "anchor", "targets", "marks", "shapes", "buttons", "controls", "checklist",
-        "sequence", "until", "complete", "done"));
+        "sequence", "until", "complete", "done", "inMenu"));
     private static readonly HashSet<string> Cond = Union(Anchor, Set("type", "count", "anchor", "at", "expr", "when", "radius", "keys", "key", "from", "to",
         "button", "show", "hold", "holding", "path", "points", "smooth", "ordered", "direction", "tolerance", "coverage", "in", "area", "over", "dir",
         "notches", "until", "untilVisible", "property", "prop", "equals", "is", "contains", "matches", "regex", "not"));

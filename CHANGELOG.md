@@ -37,6 +37,13 @@ only fixes things.
 - A text that stood still and turns unreadable (a selected list row, light on blue) while the same words show
   elsewhere does not jump there: its place is read again, enlarged and inverted, and while words are still there the
   mark stays — "Counter-Strike 2" in Steam's library list, not the "Counter-Strike 2 Update" news beside it.
+- A step whose target lives in a menu (`inMenu: true`), a window of its own (`find.in`) or the popup the previous
+  click opened, and was seen and then gone for good, goes back to the step that opens it, with a card saying so —
+  at most two steps, once a minute per step; plain targets and action steps never do.
+- Blender's underlined shortcut letters: a word's first letter read as another ("Bender Image") is one slip in a
+  longer text. The help circling fades after 6 s. A mark is held at its place only while the same word (by its
+  letters' shape) is there; no scroll hint without evidence of scrolling, nor over an area another window covers.
+  A dialog in the way stays in the way while open, wherever the pointer (Blender's focus) goes.
 - A text is found from the start of a word on: "Reset" no longer lands on the "Presets" heading above the button
   ("Kick" still counts in "Kicks").
 - `match: "exact"` no longer takes one side of a dashed title for a menu-bar item: "Master" is not found in

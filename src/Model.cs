@@ -423,6 +423,7 @@ internal sealed class Mark
     public PixelCheck? Check;
     public string Button = "left";       // left | right | middle | any
     public bool Optional;
+    public bool PinnedToOpened;           // learned to live in the window the previous step's click opened (a popup)
     public string? Label;                 // human name for events / checklist
     public string DoneStyle = "hide";     // hide | check (leave a green tick when satisfied)
     public bool? HideInactive;            // hide while the anchor's app is not in the foreground
@@ -712,6 +713,7 @@ internal sealed class Step
     public bool HelpPending;
     public bool Checking;                              // target_not_found sent: the agent is looking for the right item
     public List<PointF[]>? Sketch;                     // what the user circled with the help request (until the answer)
+    public DateTime SketchAt;                          // when: the circling fades on its own after a few seconds
     public DateTime? HighlightUntil;
     public DateTime NextPing;
     public DateTime? SeqMissingSince;            // current sequence target's anchor gone (menu closed?)
@@ -752,6 +754,7 @@ internal sealed class Step
             s.Controls = new HashSet<string>(ctl.Select(x => (J.AsStr(x) ?? "").ToLowerInvariant()));
         s.Checklist = J.Bool(n, "checklist");
         s.Sequence = J.Bool(n, "sequence") ?? false;
+        s.InMenu = J.Bool(n, "inMenu") ?? false;
         if (s.Numbered)
             for (int k = 0; k < s.Targets.Count; k++)
                 if (!s.Targets[k].Shapes.Any(x => x.Type == "badge"))
@@ -763,8 +766,17 @@ internal sealed class Step
         return s;
     }
 
+    public bool InMenu;                              // its targets are in a menu / popup the previous step opens
+    public string? DoneHow;                          // how it was last completed (targets, key, agent, …)
+    public bool SeenThisVisit;                       // its target was on screen during this visit
+    public DateTime? LostSince;                      // seen, then gone (a menu that closed): since when
+    public bool CameBackAuto;                        // entered by going back on its own: its target's container is gone
+    public int AutoBackDepth;                        // how many steps the lesson has gone back on its own to reach it
+    public DateTime AutoBackAt;                      // when the lesson last went back from it on its own (kept across visits)
+
     public void ResetRuntime()
     {
+        SeenThisVisit = false; LostSince = null; CameBackAuto = false; AutoBackDepth = 0;
         foreach (var t in Targets) t.ResetRuntime();
         foreach (var c in Until) c.Reset();
         History.Clear();

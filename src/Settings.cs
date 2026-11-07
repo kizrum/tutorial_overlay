@@ -159,6 +159,8 @@ internal sealed class Loc
         IssueInactive = "Переключитесь в нужное приложение.", IssueMissing = "Не нахожу нужный элемент на экране.",
         IssueClosed = "Это было в меню или окне, которое сейчас закрыто, — откройте его снова.",
         IssueClosedIn = "Это в окне «{0}» — сначала откройте его.",
+        IssueOpenPrevious = "Не вижу «{0}». Если это пункт меню или окна — сначала снова откройте «{1}».",
+        ReopenTitle = "Меню закрылось", ReopenText = "«{0}» было в меню или окне, которое закрылось. Откройте его снова: нажмите «{1}».",
         IssueOffscreen = "Нужное место за пределами экрана.", IssueNotRunning = "Приложение не запущено.",
         IssueNotAnswering = "Приложение сейчас не отвечает — закройте открытое меню (Esc), я найду нужное место.",
         IssueElevated = "Программа запущена от имени администратора — запустите TutorialOverlay так же, иначе я не вижу ваших кликов в ней.";
@@ -225,6 +227,8 @@ internal sealed class Loc
         IssueInactive = "Switch to the app.", IssueMissing = "Can't find the element on screen.",
         IssueClosed = "It was in a menu or window that is closed now — open it again.",
         IssueClosedIn = "It is in the \"{0}\" window — open it first.",
+        IssueOpenPrevious = "I can't see \"{0}\". If it is in a menu or window, open \"{1}\" again first.",
+        ReopenTitle = "It closed", ReopenText = "\"{0}\" was in a menu or window that has closed. Open it again: click \"{1}\".",
         IssueOffscreen = "The spot is off screen.", IssueNotRunning = "The app is not running.",
         IssueNotAnswering = "The app is not answering right now — close the open menu (Esc) and I'll find the spot.",
         IssueElevated = "The app runs as administrator — start TutorialOverlay as administrator too, or I can't see your clicks in it.",

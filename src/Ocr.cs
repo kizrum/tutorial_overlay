@@ -538,7 +538,7 @@ internal static unsafe class Ocr
                 if ((s > 0 && text[s - 1] != ' ') || (e < text.Length && text[e] != ' ')) continue;
                 int d = 0;
                 for (int k = 0; k < q.Length && d <= tol; k++)
-                    if (text[s + k] != q[k]) d += LookAlike(text[s + k], q[k]) ? 1 : tol + 1;
+                    if (text[s + k] != q[k]) d += LookAlike(text[s + k], q[k]) || Underlined(q, k, text[s + k]) ? 1 : tol + 1;
                 if (d < best) { best = d; bestAt = s; }
             }
             if (bestAt >= 0 && best <= tol) res.Add(new TextMatch(Original(bestAt, q.Length), Span(bestAt, q.Length), best / (float)q.Length));
@@ -553,6 +553,14 @@ internal static unsafe class Ocr
         "l1i|!íì", "0oо°", "5s", "8bв", "2z", "6б", "9g",
         "aа", "eеё", "pр", "cс", "yу", "xх", "kк", "mм", "tт", "hн", "nп", "uи", "rг",
     };
+
+    /// <summary>
+    /// A menu underlines the letter of its shortcut (Blender's "R̲ender Image", Windows' Alt keys), mostly the first
+    /// of a word, and the underline turns it into another letter ("Bender Image"). In a longer text (8+) a word's
+    /// first letter read as another letter costs one slip, like a look-alike; digits never (2 and 8 are other steps).
+    /// </summary>
+    private static bool Underlined(string q, int k, char read) =>
+        q.Length >= 8 && (k == 0 || q[k - 1] == ' ') && char.IsLetter(q[k]) && char.IsLetter(read);
 
     private static bool LookAlike(char a, char b)
     {
@@ -573,7 +581,7 @@ internal static unsafe class Ocr
             cur[0] = prev[0] + Indel(a[i - 1]);
             for (int j = 1; j <= b.Length; j++)
             {
-                int sub = a[i - 1] == b[j - 1] ? 0 : LookAlike(a[i - 1], b[j - 1]) ? 1 : hard;
+                int sub = a[i - 1] == b[j - 1] ? 0 : LookAlike(a[i - 1], b[j - 1]) || Underlined(b, j - 1, a[i - 1]) ? 1 : hard;
                 cur[j] = Math.Min(Math.Min(cur[j - 1] + Indel(b[j - 1]), prev[j] + Indel(a[i - 1])), prev[j - 1] + sub);
             }
             (prev, cur) = (cur, prev);

@@ -554,6 +554,10 @@ public static class OcrTests
         A.Eq(0, Ocr.Find(Lines("Audio settings"), "Audio", "exact").Count, "a word of a phrase is still not the whole line");
         A.Eq(1, Ocr.Find(Lines("Мaстер"), "Мастер").Count, "Latin a read for Cyrillic а");
         A.Eq(1, Ocr.Find(Lines("Presets", "Save preset...", "Reset"), "Reset").Count, "not inside another word: only the button");
+        A.Eq(1, Ocr.Find(Lines("Bender Image"), "Render Image").Count, "an underlined shortcut letter read as another");
+        A.Eq(1, Ocr.Find(Lines("Bender Image"), "Render Image", "exact").Count, "exact too");
+        A.Eq(0, Ocr.Find(Lines("Bender"), "Render").Count, "a short word: no");
+        A.Eq(0, Ocr.Find(Lines("Render Imade"), "Render Image").Count, "only a word's first letter");
         A.Eq(2, Ocr.Find(Lines("Kicks", "808 Kick"), "Kick").Count, "from a word's start on it still counts");
         A.Eq(1, Ocr.Find(Lines("(none)"), "none").Count, "after punctuation is a word's start");
         var title = new OcrLine();

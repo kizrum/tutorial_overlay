@@ -82,7 +82,7 @@ internal sealed class Template
 /// <summary>Where a template / text was last found; PrevRel is the sighting before LastRel (which way it was moving).</summary>
 /// <summary>Size: of the found text / template piece (what a shape without coordinates frames); kept while it is out of view.</summary>
 internal sealed record FindResult(bool Found, PointF Rel, float Score, PointF? LastRel, DateTime At, PointF? PrevRel = null, DateTime LastSeenAt = default, bool Moving = false, string? Went = null, SizeF Size = default, IntPtr Root = default, RectangleF? Visible = null, RectangleF? Box = null,
-                              PointF[]? Places = null, string? Closed = null);
+                              PointF[]? Places = null, string? Closed = null, bool InkLeft = false);
 
 /// <summary>
 /// Visual anchors: finds templates inside the anchor's element using the window's own pixels (PrintWindow),
@@ -220,9 +220,11 @@ internal static class Finder
         if (Log.Verbose)
             Log.Debug($"find text \"{a.Find.TextShown}\": order fresh [{string.Join(", ", fresh.Select(W))}] → main → stale [{string.Join(", ", stale.Select(W))}]" +
                       $" (step since {StepSince:HH:mm:ss.fff}, opened: {string.Join(", ", popups.Select(h => Resolver.Since.TryGetValue(h, out var t) ? $"{t:HH:mm:ss.fff}" : "?"))})");
+        // a window searched again keeps what was found in it a moment ago (held through a tooltip over the words)
+        FindResult? PrevIn(IntPtr h) => prev is { Root: var pr } && pr == h ? prev : null;
         foreach (var h in fresh)
         {
-            var r = SearchIn(a.WithHwnd(h), null);
+            var r = SearchIn(a.WithHwnd(h), PrevIn(h));
             if (r.Found) { if (Log.Verbose) Log.Debug($"  found in fresh {W(h)}"); return r with { Root = h }; }
         }
         var main = SearchIn(a, prev is { Root: var pr } && pr == IntPtr.Zero ? prev : null);
@@ -230,7 +232,7 @@ internal static class Finder
         if (Log.Verbose) Log.Debug("  not in main");
         foreach (var h in stale)
         {
-            var r = SearchIn(a.WithHwnd(h), null);
+            var r = SearchIn(a.WithHwnd(h), PrevIn(h));
             if (r.Found) { if (Log.Verbose) Log.Debug($"  found in stale {W(h)}"); return r with { Root = h }; }
         }
         var miss = main;
@@ -407,6 +409,25 @@ internal static class Finder
             if (m.Count > 0) return m[0].Rect;
         }
         return null;
+    }
+
+    /// <summary>
+    /// The followed word's letters are still there, whatever their colours now: the pixels off the background at that
+    /// spot cover mostly the same places as the word's own letters did (a new theme keeps the shapes, other words
+    /// do not). <paramref name="at"/>: top-left of the word in the picture.
+    /// </summary>
+    private static bool SameShape(Bitmap shot, Point at, Track tr)
+    {
+        var r = new Rectangle(at.X, at.Y, tr.W, tr.H);
+        if (tr.Ink.Length < 12 || r.X < 0 || r.Y < 0 || r.Right > shot.Width || r.Bottom > shot.Height) return false;
+        using var part = shot.Clone(r, shot.PixelFormat);
+        var px = Template.GrayFull(part);
+        var nowInk = InkOf(px);
+        if (nowInk.Length == px.Length) return false;              // no letters at all: background
+        var was = new HashSet<int>(tr.Ink);
+        int both = nowInk.Count(was.Contains);
+        int union = was.Count + nowInk.Length - both;
+        return union > 0 && both / (double)union >= 0.45;
     }
 
     /// <summary>Something is written there (not an empty strip): the gray levels vary like letters do.</summary>
@@ -587,7 +608,19 @@ internal static class Finder
                 // the mark: what was found a moment ago stays for a little while
                 if (found.Count <= f.Nth && prev is { Found: true } && !moving && (DateTime.UtcNow - prev.At).TotalMilliseconds < HoldMs)
                     return prev;
-                if (found.Count <= f.Nth) { Tracks.TryRemove(a.Key, out _); return Miss(); }
+                if (found.Count <= f.Nth)
+                {
+                    Tracks.TryRemove(a.Key, out var lostTrack);
+                    // the same word still where it stood, only drawn differently (a new theme, hovered, pressed): the
+                    // mark may wait there. Other words there (the header under a menu that closed) or none: it may not
+                    bool sameWord = false;
+                    if (prev is { Found: true } && lostTrack != null)
+                    {
+                        var was1 = new PointF(frame.X + prev.Rel.X - readArea.X, frame.Y + prev.Rel.Y - readArea.Y);
+                        sameWord = SameShape(shot, new Point((int)Math.Round(was1.X - lostTrack.W / 2f), (int)Math.Round(was1.Y - lostTrack.H / 2f)), lostTrack);
+                    }
+                    return Miss() with { InkLeft = sameWord || prev?.InkLeft == true && !prev.Found };
+                }
                 // it stood still and now reads only far away: its own place turned unreadable (a list item got
                 // selected, white on blue) while the same words show elsewhere ("Counter-Strike 2 Update" in the news
                 // beside Steam's library list). Read the old place closer; still nothing, but words there: the mark
