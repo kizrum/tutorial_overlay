@@ -27,7 +27,9 @@ restart Claude Code. Do not try to install or download it yourself.
 2. **Write the whole path ahead.** Targets in menus and dialogs that are not open yet get anchors from what you
    know (`find: {text: 'General settings'}` or an element name; where versions name it differently, list the full
    names: `text: ['General settings', 'General preferences']` — needs a TutorialOverlay with `inspect`, an older one
-   takes only one text); the overlay finds them when the window opens, so
+   takes only one text). When you know which window the text is in, say so with `find.in`: `"main"` for the app's
+   own menu bar and panels, `{title: 'Settings'}` for a dialog (the start of its title) — the same words in another
+   window ("Options" in a settings page, "Theme settings" in a menu) are then never taken for it. The overlay finds them when the window opens, so
    the lesson runs without waiting on you. If the target is not where it should be (a window opened without it, or
    an open panel or list does not show it after a few seconds), a `target_not_found` event
    brings that window's numbered contents with ready anchors: pick the right one and call `retarget` — or tell the
@@ -49,7 +51,10 @@ restart Claude Code. Do not try to install or download it yourself.
    matches the result: `appear` for a window that opens, `uia` for a checkbox or toggle state, `pixel` for a cell
    that lights up, `key` for a shortcut, `drag`, `scroll`, `trace`. Use `opens` on a target that must open a window.
 7. **Check before starting:** `validate(spec)` resolves every anchor. Fix errors; warnings on later steps often
-   mean a window an earlier step opens. Never start a step you have not validated, even a quick test one.
+   mean a window an earlier step opens. Never start a step you have not validated, even a quick test one. A text
+   target with `repeated` is on screen several times and the mark goes to the first: check which one the step means
+   and pin it with `find.within` or `find.index` (or use the element / numbered anchor) — "Save" in the menu bar is
+   not the "Save" button of a dialog.
 8. **Start and follow:** `start_tutorial(spec)`, then `events(since, timeoutMs)` to see hits, misses, `no_effect`
    and `help`. For a long lesson use `keepOpen: true` and `append_steps`. While the lesson runs, keep an `events`
    long-poll going all the time and do nothing slow in between (no builds, no restarts, no long reading): the user

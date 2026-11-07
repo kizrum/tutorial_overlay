@@ -438,6 +438,9 @@ internal static unsafe class Ocr
     /// </summary>
     internal static IEnumerable<(int from, int to)> Items(OcrLine line)
     {
+        // a dash standing alone joins the two sides into one title ("Mixer - Master", "Out 1 - Out 2"): no menu bar
+        // has one, and its items would let "Master" pass for the whole line
+        if (line.Words.Any(w => w.Text is "-" or "–" or "—")) { yield return (0, line.Words.Count); yield break; }
         int start = 0;
         for (int i = 1; i <= line.Words.Count; i++)
         {
@@ -514,16 +517,17 @@ internal static unsafe class Ocr
                 }
                 continue;
             }
-            int at = text.IndexOf(q, StringComparison.Ordinal);
-            if (at >= 0)
+            // from the start of a word on: "Kick" is in "Kicks", but "Reset" is not in "Presets" — a word that only
+            // holds the letters is another word, and the mark would land on it (the "Presets" heading over the button)
+            bool any = false;
+            for (int at = text.IndexOf(q, StringComparison.Ordinal); at >= 0; at = text.IndexOf(q, at + 1, StringComparison.Ordinal))
             {
-                while (at >= 0)
-                {
-                    res.Add(new TextMatch(Original(at, q.Length), Span(at, q.Length), 0));
-                    at = text.IndexOf(q, at + q.Length, StringComparison.Ordinal);
-                }
-                continue;
+                if (at > 0 && char.IsLetterOrDigit(text[at - 1]) && char.IsLetterOrDigit(q[0])) continue;
+                res.Add(new TextMatch(Original(at, q.Length), Span(at, q.Length), 0));
+                any = true;
+                at += q.Length - 1;
             }
+            if (any) continue;
             if (tol == 0 || text.Length < q.Length) continue;
             // near match: an OCR slip swaps a letter for a look-alike (l/I, 0/O) — same length, whole words only.
             // Letting letters go missing turned "Sampler" into the "sample" inside "Resample".

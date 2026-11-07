@@ -392,6 +392,8 @@ internal static partial class Engine
         s.ResetRuntime();
         s.EnteredAt = DateTime.UtcNow;
         Finder.StepSince = s.EnteredAt;
+        Finder.StepGraceMs = Finder.GraceFor(back);
+        Finder.ContinueIn = PreviousWindow(t, idx);
         // coming back must not bounce straight forward again because the step's goal is already true
         s.Review = back;
         _stepVersion++;
@@ -592,6 +594,79 @@ internal static partial class Engine
         if (m.Check != null) ev["checkPending"] = true;
         if (m.OpensArmedAt != null) ev["waitingFor"] = m.Opens!.Describe();
         Events.Emit(kind, ev);
+        if (kind == "hit" && inStep) PinToItsWindow(m, t!, step!, "clicked");
+    }
+
+    /// <summary>
+    /// A text found in the window the previous step's click opened (OPTIONS → its menu, "Audio settings" → the
+    /// settings) lives there: pinned before the user clicks it. Should the user close that window and open another
+    /// with the same words (the menu's "Theme settings" while the step means the settings' Theme tab), the mark does
+    /// not move there — the card says to open the right window. Found in the main window or one open for long, it is
+    /// not pinned: nothing says that is its home.
+    /// </summary>
+    private static void PinToOpenedWindow(Step s, Tutorial t)
+    {
+        foreach (var m in s.Targets)
+        {
+            if (m.Satisfied || !Pinnable(m.Anchor) || Finder.Get(m.Anchor.Key) is not { Found: true } fr || fr.Root == IntPtr.Zero) continue;
+            bool openedByPrevious = Resolver.Since.TryGetValue(fr.Root, out var opened)
+                                    && opened <= s.EnteredAt && opened >= s.EnteredAt.AddMilliseconds(-Finder.OpenedBeforeStepMs);
+            bool previousOnesWindow = Finder.ContinueIn is { } ci && ci.InMatches(CleanTitle(Native.WindowTitle(fr.Root)), Native.ClassName(fr.Root));
+            if (!openedByPrevious && !previousOnesWindow) continue;
+            PinToItsWindow(m, t, s, openedByPrevious ? "opened by the previous step" : "the previous step's window");
+        }
+    }
+
+    /// <summary>The window (find.in, not main) of the nearest earlier step's target, if it has one.</summary>
+    private static FindSpec? PreviousWindow(Tutorial t, int idx)
+    {
+        for (int i = idx - 1; i >= 0; i--)
+        {
+            var f = t.Steps[i].Targets.Select(m => m.Anchor.Find).FirstOrDefault(x => x is { HasIn: true });
+            if (f != null) return f.InMain ? null : f;
+            if (t.Steps[i].Targets.Count > 0) return null;   // a step whose window is not known: no guess past it
+        }
+        return null;
+    }
+
+    /// <summary>A text named only by its app, without find.in: the kind a window can be learned for.</summary>
+    private static bool Pinnable(AnchorSpec a) =>
+        a.Find is { Text: not null, HasIn: false } && a.Process != null && a.Window == null && a.Title == null
+        && a.WindowClass == null && a.Hwnd == null && a.Path.Count == 0;
+
+    /// <summary>
+    /// A text named only by its app, clicked where it was found: from now on it is looked for in that window only —
+    /// the main one, or one with the same title start and class ("Settings" of "Settings - Look and feel"; a menu by
+    /// its class). Going back or replaying the saved lesson then never takes the same words elsewhere: the "Theme
+    /// settings" item of a menu for the Theme tab of the settings, the "Options" heading of a dialog for the menu.
+    /// </summary>
+    private static void PinToItsWindow(Mark m, Tutorial t, Step s, string how)
+    {
+        var a = m.Anchor;
+        if (!Pinnable(a) || a.Find is not { } f) return;
+        string oldKey = a.Key;
+        if (Finder.Get(oldKey) is not { Found: true } fr) return;
+        if (fr.Root == IntPtr.Zero) f.InMain = true;
+        else
+        {
+            if (!Native.IsWindow(fr.Root)) return;
+            var title = CleanTitle(Native.WindowTitle(fr.Root)).Trim();
+            int dash = title.IndexOf(" - ", StringComparison.Ordinal);
+            // the part before " - " names the window; after it, the page or document it shows now (FL's settings
+            // tabs, an editor's file) — it changes while the window stays the same
+            f.InTitle = title.Length == 0 ? null : dash > 0 ? title[..dash].Trim() : title;
+            f.InClass = Native.ClassName(fr.Root);
+        }
+        // what was found stays found under the new key: no blink while the next search runs
+        Finder.Carry(oldKey, a.Key);
+        _stepVersion++;
+        int si = t.Steps.IndexOf(s), k = s.Targets.IndexOf(m);
+        if (si >= 0 && k >= 0 && t.Spec["steps"] is JsonArray specSteps && specSteps.Count == t.Steps.Count
+            && specSteps[si] is JsonObject rawStep && J.Get(rawStep, "targets") is JsonArray rawTargets
+            && rawTargets.Count == s.Targets.Count && rawTargets[k] is JsonObject rawTarget
+            && J.Get(rawTarget, "anchor") is JsonObject rawAnchor && J.Get(rawAnchor, "find") is JsonObject rawFind)
+            rawFind["in"] = f.InJson();
+        Events.Emit("target_pinned", new() { ["step"] = si, ["target"] = m.Id, ["in"] = f.InJson(), ["how"] = how, ["anchor"] = a.Describe() });
     }
 
     // =========================================================== per-frame (UI thread)
@@ -635,7 +710,15 @@ internal static partial class Engine
             var hold = HoldKeys(step);
             if (!hold.SequenceEqual(InputHook.HoldWatched)) InputHook.HoldWatched = hold;
             int fgPid = ForegroundPid();
+            if (step != null && t != null && !step.Review) PinToOpenedWindow(step, t);
             foreach (var m in marks) ComputeMark(m, step != null && step.Targets.Contains(m) ? t : null, fgPid, now);
+            if (Recorder.Enabled)
+                foreach (var m in marks)
+                    if (!RecordedState.TryGetValue(m.Id, out var was) || was != m.Visibility)
+                    {
+                        RecordedState[m.Id] = m.Visibility;
+                        Recorder.Note($"mark-{m.Id}-{m.Visibility}", new JsonObject { ["mark"] = m.Id, ["state"] = m.Visibility, ["was"] = was });
+                    }
             if (Log.Verbose)
                 foreach (var m in marks)
                 {
@@ -785,7 +868,29 @@ internal static partial class Engine
     }
 
     private static IntPtr _lastAppFgWindow;
-    private static readonly Dictionary<string, string> SeenState = new();   // verbose log: a mark's visibility as it changes
+    private static readonly Dictionary<string, string> SeenState = new();
+    private static readonly Dictionary<string, string> RecordedState = new();   // --record: a picture when a mark's state changes
+
+    /// <summary>The current step's targets as they are now (for --record): read without the lock, a moment's race is fine.</summary>
+    internal static JsonArray MarkStates()
+    {
+        var arr = new JsonArray();
+        try
+        {
+            if (_tut is { } t && t.Current is { } s)
+            {
+                arr.Add((JsonNode)new JsonObject { ["step"] = t.Index, ["title"] = s.Title, ["hint"] = s.Hint });
+                foreach (var m in s.Targets.ToList())
+                    arr.Add((JsonNode)new JsonObject
+                    {
+                        ["id"] = m.Id, ["name"] = m.Label, ["state"] = m.Visibility, ["satisfied"] = m.Satisfied,
+                        ["at"] = m.Geo is { } g ? J.PtJson(g.A.P) : null, ["anchor"] = m.Anchor.Describe(),
+                    });
+            }
+        }
+        catch { }
+        return arr;
+    }   // verbose log: a mark's visibility as it changes
 
     /// <summary>
     /// The foreground window, except that a screenshot tool in front does not count: while the user snips the
@@ -806,6 +911,7 @@ internal static partial class Engine
     {
         var fg = AppForegroundWindow();
         if (fg == IntPtr.Zero) return null;
+        if (LessonsOwnWindow(fg)) return null;
         // the window a target is looked for in is never in the way, even while its mark is out of sight for a moment
         if (s.Targets.Any(m => !m.Satisfied && Resolver.Get((m.Anchor.Find != null ? m.Anchor.WithoutFind() : m.Anchor).Key) is { Found: true } wr && wr.Root == fg))
             return null;
@@ -828,6 +934,31 @@ internal static partial class Engine
         var main = Native.FrameRect(roots.First());
         if ((long)frame.Width * frame.Height >= (long)main.Width * main.Height * 0.6) return null;   // another big window, not a dialog
         return (fg, title, frame);
+    }
+
+    /// <summary>
+    /// A window the lesson itself led to: a target of this or an earlier step lives in it (find.in, written or pinned —
+    /// the settings the steps OPTIONS → Audio settings → Theme opened), the step's own condition names it, or the
+    /// previous step's click opened it. It is never "a dialog to answer first", even on a step with no target of its
+    /// own: asking to close it would undo what the lesson just did. A dialog open before the lesson, or one that
+    /// popped up by itself ("Save changes?"), still is.
+    /// </summary>
+    private static bool LessonsOwnWindow(IntPtr hwnd)
+    {
+        if (_tut is not { } t || t.Index < 0 || t.Current is not { } cur) return false;
+        string title = CleanTitle(Native.WindowTitle(hwnd)), cls = Native.ClassName(hwnd);
+        // a target of this or an earlier step lives in it
+        if (t.Steps.Take(t.Index + 1).SelectMany(s => s.Targets)
+            .Any(m => m.Anchor.Find is { HasIn: true, InMain: false } f && f.InMatches(title, cls))) return true;
+        // the step itself is about it ("type a name in Preset name", until it disappears)
+        bool Names(AnchorSpec? a) => a != null && title.Length > 0
+            && (a.Window != null && title.Contains(a.Window, StringComparison.OrdinalIgnoreCase)
+                || a.Title != null && title.Contains(a.Title, StringComparison.OrdinalIgnoreCase)
+                || a.WindowClass != null && cls.Equals(a.WindowClass, StringComparison.OrdinalIgnoreCase));
+        if (cur.Until.Any(c => Names(c.Anchor))) return true;
+        // the previous step's click opened it (Save preset… → Preset name): the lesson led there
+        return Resolver.Since.TryGetValue(hwnd, out var opened) && opened <= cur.EnteredAt.AddMilliseconds(500)
+               && opened >= cur.EnteredAt.AddMilliseconds(-Finder.OpenedBeforeStepMs) && t.Index > 0;
     }
 
     /// <summary>Window titles may carry control or invisible characters (FL Studio's do): spaces instead, once.</summary>
@@ -1016,6 +1147,8 @@ internal static partial class Engine
         {
             var fr = Finder.Get(a.Key);
             if (fr == null) { reason = "searching"; return null; }
+            // its window (find.in) is not open: nothing to scroll, nowhere to point — the card says to open it
+            if (fr.Closed is string closedIn) { reason = "closed:" + closedIn; return null; }
             // found in one of the app's menus / dialogs (an anchor naming only the app): the mark belongs to that window
             if (fr.Root != IntPtr.Zero && fr.Root != root)
             {
@@ -1053,10 +1186,14 @@ internal static partial class Engine
                 }
                 else
                 {
-                    geo.GoneDir = GoneDirection(lr, fr.PrevRel, frame, geo.View.Value, false);
-                    // it was still and is now unreadable (selected, hovered, redrawn): not scrolled away, so
-                    // keep the mark where it was for a while
-                    if (geo.GoneDir == null && gone < 3) geo.FromLastKnown = false;
+                    // a still text by the top or bottom edge may have scrolled out — inside a pane or a list. Looked
+                    // for in a whole window, the edge is the window's own: its button bar does not scroll, and
+                    // "scroll down" drew the wheel hint and the mascot over the very button ("Save preset…")
+                    bool pane = ScrollsToFind(a);
+                    geo.GoneDir = pane ? GoneDirection(lr, fr.PrevRel, frame, geo.View.Value, false) : null;
+                    // it was still and is now unreadable (selected, hovered, repainted in a new theme): not scrolled
+                    // away, so keep the mark where it was — in a whole window for longer, nothing there moves it
+                    if (geo.GoneDir == null && gone < (pane ? 3 : 20)) geo.FromLastKnown = false;
                 }
             }
         }
@@ -1759,6 +1896,8 @@ internal static partial class Engine
             "not answering" => t.IssueNotAnswering,
             "elevated" => t.IssueElevated,
             "resolving" or "searching" => null,
+            "closed" or "closed:" => t.IssueClosed,
+            string c when c.StartsWith("closed:") => string.Format(t.IssueClosedIn, c["closed:".Length..]),
             _ => t.IssueMissing,
         };
     }

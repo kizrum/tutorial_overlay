@@ -43,6 +43,49 @@ dotnet run --project tests -- Lint    # only those with "Lint" in their name
 
 The exit code is the number of failed tests.
 
+## OCR bench
+
+Saved screenshots of real apps with the text to look for and where it truly is, read through the same path as a
+live text anchor (`Finder.FindIn`). It measures what matters for a mark: does it land on the target (recall), on
+something else (false match), how far off the centre is, how often the text is on screen more than once, and how
+long a read takes. Each run is saved and compared with the previous one, so a change to the OCR, its
+preprocessing or the matching shows up as cases that changed, not as a feeling.
+
+```powershell
+dotnet run --project tests -- --ocr-capture FL64 fl_main            # the app's window as a live search reads it
+dotnet run --project tests -- --ocr-bench                           # all cases in examples/ocr/cases.json
+```
+
+The capture writes `name.png` and, to help with labelling, `name.uia.txt` (UI Automation elements: `rel` is the
+position in the picture, a truth that does not come from OCR) and `name.ocr.txt` (what OCR reads now — check it on
+the picture before taking it as a truth). A case is an anchor's `find` as written in a tutorial and a `truth`
+rectangle in the picture's pixels, or `null` for a text that must not be found:
+
+```json
+{ "cases": [ { "id": "fl-options", "image": "fl_main.png", "find": { "text": "OPTIONS" }, "truth": [264, 15, 74, 30] } ] }
+```
+
+Like the examples, the set lives in `examples/ocr/` on your own computer only. Worth covering: each app you teach,
+dark and light themes, 100 % and 150 % scale, small and dim captions, Cyrillic and mixed lines, words that occur
+more than once, and texts that are absent but close to something present.
+
+## Live UX run
+
+Tests cover the logic, the bench covers OCR; only a live lesson shows whether the loop works for a person. One
+5–15 minute lesson per app (FL Studio first; then one with a real UIA tree, such as Excel or OBS), driven by the agent
+through the plugin as a user would, each time through all of these:
+
+1. ask the agent for the lesson; do a few steps as the card says;
+2. pretend not to understand a step and press Help — does the answer get you unstuck?
+3. make a mistake (click beside the target, open the wrong menu), circle the area and ask the agent to sort it out;
+4. move and resize the window, scroll, switch a tab, open a dialog — do the marks follow, and come back?
+5. go back a step and do it again;
+6. finish, and ask to go on with a new topic.
+
+For every problem note: the app, the step, what happened, how much it got in the way (blocks the lesson / costs
+time / cosmetic), whether it repeats, and whether it is general or this app only. Fix in that order: what breaks the
+lesson, marks on the wrong place or lost, steps that complete wrongly or never, Help, then navigation.
+
 ## Example tutorials
 
 Ready tutorials (specs in JSON) are not part of the repository: the `examples/` folder and the tutorial library

@@ -18,7 +18,6 @@ internal static partial class Engine
     /// <summary>The target has been missing this long while the new window stood still: not just the menu's fade-in or the first OCR read.</summary>
     private const int MissingAfterMs = 1500;
     /// <summary>A window counts as opened for this step if it appeared at most this long before the step started (the click that completed the previous step opened it).</summary>
-    private const int OpenedBeforeStepMs = 5000;
     /// <summary>
     /// No window opened, but the one the target is looked for in is there (a tab of an open settings window, the
     /// browser list): missing this long into the step, the target is reported too — longer than for a new window,
@@ -71,7 +70,7 @@ internal static partial class Engine
             if (!pids.Contains(ForegroundPid())) { MissingSince.Remove(m.Id); continue; }
             // the newest window of the app that opened around this step and has been there long enough to be searched
             var win = windows.Where(w => pids.Contains(w.Pid) && WindowSince.TryGetValue(w.Hwnd, out var at)
-                                         && at >= step.EnteredAt.AddMilliseconds(-OpenedBeforeStepMs)
+                                         && at >= step.EnteredAt.AddMilliseconds(-Finder.GraceFor(step.Review))
                                          && (now - at).TotalMilliseconds >= MissingAfterMs)
                              .OrderByDescending(w => WindowSince[w.Hwnd]).FirstOrDefault();
             RectangleF? scope = null;

@@ -270,8 +270,23 @@ internal static class Icons
         bool topEdge = false, botEdge = false;
         for (int i = 0; i < capY && top > 0; i++) { if (Edge(Row(top - 1, t.X, t.Right))) { topEdge = true; break; } top--; }
         for (int i = 0; i < capY && bot < h; i++) { if (Edge(Row(bot, t.X, t.Right))) { botEdge = true; break; } bot++; }
-        bool boxed = topEdge && botEdge;
+        // a button, a tab, a drop-down holds its caption in the middle; edges far off-centre are other things — a
+        // caption under a picture tile has the tile above and the NEXT tile below, and a frame reaching there takes
+        // a click on the neighbour ("Light pear" under "Dark orange") for this one
+        bool boxed = topEdge && botEdge && Math.Abs((t.Y - top) - (bot - t.Bottom)) <= Math.Max(4, th / 2);
         if (!boxed) { top = Math.Max(0, t.Y - th / 2); bot = Math.Min(h, t.Bottom + th / 2); }
+
+        // columns of ink from x on (gaps of a letter space allowed), up to a little over a line's height
+        int InkRun(int x0, int dir)
+        {
+            int run = 0, gap = 0, maxGap = Math.Max(2, th / 4);
+            for (int x = x0; x >= 0 && x < w && run + gap < th * 2; x += dir)
+            {
+                if (Ink(Col(x, t.Y, t.Bottom))) { run += gap + 1; gap = 0; }
+                else if (++gap > maxGap) break;
+            }
+            return run;
+        }
 
         int capX = Math.Clamp(th * 14, 120, 360);
         int Side(int dir, out bool bounded)
@@ -285,6 +300,14 @@ internal static class Icons
                 if (boxed)
                 {
                     if (Edge(Col(nx, top, bot))) { bounded = true; break; }
+                    // another caption on the same strip, past more than a word space ("Reset" beside "Save preset…",
+                    // their divider too faint to count): two buttons — this one ends halfway into the gap
+                    bool letters = Ink(Col(nx, t.Y, t.Bottom));
+                    // a word, not a drop-down's arrow or an icon: ink running on for a line's height or more
+                    if (letters && gapAt >= 0 && Math.Abs(x - gapAt) >= Math.Max(4, th * 7 / 10) && InkRun(nx, dir) >= th)
+                    { bounded = true; return (x + gapAt) / 2; }
+                    if (!letters && gapAt < 0) gapAt = x;
+                    if (letters) gapAt = -1;
                 }
                 else
                 {

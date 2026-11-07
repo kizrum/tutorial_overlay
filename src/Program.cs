@@ -221,6 +221,7 @@ internal static class Program
                 case "--show-inactive": Engine.HideWhenInactiveDefault = false; break;
                 case "--hide-from-capture": Settings.Global.HideFromCapture = true; break;
                 case "--verbose": Log.Verbose = true; break;
+                case "--record": Recorder.Enabled = true; break;
                 // started by --stdio: nobody sits in front of it to read an "already running" message box
                 case "--background": Background = true; break;
                 case "--instance":
@@ -254,6 +255,7 @@ internal static class Program
 
         if (!ClaimInstance()) return AlreadyRunning();
         Log.OpenFile("");
+        Recorder.Start();
         CleanUpOldFiles();
         _ = Instances.Running();     // removes a server.json left behind by a killed server
 

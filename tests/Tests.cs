@@ -15,6 +15,9 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "--ocr-bench") return OcrBench.Run(args.Skip(1).ToArray());
+        if (args.Length > 0 && args[0] == "--ocr-read") return OcrBench.ReadOut(args.Skip(1).ToArray());
+        if (args.Length > 0 && args[0] == "--ocr-capture") return OcrBench.Capture(args.Skip(1).ToArray());
         var filter = args.Length > 0 ? args[0] : null;
         var tests = typeof(Program).Assembly.GetTypes()
             .SelectMany(t => t.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
@@ -318,6 +321,161 @@ public static class LibraryTests
     }
 }
 
+public static class RankTests
+{
+    private static List<OcrLine> Lines(params (string text, float y)[] rows)
+    {
+        var res = new List<OcrLine>();
+        foreach (var (t, y) in rows)
+        {
+            var l = new OcrLine();
+            float x = 0;
+            foreach (var w in t.Split(' ')) { l.Words.Add(new OcrWord(w, new RectangleF(x, y, w.Length * 8, 14))); x += w.Length * 8 + 6; }
+            res.Add(l);
+        }
+        return res;
+    }
+
+    /// <summary>The line the mark goes to (by its y), as the search picks: Rank, then find.index.</summary>
+    private static float Pick(List<OcrLine> lines, string find)
+    {
+        var f = FindSpec.Parse(A.Json(find))!;
+        var found = Finder.MatchAny(lines, f).OrderBy(m => Math.Round(m.Rect.Y / 8)).ThenBy(m => m.Rect.X).ToList();
+        return Finder.Rank(found, lines, f)[f.Nth].Rect.Y;
+    }
+
+    public static void TestWholeCaptionBeforePartOfALongerOne()
+    {
+        var themes = Lines(("Dark orange", 0), ("Dark", 100));
+        A.Eq(100f, Pick(themes, "{\"text\":\"Dark\"}"), "the theme Dark, not Dark orange above it");
+        A.Eq(0f, Pick(themes, "{\"text\":\"Dark\",\"index\":0}"), "index counts in reading order");
+    }
+
+    public static void TestOwnLetterCaseBreaksATie()
+    {
+        var browser = Lines(("Bassdrum 22", 0), ("W BassDrum", 100));
+        A.Eq(100f, Pick(browser, "{\"text\":\"BassDrum\"}"), "the author's case");
+        A.Eq(0f, Pick(browser, "{\"text\":\"bassdrum\"}"), "no capitals given: reading order");
+    }
+}
+
+public static class ControlBoxTests
+{
+    /// <summary>A grey picture (bg 40) with a text block and full-width border lines at the given rows.</summary>
+    private static byte[] Pic(int w, int h, Rectangle text, params int[] borderRows)
+    {
+        var g = new byte[w * h];
+        Array.Fill(g, (byte)40);
+        foreach (var y in borderRows) for (int x = 0; x < w; x++) g[y * w + x] = 160;
+        for (int y = text.Y; y < text.Bottom; y++) for (int x = text.X; x < text.Right; x += 3) g[y * w + x] = 220;
+        return g;
+    }
+
+    public static void TestCentredCaptionIsItsButton()
+    {
+        var t = new Rectangle(100, 50, 80, 20);
+        var box = Icons.ControlBox(Pic(300, 120, t, 41, 79), 300, 120, t);
+        A.Check(box is Rectangle b && b.Top <= 42 && b.Bottom >= 79, "a box around the caption: " + box);
+    }
+
+    public static void TestTwoButtonsOnOneStripAreTwo()
+    {
+        // one strip (borders above and below), "Reset" and "Save preset" on it with a faint divider: no edge between
+        var t = new Rectangle(160, 50, 80, 20);
+        var g = Pic(300, 120, t, 41, 79);
+        for (int y = 50; y < 70; y++) for (int x = 60; x < 120; x += 3) g[y * 300 + x] = 220;   // the other caption
+        var box = Icons.ControlBox(g, 300, 120, t);
+        A.Check(box is Rectangle b && b.Left > 120, "the frame stops before the other caption: " + box);
+    }
+
+    public static void TestDropDownKeepsItsArrow()
+    {
+        var t = new Rectangle(100, 50, 80, 20);
+        var g = Pic(300, 120, t, 41, 79);
+        for (int y = 56; y < 64; y++) for (int x = 200; x < 208; x++) g[y * 300 + x] = 220;   // a small arrow
+        for (int y = 41; y < 80; y++) g[y * 300 + 230] = 160;                                  // the box's right edge
+        var box = Icons.ControlBox(g, 300, 120, t);
+        A.Check(box is Rectangle b && b.Right >= 208, "the arrow is part of the drop-down: " + box);
+    }
+
+    public static void TestCaptionPressedToOneEdgeIsNotABox()
+    {
+        // a tile caption: its picture 6 px above, the next tile 30 px below
+        var t = new Rectangle(100, 50, 80, 20);
+        var box = Icons.ControlBox(Pic(300, 140, t, 43, 100), 300, 140, t);
+        A.Check(box is not Rectangle b || b.Bottom < 90, "the frame must not reach the next tile: " + box);
+    }
+}
+
+public static class JitterTests
+{
+    public static void TestHoverShakeIsNotAMove()
+    {
+        A.Check(Finder.Jitter(5, 0, 16), "a hovered item sliding sideways");
+        A.Check(Finder.Jitter(8, 0, 16), "up to half a line sideways");
+        A.Check(Finder.Jitter(2, 1, 16), "the highlight shifting the fit a pixel");
+    }
+
+    public static void TestScrollIsStillFollowed()
+    {
+        A.Check(!Finder.Jitter(0, 3, 16), "a slow scroll step");
+        A.Check(!Finder.Jitter(0, -24, 16), "a line up");
+        A.Check(!Finder.Jitter(30, 0, 16), "a sideways scroll");
+    }
+}
+
+public static class FindInTests
+{
+    private static FindSpec F(string json) => FindSpec.Parse(A.Json(json))!;
+
+    public static void TestWindowByTitleStartAndClass()
+    {
+        var f = F("{\"text\":\"Theme\",\"in\":{\"title\":\"Settings\",\"class\":\"TMIDIForm\"}}");
+        A.Check(f.InMatches("Settings - Look and feel", "TMIDIForm"), "another tab of the same window");
+        A.Check(f.InMatches("Settings - Audio devices / mixer", "TMIDIForm"), "and another");
+        A.Check(!f.InMatches("", "TQuickPopupMenuWindow"), "not a menu");
+        A.Check(!f.InMatches("Settings - x", "TOther"), "class differs");
+    }
+
+    public static void TestMenuByClassAndMain()
+    {
+        var menu = F("{\"text\":\"Audio settings\",\"in\":{\"class\":\"TQuickPopupMenuWindow\"}}");
+        A.Check(menu.InMatches("", "TQuickPopupMenuWindow"), "a menu without a title");
+        A.Check(!menu.InMatches("Settings - Look and feel", "TMIDIForm"), "not the dialog");
+        var main = F("{\"text\":\"OPTIONS\",\"in\":\"main\"}");
+        A.Check(main.InMain && !main.InMatches("", "TQuickPopupMenuWindow"), "main: only the main window");
+        A.Eq("main", main.InJson()!.ToString(), "written back as main");
+        A.Check(F("{\"text\":\"OPTIONS\"}").Key != main.Key, "in is part of the key");
+    }
+
+    public static void TestLintKnowsIn()
+    {
+        var w = SpecLint.CheckSteps(A.Json("[{\"title\":\"t\",\"targets\":[{\"anchor\":{\"process\":\"FL64\",\"find\":{\"text\":\"OPTIONS\",\"in\":\"main\"}}}]}]"), 0);
+        A.Eq(0, w.Count, "find.in is a known field: " + string.Join("; ", w));
+    }
+}
+
+public static class RepeatTests
+{
+    private static FindSpec F(string json) => FindSpec.Parse(A.Json(json))!;
+    private static readonly List<PointF> Two = new() { new PointF(10, 20), new PointF(300, 400) };
+
+    public static void TestRepeatedTextIsFlagged()
+    {
+        var note = Engine.RepeatNote(F("{\"text\":\"Save\"}"), Two);
+        A.Check(note != null && note.Contains("2 times") && note.Contains("(300,400)"), "two places, both listed: " + note);
+    }
+
+    public static void TestPinnedOrSingleTextIsNot()
+    {
+        A.Eq(null, Engine.RepeatNote(F("{\"text\":\"Save\",\"index\":1}"), Two), "index chosen by the author");
+        A.Eq(null, Engine.RepeatNote(F("{\"text\":\"Save\",\"index\":0}"), Two), "index 0 given explicitly");
+        A.Eq(null, Engine.RepeatNote(F("{\"text\":\"Save\"}"), new List<PointF> { new(1, 1) }), "only once");
+        A.Eq(null, Engine.RepeatNote(F("{\"text\":\"Save\"}"), null), "followed / not counted");
+        A.Eq(null, Engine.RepeatNote(F("{\"template\":\"play\"}"), Two), "templates have their own tie check");
+    }
+}
+
 public static class OcrTests
 {
     private static List<OcrLine> Lines(params string[] texts)
@@ -367,6 +525,14 @@ public static class OcrTests
         A.Check(hit[0].Rect.Width == 40, "framed on the item alone");
         A.Eq(0, Ocr.Find(Lines("Audio settings"), "Audio", "exact").Count, "a word of a phrase is still not the whole line");
         A.Eq(1, Ocr.Find(Lines("Мaстер"), "Мастер").Count, "Latin a read for Cyrillic а");
+        A.Eq(1, Ocr.Find(Lines("Presets", "Save preset...", "Reset"), "Reset").Count, "not inside another word: only the button");
+        A.Eq(2, Ocr.Find(Lines("Kicks", "808 Kick"), "Kick").Count, "from a word's start on it still counts");
+        A.Eq(1, Ocr.Find(Lines("(none)"), "none").Count, "after punctuation is a word's start");
+        var title = new OcrLine();
+        float tx = 0;
+        foreach (var w in new[] { "Mixer", "-", "Master" }) { title.Words.Add(new OcrWord(w, new RectangleF(tx, 0, w.Length * 8, 14))); tx += w.Length * 8 + 12; }
+        A.Eq(0, Ocr.Find(new List<OcrLine> { title }, "Master", "exact").Count, "a dashed title is one line, not menu items");
+        A.Eq(1, Ocr.Find(new List<OcrLine> { title }, "Mixer - Master", "exact").Count, "the whole title still matches");
     }
 
     public static void TestYoAndRegex()

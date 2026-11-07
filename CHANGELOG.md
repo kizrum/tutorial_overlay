@@ -6,6 +6,36 @@ only fixes things.
 
 ## [Unreleased]
 
+- `validate` warns (`repeated`) when a text target without `index` is on screen more than once, and lists where:
+  the mark goes to the first in reading order, which may not be the one the step means.
+- `find.in` names the window a text lives in (`"main"`, or `{title, class}`): it is looked for there only, and with
+  that window closed the card says to open it. A text clicked where it was found is pinned to that window
+  (`target_pinned`, kept by `save_tutorial`): going back no longer marks "Theme settings" in a menu for the Theme tab
+  of the settings, or a dialog's "Options" heading for the menu bar's OPTIONS.
+- On a step gone back to, a window opened just before it is no longer taken for the step's own.
+- A text seen in a menu that has closed no longer asks to scroll the main window toward where the menu was.
+- Several occurrences in one window, no `index`: a whole caption before the same words in a longer one, then the
+  author's letter case, then reading order.
+- A text found in the window the previous step's click opened, or in the previous step's window, is pinned there
+  before it is clicked, and that window is read right after the step's new ones: the step after the Theme tab finds
+  the settings' "Options", not the menu bar's OPTIONS.
+- A window the lesson led to (a target lives in it, the step's condition names it, or the previous step's click opened
+  it) is never "a dialog to close first".
+- Not found, but a line holds part of it: that line is read again, enlarged ("Save preset…" on FL's dark-orange
+  button, where the recognizer dropped "Save").
+- Looked for in a whole window, a still text that turns unreadable (repainted in a new theme, hovered) keeps its mark
+  for up to 20 s and never asks to scroll: a window's button bar does not scroll. One jump of the follower before it
+  is lost no longer counts as scrolling.
+- A hovered menu item no longer shakes the mark: a sideways step of up to half a line, or a pixel or two, is not
+  followed.
+- A caption framed as its control only when it sits in the middle of it: the caption under a picture tile no longer
+  reaches into the next tile, and two buttons on one strip ("Reset", "Save preset…") are framed apart.
+- `--record` (development): a screenshot with the overlay for every lesson event and mark change, with the event and
+  the marks' states beside it, in `%LOCALAPPDATA%\TutorialOverlay\records\`.
+- A text is found from the start of a word on: "Reset" no longer lands on the "Presets" heading above the button
+  ("Kick" still counts in "Kicks").
+- `match: "exact"` no longer takes one side of a dashed title for a menu-bar item: "Master" is not found in
+  "Mixer - Master".
 - A found text is framed and clicked as the control it sits on: a drop-down with its arrow, a tab, a menu-bar item
   (up to halfway to its neighbour). A click on the arrow or beside the caption is a hit, not a miss. Text in a page,
   with nothing around it, is still framed by its words.

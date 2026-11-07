@@ -18,7 +18,7 @@ internal static class SpecLint
     private static readonly HashSet<string> Anchor = Set("process", "app", "window", "windowClass", "title", "hwnd", "relativeTo", "client",
         "origin", "element", "path", "find", "offset", "dx", "dy", "screen");
     private static readonly HashSet<string> Element = Set("name", "match", "role", "controlType", "type", "automationId", "id", "className", "class", "pick", "index");
-    private static readonly HashSet<string> Find = Set("template", "id", "axis", "maxScore", "text", "match", "lang", "index", "nth", "within");
+    private static readonly HashSet<string> Find = Set("template", "id", "axis", "maxScore", "text", "match", "lang", "index", "nth", "within", "in");
     private static readonly HashSet<string> Check = Set("anchor", "at", "expr", "when", "radius");
     private static readonly HashSet<string> Shape = Set("type", "shape", "x", "y", "w", "width_px", "wide", "h", "height", "r", "radius_px", "to", "length",
         "text", "label", "n", "color", "thickness", "stroke", "lineWidth", "size", "fontSize", "target", "title", "id", "buttonId", "style", "action",

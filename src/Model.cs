@@ -58,7 +58,15 @@ internal sealed class FindSpec
     public string TextMatch = "contains";   // contains | exact | regex
     public string? Lang;              // OCR language tag (default: the user's languages)
     public int Nth;                   // which occurrence, top-to-bottom then left-to-right (0 = first)
+    public bool NthGiven;             // the author chose the occurrence (index / nth), so several of them are expected
     public RectangleF? Within;        // search only this part of the element (relative to its top-left)
+    // in: which of the app's windows the text lives in — "main", or a window by its title's start and class
+    // ("Settings" of "Settings - Look and feel", TMIDIForm); a menu without a title by its class. Written by hand, or
+    // learned from the window the user's click found it in, so going back or replaying never takes the same words in
+    // another window (the "Theme settings" item of a menu for the Theme tab of the settings).
+    public bool InMain;
+    public string? InTitle, InClass;
+    public bool HasIn => InMain || InTitle != null || InClass != null;
     public string Axis = "xy";        // xy | x | y — which coordinates come from the match (y: keyboard rows, x: bar ruler)
     public float MaxScore = 0.08f;    // mean abs difference allowed (0 identical … 1 opposite)
 
@@ -76,12 +84,16 @@ internal sealed class FindSpec
             TextMatch = (J.Str(n, "match") ?? "contains").ToLowerInvariant(),
             Lang = J.Str(n, "lang"),
             Nth = J.Int(n, "index") ?? J.Int(n, "nth") ?? 0,
+            NthGiven = J.Has(n, "index") || J.Has(n, "nth"),
         };
         // text: one wording, or several the app may use (versions, languages) — the first one found wins
         if (J.Arr(n, "text") is JsonArray variants)
             f.Texts = variants.Select(J.AsStr).OfType<string>().Where(s => s.Trim().Length > 0).ToList();
         else if (f.Text != null) f.Texts = new List<string> { f.Text };
         f.Text = f.Texts.FirstOrDefault();
+        var inn = J.Unwrap(J.Get(n, "in"));
+        if (inn is JsonValue && J.AsStr(inn) is string iv) { if (iv.Equals("main", StringComparison.OrdinalIgnoreCase)) f.InMain = true; else f.InTitle = iv; }
+        else if (inn is JsonObject io) { f.InTitle = J.Str(io, "title"); f.InClass = J.Str(io, "class"); }
         if (J.Arr(n, "within") is JsonArray a && a.Count >= 4)
             f.Within = new RectangleF((float)(J.AsNum(a[0]) ?? 0), (float)(J.AsNum(a[1]) ?? 0), (float)(J.AsNum(a[2]) ?? 0), (float)(J.AsNum(a[3]) ?? 0));
         return f;
@@ -90,7 +102,20 @@ internal sealed class FindSpec
     /// <summary>The wordings for messages: "A" or "A / B".</summary>
     public string TextShown => string.Join(" / ", Texts);
 
-    public string Key => Text != null ? $"text:{string.Join("|", Texts)}/{TextMatch}/{Lang}/{Nth}/{Within}/{Axis}" : $"{Template}/{Within}/{Axis}/{MaxScore}";
+    public string Key => Text != null ? $"text:{string.Join("|", Texts)}/{TextMatch}/{Lang}/{Nth}/{Within}/{Axis}/{InShown}" : $"{Template}/{Within}/{Axis}/{MaxScore}";
+
+    /// <summary>The window it lives in, for messages: "main", "Settings", "the TQuickPopupMenuWindow window"; null: any.</summary>
+    public string? InShown => InMain ? "main" : InTitle ?? (InClass != null ? InClass : null);
+
+    /// <summary>The window as JSON for find.in: "main" or {title, class}.</summary>
+    public JsonNode? InJson() => InMain ? JsonValue.Create("main")
+        : HasIn ? new JsonObject { ["title"] = InTitle, ["class"] = InClass } : null;
+
+    /// <summary>A window of the app is the one find.in names (main is told apart by the caller).</summary>
+    public bool InMatches(string title, string cls) =>
+        !InMain && (InClass != null || InTitle != null)
+        && (InClass == null || cls.Equals(InClass, StringComparison.OrdinalIgnoreCase))
+        && (InTitle == null || title.TrimStart().StartsWith(InTitle, StringComparison.OrdinalIgnoreCase));
 }
 
 /// <summary>
@@ -219,7 +244,7 @@ internal sealed class AnchorSpec
         if (Title != null) parts.Add($"title~\"{Title}\"");
         if (WindowClass != null) parts.Add($"class {WindowClass}");
         foreach (var p in Path) parts.Add("> " + p.Describe());
-        if (Find != null) parts.Add(Find.Text != null ? $"find text \"{Find.TextShown}\"" + (Find.Nth > 0 ? $" #{Find.Nth}" : "") : $"find template '{Find.Template}'");
+        if (Find != null) parts.Add(Find.Text != null ? $"find text \"{Find.TextShown}\"" + (Find.Nth > 0 ? $" #{Find.Nth}" : "") + (Find.InShown is string inn ? $" in {inn}" : "") : $"find template '{Find.Template}'");
         return string.Join(" ", parts);
     }
 }

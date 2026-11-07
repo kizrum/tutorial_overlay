@@ -157,6 +157,8 @@ internal sealed class Loc
     public string HelpSent = "Передал ассистенту — сейчас подскажу.", Highlighting = "Подсвечиваю, куда нажать…", Checking = "Уточняю, где этот пункт…";
     public string IssueMinimized = "Окно свёрнуто — разверните его.", IssueOccluded = "Нужное место закрыто другим окном.",
         IssueInactive = "Переключитесь в нужное приложение.", IssueMissing = "Не нахожу нужный элемент на экране.",
+        IssueClosed = "Это было в меню или окне, которое сейчас закрыто, — откройте его снова.",
+        IssueClosedIn = "Это в окне «{0}» — сначала откройте его.",
         IssueOffscreen = "Нужное место за пределами экрана.", IssueNotRunning = "Приложение не запущено.",
         IssueNotAnswering = "Приложение сейчас не отвечает — закройте открытое меню (Esc), я найду нужное место.",
         IssueElevated = "Программа запущена от имени администратора — запустите TutorialOverlay так же, иначе я не вижу ваших кликов в ней.";
@@ -221,6 +223,8 @@ internal sealed class Loc
         HelpSent = "Told the assistant — a hint is coming.", Highlighting = "Highlighting where to click…", Checking = "Checking where this item is…",
         IssueMinimized = "The window is minimized — restore it.", IssueOccluded = "Another window covers the spot.",
         IssueInactive = "Switch to the app.", IssueMissing = "Can't find the element on screen.",
+        IssueClosed = "It was in a menu or window that is closed now — open it again.",
+        IssueClosedIn = "It is in the \"{0}\" window — open it first.",
         IssueOffscreen = "The spot is off screen.", IssueNotRunning = "The app is not running.",
         IssueNotAnswering = "The app is not answering right now — close the open menu (Esc) and I'll find the spot.",
         IssueElevated = "The app runs as administrator — start TutorialOverlay as administrator too, or I can't see your clicks in it.",

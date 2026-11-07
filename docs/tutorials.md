@@ -63,6 +63,21 @@ item to the menu window (`windowClass` + `offset`) rather than to its text: the 
 not be read. `index` is the occurrence's number top to bottom and left to right; `within: [x,y,w,h]` is a part of
 the element.
 
+A text named only by its app (`{process, find: {text}}`) is looked for in the app's menus and dialogs too: first a
+window opened during the step, then the main window, then windows that were already open. `in` says which window it
+lives in: `"main"`, or `{title, class}` — the start of the window's title (the part before " - ": "Settings" of
+"Settings - Look and feel", which stays when the tab changes) and/or its class (a menu without a title by its class
+alone). Such a text is looked for there only; with the window closed it is not shown, and the card says to open that
+window. When the user clicks a text that has no `in`, the overlay adds it from the window it was found in (event
+`target_pinned`), so going back or replaying the saved lesson never takes the same words in another window: the
+"Theme settings" item of a menu for the Theme tab of the settings, a dialog's "Options" heading for the menu bar's
+OPTIONS.
+
+Several occurrences in one window, no `index`: a whole caption comes before the same words inside a longer one ("Dark"
+before "Dark orange", the "Ports" tab before "Ports.cs"), then the one in the author's letter case ("BassDrum" before
+"Bassdrum 22"), then reading order. `index` counts in reading order alone. A text only matches from the start of a
+word: "Reset" is not in "Presets".
+
 `text` may list several wordings the app may use — versions and translations name the same item differently:
 `find: {text: ["General settings", "General preferences"]}`. The first one found wins, in the given order, so a path
 written ahead does not wait on the agent when the app says it differently. Letter case never matters. A wording that

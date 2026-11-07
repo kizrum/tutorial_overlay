@@ -54,6 +54,19 @@ internal static partial class Engine
         return null;
     }
 
+    /// <summary>
+    /// A text the author did not pin (no index / nth) that is on screen more than once: the mark goes to the first
+    /// (Finder.Rank), which may not be the one the step means ("Save" in the menu and on a dialog button). Null when
+    /// it occurs once, or the author chose the occurrence. <paramref name="places"/>: each one's centre, the marked one first.
+    /// </summary>
+    internal static string? RepeatNote(FindSpec f, IReadOnlyList<PointF>? places)
+    {
+        if (f.Text == null || f.NthGiven || places == null || places.Count < 2) return null;
+        var at = string.Join(", ", places.Take(6).Select((p, i) => $"{i}: ({p.X:0},{p.Y:0})")) + (places.Count > 6 ? ", …" : "");
+        return $"text \"{f.TextShown}\" is on screen {places.Count} times ({at}); the mark goes to 0 (a whole caption before part of a longer one, then the same letter case, then reading order). " +
+               "If that is not the one, pin it: find.within (the part of the element it is in), find.index, match:'exact', or an element anchor";
+    }
+
     private static JsonObject ValidateCore(JsonNode args)
     {
         var spec = J.Unwrap(J.Get(args, "spec")) ?? (J.Has(args, "steps") ? args : null);
@@ -145,6 +158,7 @@ internal static partial class Engine
 
         void Count(JsonObject r)
         {
+            if (J.Has(r, "repeated")) warnings++;
             if (J.Bool(r, "ok") == true) return;
             // a program a later step works in is usually started by an earlier one (Start menu, a link, "opens")
             if (J.Str(r, "reason") == "process not running" && curIndex != firstIndex)
@@ -165,7 +179,8 @@ internal static partial class Engine
             ["steps"] = outSteps,
             ["advice"] = "errors: fix before starting (unknown template, unreadable step, window/element missing on the first step). " +
                          "warnings on later steps are often things an earlier step opens; check them when you get there " +
-                         "(validate again, or watch anchor_found events). 'occluded'/'inactive' only mean another window is in front now.",
+                         "(validate again, or watch anchor_found events). 'occluded'/'inactive' only mean another window is in front now. " +
+                         "'repeated': the text is on screen more than once — make sure the mark is on the right one.",
         };
     }
 
@@ -221,6 +236,9 @@ internal static partial class Engine
                 if (_found == null || !_found.TryGetValue(a.Key, out fr!)) { fr = Finder.Search(a, null); if (_found != null) _found[a.Key] = fr; }
             }
             catch (Exception e) { return Bad((fs.Text != null ? "text search failed: " : "template search failed: ") + e.Message, "error"); }
+            if (!fr.Found && fr.Closed is string closedIn)
+                return Bad(closedIn.Length > 0 ? $"text \"{fs.TextShown}\" is in the window \"{closedIn}\", not open now (fine if an earlier step opens it)"
+                                               : $"text \"{fs.TextShown}\" is in a {fs.InClass} window (a menu), not open now (fine if an earlier step opens it)");
             if (!fr.Found)
                 return Bad(fs.Text != null ? $"text \"{fs.TextShown}\" not visible in the element (scrolled away? different wording or language?)"
                                            : $"template '{fs.Template}' not visible in the element (scrolled away?)");
@@ -239,6 +257,7 @@ internal static partial class Engine
             if (fr.Visible is RectangleF fv) o["visible"] = J.RectJson(new RectangleF(vf.X + fv.X, vf.Y + fv.Y, fv.Width, fv.Height));
             else if (fr.Box is RectangleF fb) o["visible"] = J.RectJson(new RectangleF(vf.X + fr.Rel.X + fb.X, vf.Y + fr.Rel.Y + fb.Y, fb.Width, fb.Height));
             else if (fr.Size.Width > 0) o["visible"] = J.RectJson(new RectangleF(hit.X - fr.Size.Width / 2, hit.Y - fr.Size.Height / 2, fr.Size.Width, fr.Size.Height));
+            if (RepeatNote(fs, fr.Places?.Select(p => new PointF(vf.X + p.X, vf.Y + p.Y)).ToList()) is string rep) o["repeated"] = rep;
         }
         o["point"] = J.PtJson(ag.P);
         if (a.Find == null && !a.HasPoint) o["visible"] = J.RectJson(bounds);

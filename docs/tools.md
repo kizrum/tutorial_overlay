@@ -24,7 +24,7 @@
 | `find_text(text?, anchor, within, match, lang)` | find a caption on screen with the OCR built into Windows: rectangle, centre, `rel` and a `suggestedAnchor` with `find: {text}`; without `text`, all the text recognised in the area |
 | `template(id, anchor, rect)` | remember a small piece of UI as a picture for `find: {template}` anchors |
 | `retarget(target, anchor, step?, label?, title?, text?)` | give a step's target another anchor while the tutorial runs, and the card the item's real name (shapes and checks stay); answers whether the new anchor resolves now. The usual answer to `target_not_found` |
-| `validate(spec?)` | check a tutorial before it starts (or the current one): for each step, whether its target is visible now, and if not, why |
+| `validate(spec?)` | check a tutorial before it starts (or the current one): for each step, whether its target is visible now, and if not, why; `repeated` — a text target without `index` that is on screen more than once (the mark goes to the first) |
 | `wait_for_turn(timeoutMs)` | wait until another agent frees the server (after a `busy` answer) and take it |
 | `release()` | finish: the server is free for another agent, a running tutorial carries on |
 | `ask(question, options, input)` | ask the user in a panel above the card and wait for the answer: a button (`{choice, label}`) or text (`{text}`) |

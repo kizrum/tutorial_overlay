@@ -81,7 +81,8 @@ internal sealed class Template
 /// <summary>Where a template was last found, relative to its window's frame (so marks follow window moves).</summary>
 /// <summary>Where a template / text was last found; PrevRel is the sighting before LastRel (which way it was moving).</summary>
 /// <summary>Size: of the found text / template piece (what a shape without coordinates frames); kept while it is out of view.</summary>
-internal sealed record FindResult(bool Found, PointF Rel, float Score, PointF? LastRel, DateTime At, PointF? PrevRel = null, DateTime LastSeenAt = default, bool Moving = false, string? Went = null, SizeF Size = default, IntPtr Root = default, RectangleF? Visible = null, RectangleF? Box = null);
+internal sealed record FindResult(bool Found, PointF Rel, float Score, PointF? LastRel, DateTime At, PointF? PrevRel = null, DateTime LastSeenAt = default, bool Moving = false, string? Went = null, SizeF Size = default, IntPtr Root = default, RectangleF? Visible = null, RectangleF? Box = null,
+                              PointF[]? Places = null, string? Closed = null);
 
 /// <summary>
 /// Visual anchors: finds templates inside the anchor's element using the window's own pixels (PrintWindow),
@@ -121,6 +122,15 @@ internal static class Finder
     }
 
     public static FindResult? Get(string key) => Results.TryGetValue(key, out var r) ? r : null;
+
+    /// <summary>An anchor got a new key (pinned to its window): its last result, follower and frame go with it.</summary>
+    public static void Carry(string from, string to)
+    {
+        if (Results.TryGetValue(from, out var r)) Results[to] = r;
+        if (Tracks.TryGetValue(from, out var tr)) Tracks[to] = tr;
+        if (Boxes.TryGetValue(from, out var b)) Boxes[to] = b;
+        if (TextSearchedAt.TryGetValue(from, out var at)) TextSearchedAt[to] = at;
+    }
 
     private static void Loop()
     {
@@ -176,6 +186,7 @@ internal static class Finder
         if (a.Find?.Text == null || a.Process == null || a.Window != null || a.Title != null || a.WindowClass != null || a.Hwnd != null || a.Path.Count > 0)
             return SearchIn(a, prev);
         var pids = Resolver.Pids(a.Process);
+        if (a.Find.HasIn) return SearchInItsWindow(a, prev, pids);
         // the app's windows but its largest per process (as Resolver.Popups, but also for an app no lesson watches:
         // validate before the start)
         var popups = Resolver.RecentWindows(400)
@@ -183,38 +194,94 @@ internal static class Finder
             .GroupBy(w => w.Pid)
             .SelectMany(g => g.OrderByDescending(w => (long)w.Frame.Width * w.Frame.Height).Skip(1))
             .Where(w => Native.IsWindowVisible(w.Hwnd)).Select(w => w.Hwnd).ToList();
-        if (popups.Count == 0) return SearchIn(a, prev);
+        if (popups.Count == 0)
+        {
+            // where it was seen in a menu that has closed says nothing about the main window: carried over, that spot
+            // was "past the window's edge" and the card asked to scroll. A miss still belongs to the closed menu
+            var only = SearchIn(a, prev is { Root: var r0 } && r0 == IntPtr.Zero ? prev : null);
+            return !only.Found && prev is { Root: var seen } && seen != IntPtr.Zero ? only with { Root = seen } : only;
+        }
         // a menu or dialog opened during this step (by the click the step asks for, or the one that ended the
         // previous step) comes first: that is where the user is looking. Then the main window, and only then a dialog
         // that was already open — its "Options" heading is not the menu bar's OPTIONS
-        var fromStep = StepSince.AddMilliseconds(-OpenedBeforeStepMs);
+        var fromStep = StepSince.AddMilliseconds(-StepGraceMs);
         bool Fresh(IntPtr h) => Resolver.Since.TryGetValue(h, out var at) && at >= fromStep;
         var fresh = popups.Where(Fresh).ToList();
         var stale = popups.Where(h => !Fresh(h)).ToList();
+        // the window the previous step's target was in (the settings, for the step after its Theme tab): the lesson
+        // goes on there before the main window is read — else "Options" in it went to the menu bar's OPTIONS
+        if (ContinueIn is { } ci)
+        {
+            var cont = stale.Where(h => ci.InMatches(Native.WindowTitle(h), Native.ClassName(h))).ToList();
+            foreach (var h in cont) { stale.Remove(h); fresh.Add(h); }
+        }
         if (prev is { Found: true, Root: var was } && was != IntPtr.Zero && fresh.Remove(was)) fresh.Insert(0, was);
+        string W(IntPtr h) => $"0x{h.ToInt64():X} \"{Native.WindowTitle(h)}\"";
+        if (Log.Verbose)
+            Log.Debug($"find text \"{a.Find.TextShown}\": order fresh [{string.Join(", ", fresh.Select(W))}] → main → stale [{string.Join(", ", stale.Select(W))}]" +
+                      $" (step since {StepSince:HH:mm:ss.fff}, opened: {string.Join(", ", popups.Select(h => Resolver.Since.TryGetValue(h, out var t) ? $"{t:HH:mm:ss.fff}" : "?"))})");
         foreach (var h in fresh)
         {
             var r = SearchIn(a.WithHwnd(h), null);
-            if (r.Found) return r with { Root = h };
+            if (r.Found) { if (Log.Verbose) Log.Debug($"  found in fresh {W(h)}"); return r with { Root = h }; }
         }
         var main = SearchIn(a, prev is { Root: var pr } && pr == IntPtr.Zero ? prev : null);
-        if (main.Found) return main;
+        if (main.Found) { if (Log.Verbose) Log.Debug("  found in main"); return main; }
+        if (Log.Verbose) Log.Debug("  not in main");
         foreach (var h in stale)
         {
             var r = SearchIn(a.WithHwnd(h), null);
-            if (r.Found) return r with { Root = h };
+            if (r.Found) { if (Log.Verbose) Log.Debug($"  found in stale {W(h)}"); return r with { Root = h }; }
         }
         var miss = main;
         // last seen in a menu: a miss still belongs to that window (its last position is relative to it)
         return prev is { Root: var seenIn } && seenIn != IntPtr.Zero && miss.Root == IntPtr.Zero ? miss with { Root = seenIn } : miss;
     }
 
+    /// <summary>
+    /// A text whose window is known (find.in): looked for there only. Not open → not found, Closed = its title ("" for
+    /// a menu without one; the card says to open it) — the same words elsewhere are another thing, and a mark there sends the user wrong.
+    /// </summary>
+    private static FindResult SearchInItsWindow(AnchorSpec a, FindResult? prev, int[] pids)
+    {
+        var f = a.Find!;
+        if (f.InMain) return SearchIn(a, prev is { Root: var pr } && pr == IntPtr.Zero ? prev : null);
+        var mine = Resolver.RecentWindows(400)
+            .Where(w => pids.Contains(w.Pid) && w.Frame.Width > 1 && w.Frame.Height > 1 && !Native.IsIconic(w.Hwnd))
+            .GroupBy(w => w.Pid)
+            .SelectMany(g => g.OrderByDescending(w => (long)w.Frame.Width * w.Frame.Height).Skip(1))   // not the main window
+            .Where(w => Native.IsWindowVisible(w.Hwnd) && f.InMatches(Native.WindowTitle(w.Hwnd), w.Class))
+            .Select(w => w.Hwnd).ToList();
+        if (prev is { Found: true, Root: var was } && mine.Remove(was)) mine.Insert(0, was);
+        if (Log.Verbose) Log.Debug($"find text \"{f.TextShown}\" in {f.InShown}: {mine.Count} such window(s) open");
+        foreach (var h in mine)
+        {
+            var r = SearchIn(a.WithHwnd(h), h == (prev?.Root ?? IntPtr.Zero) ? prev : null);
+            if (r.Found) return r with { Root = h };
+        }
+        PointF? last = prev?.Found == true ? prev.Rel : prev?.LastRel;
+        return new FindResult(false, default, 1, mine.Count > 0 ? last : null, DateTime.UtcNow, Root: mine.Count > 0 ? prev?.Root ?? IntPtr.Zero : IntPtr.Zero,
+                              Closed: mine.Count == 0 ? f.InTitle ?? "" : null);
+    }
+
     /// <summary>How long a text found a moment ago stays put through reads that miss it.</summary>
     private const int HoldMs = 1200;
 
+    /// <summary>The window the previous step's target lives in (its find.in), read right after the step's new windows.</summary>
+    public static volatile FindSpec? ContinueIn;
+
     /// <summary>When the current step began (MaxValue: no lesson running — then the main window comes first).</summary>
     public static DateTime StepSince = DateTime.MaxValue;
-    private const int OpenedBeforeStepMs = 5000;
+    /// <summary>
+    /// A window opened this long before the step began still counts as the step's own: the click that ended the
+    /// previous step opened it. Not for a step gone back to — the windows later steps opened (the settings dialog
+    /// with its own "Options") are not where this step's target is (its menu bar's OPTIONS).
+    /// </summary>
+    public static int StepGraceMs = OpenedBeforeStepMs;
+    internal const int OpenedBeforeStepMs = 5000;
+
+    /// <summary>How long before a step's start a window may have opened and still be the step's own.</summary>
+    internal static int GraceFor(bool wentBack) => wentBack ? 0 : OpenedBeforeStepMs;
 
     /// <summary>A template fits another place (half a template or more away) almost as well as the best one.</summary>
     private const float AmbiguousMargin = 0.012f;
@@ -283,6 +350,85 @@ internal static class Finder
         return (float)shot.Width * shot.Height > budget ? Ocr.ReadTiled(shot, f.Lang, 1f, query) : Ocr.Read(shot, f.Lang, query, budget);
     }
 
+    /// <summary>OCR budget for reading a text's whole search area (pixels handed to one recognizer run).</summary>
+    internal const float WholeAreaBudget = 1_500_000f;
+
+    /// <summary>
+    /// A text's occurrences in a picture, in reading order (top-to-bottom, then left-to-right) — what a search picks
+    /// from: find.index counts in this order. The OCR bench reads saved screenshots through this same path.
+    /// </summary>
+    internal static List<OcrLine> ReadForBench(Bitmap shot, FindSpec f) => ReadFor(shot, f, WholeAreaBudget);
+
+    internal static List<TextMatch> FindIn(Bitmap shot, FindSpec f, float budget = WholeAreaBudget)
+    {
+        var lines = ReadFor(shot, f, budget);
+        var found = MatchAny(lines, f);
+        if (found.Count == 0 && f.TextMatch != "regex") found = Closer(shot, lines, f, out lines);
+        return Rank(found.OrderBy(m => Math.Round(m.Rect.Y / 8)).ThenBy(m => m.Rect.X).ToList(), lines, f);
+    }
+
+    /// <summary>
+    /// Not found, but a line holds part of it ("B Reset preset..." for "Save preset": white "Save" on FL's dark-orange
+    /// button was dropped by the recognizer): that line is read again, cut out with room on both sides and enlarged —
+    /// small, dim or low-contrast words read there that a whole-window read loses. At most a few lines, and only
+    /// after a miss, so a found text costs nothing more.
+    /// </summary>
+    private static List<TextMatch> Closer(Bitmap shot, List<OcrLine> lines, FindSpec f, out List<OcrLine> read)
+    {
+        read = lines;
+        var words = f.Texts.SelectMany(t => t.ToLowerInvariant().Split(Spaces, StringSplitOptions.RemoveEmptyEntries))
+                           .Where(w => w.Count(char.IsLetterOrDigit) >= 4).Distinct().ToList();
+        if (words.Count == 0) return new List<TextMatch>();
+        var partial = lines.Where(l => words.Any(w => l.Text.ToLowerInvariant().Contains(w))).Take(3).ToList();
+        foreach (var l in partial)
+        {
+            var b = l.Bounds;
+            float pad = b.Height * 6;   // a dropped word sits beside the read ones
+            var cut = Rectangle.Intersect(Rectangle.Round(RectangleF.FromLTRB(b.Left - pad, b.Top - b.Height, b.Right + pad, b.Bottom + b.Height)),
+                                          new Rectangle(0, 0, shot.Width, shot.Height));
+            if (cut.Width < 8 || cut.Height < 8) continue;
+            using var part = shot.Clone(cut, shot.PixelFormat);
+            using var big = new Bitmap(part.Width * 2, part.Height * 2);
+            using (var g = Graphics.FromImage(big))
+            {
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.DrawImage(part, 0, 0, big.Width, big.Height);
+            }
+            var again = ReadFor(big, f, 1_000_000f);
+            // back to the picture's coordinates
+            var mapped = again.Select(x =>
+            {
+                var ol = new OcrLine();
+                foreach (var w in x.Words)
+                    ol.Words.Add(new OcrWord(w.Text, new RectangleF(cut.X + w.Rect.X / 2, cut.Y + w.Rect.Y / 2, w.Rect.Width / 2, w.Rect.Height / 2)));
+                return ol;
+            }).ToList();
+            var m = MatchAny(mapped, f);
+            if (Log.Verbose) Log.Debug($"find text \"{f.TextShown}\": read closer around \"{l.Text}\": " + string.Join(" / ", mapped.Select(x => x.Text)));
+            if (m.Count > 0) { read = lines.Concat(mapped).ToList(); return m; }
+        }
+        return new List<TextMatch>();
+    }
+
+    /// <summary>
+    /// Which of several occurrences a text the author did not pin (no index) means: first one that is the whole
+    /// caption ("Dark", not the "Dark" of "Dark orange"; the "Ports" tab, not "Ports.cs"), then one in the author's
+    /// own letter case ("BassDrum", not "Bassdrum 22"), then reading order. With index, reading order alone — that is
+    /// what the index counts in.
+    /// </summary>
+    internal static List<TextMatch> Rank(List<TextMatch> found, List<OcrLine> lines, FindSpec f)
+    {
+        if (f.NthGiven || found.Count < 2 || f.TextMatch != "contains") return found;
+        var whole = f.Texts.SelectMany(t => Ocr.Find(lines, t, "exact")).Select(m => m.Rect).ToList();
+        bool Whole(TextMatch m) => whole.Any(w =>
+        {
+            var x = RectangleF.Intersect(w, m.Rect);
+            return x.Width * x.Height > 0.5f * m.Rect.Width * m.Rect.Height;
+        });
+        bool OwnCase(TextMatch m) => f.Texts.Any(t => t.Any(char.IsUpper) && m.Text.Contains(t.Trim(), StringComparison.Ordinal));
+        return found.OrderBy(m => Whole(m) ? 0 : 1).ThenBy(m => OwnCase(m) ? 0 : 1).ToList();   // stable: reading order within
+    }
+
     /// <summary>
     /// The matches of the first wording that occurs at all (the order is the author's preference). A wording that
     /// is a cut-down form of another one listed ("Snare" beside "808 Snare") is a fallback keyword, and such a one
@@ -330,7 +476,7 @@ internal static class Finder
         // was it moving (scrolled) just before it went missing? then it went off; still, it is just unreadable
         Tracks.TryGetValue(a.Key, out var pt);
         string? went = prev?.Found == true ? pt?.Went() : prev?.Went;
-        bool moving = prev?.Found == true ? pt != null && (DateTime.UtcNow - pt.MovedAt).TotalSeconds < 1 || went != null
+        bool moving = prev?.Found == true ? pt != null && pt.Scrolling || went != null
                                           : prev?.Moving ?? false;
         FindResult Miss() => new(false, default, 1, last, DateTime.UtcNow, before, seenAt, moving, went, prev?.Size ?? default);
         Template? tpl = null;
@@ -355,13 +501,13 @@ internal static class Finder
         }
         var shotAt = DateTime.UtcNow;
         var shot = ScreenCapture.CaptureWindow(r.Root, Rectangle.Round(readArea));
-        if (shot == null) return Miss();
+        if (shot == null) { if (Log.Verbose) Log.Debug($"  no picture of 0x{r.Root.ToInt64():X} {Rectangle.Round(readArea)}"); return Miss(); }
+        if (Log.Verbose && f.Text != null) Log.Debug($"  reading 0x{r.Root.ToInt64():X} {shot.Width}x{shot.Height}{(followed != null ? " (band around the followed text)" : "")}");
         try
         {
         if (tpl == null)
         {
-            var found = MatchAny(ReadFor(shot, f, followed != null ? 1_000_000f : 1_500_000f), f)
-                .OrderBy(m => Math.Round(m.Rect.Y / 8)).ThenBy(m => m.Rect.X).ToList();
+            var found = FindIn(shot, f, followed != null ? 1_000_000f : WholeAreaBudget);
             if (followed != null && found.Count == 0)
             {
                 // not in the band around where it was followed to: read the whole area before calling it gone
@@ -372,8 +518,7 @@ internal static class Finder
                 shotAt = DateTime.UtcNow;
                 shot = ScreenCapture.CaptureWindow(r.Root, Rectangle.Round(readArea));
                 if (shot == null) return Miss();
-                found = MatchAny(ReadFor(shot, f, 1_500_000f), f)
-                    .OrderBy(m => Math.Round(m.Rect.Y / 8)).ThenBy(m => m.Rect.X).ToList();
+                found = FindIn(shot, f, WholeAreaBudget);
             }
             RectangleF m;
             if (followed != null)
@@ -428,7 +573,12 @@ internal static class Finder
                 && (box is not RectangleF nb || nb.Width * nb.Height < kept.box.Width * kept.box.Height))
                 box = kept.box;
             if (box is RectangleF keep) Boxes[a.Key] = (here0, keep);
-            return new FindResult(true, here0, 0, last, DateTime.UtcNow, Size: m.Size, Box: box);
+            // every occurrence of this read (relative to the window frame, reading order): validate warns when a text
+            // the author did not pin with index / within is on screen more than once — the mark may land on the wrong one
+            var places = followed == null && found.Count > 1
+                ? found.Select(x => new PointF(readArea.X + x.Rect.X + x.Rect.Width / 2 - frame.X, readArea.Y + x.Rect.Y + x.Rect.Height / 2 - frame.Y)).ToArray()
+                : null;
+            return new FindResult(true, here0, 0, last, DateTime.UtcNow, Size: m.Size, Box: box, Places: places);
         }
         // where it was a moment ago, first: a search around it costs a few milliseconds, the whole window ~200 ms —
         // and a template target is looked for on every pass while its app is in front
@@ -507,7 +657,9 @@ internal static class Finder
         public Rectangle Screen;       // where the text is now
         public RectangleF View;        // the area it lives in (the element / within): never followed outside it
         public IntPtr Root;
-        public DateTime MovedAt;
+        public DateTime MovedAt, MovedBefore;   // its last two steps: two within a second is a scroll, one a jump
+        /// <summary>Followed as it scrolled (two steps within the last second), not one jump right before it was lost.</summary>
+        public bool Scrolling => (DateTime.UtcNow - MovedBefore).TotalSeconds < 1;
         public DateTime RestUntil;     // after a failed search: a short pause instead of searching 30 times a second
         // the content around a text that stays put: it scrolling past means this is a pinned copy (a sticky header)
         public byte[]? PrevImg;
@@ -566,7 +718,7 @@ internal static class Finder
         // re-confirmed in the same place: keep what was seen of the content scrolling past it
         if (Tracks.TryGetValue(key, out var old) && Math.Abs(old.Screen.Y - t.Screen.Y) <= 3 && Math.Abs(old.Screen.X - t.Screen.X) <= 3)
         {
-            t.ContentAcc = old.ContentAcc; t.ContentAt = old.ContentAt; t.MovedAt = old.MovedAt;
+            t.ContentAcc = old.ContentAcc; t.ContentAt = old.ContentAt; t.MovedAt = old.MovedAt; t.MovedBefore = old.MovedBefore;
         }
         Tracks[key] = t;
     }
@@ -670,7 +822,7 @@ internal static class Finder
             tr.RestUntil = DateTime.UtcNow.AddMilliseconds(RestMs);
             return;
         }
-        if (moved.Location == tr.Screen.Location)
+        if (moved.Location == tr.Screen.Location || Jitter(moved.X - tr.Screen.X, moved.Y - tr.Screen.Y, tr.H))
         {
             // it is where it was, only looks a little different (hovered, selected, redrawn): the full search found
             // nothing new — rest instead of repeating it 30 times a second until the look changes back
@@ -680,12 +832,22 @@ internal static class Finder
         tr.ContentAcc = 0;
         tr.PrevImg = null;
         tr.Screen = moved;
+        tr.MovedBefore = tr.MovedAt;
         tr.MovedAt = DateTime.UtcNow;
         var frame = Native.FrameRect(tr.Root);
         var c = new PointF(moved.X + moved.Width / 2f, moved.Y + moved.Height / 2f);
         // the rest of what was found (the control's box, the window) moves along: only the place changes
         Results[key] = cur with { Rel = new PointF(c.X - frame.X, c.Y - frame.Y), LastRel = cur.Rel, At = DateTime.UtcNow };
     }
+
+    /// <summary>
+    /// A step of the follower that is a hover animation, not a move: menus and lists scroll up and down, but a hovered
+    /// item slides or indents sideways (up to half a line), and its highlight shifts the best fit by a pixel or two
+    /// up or down. Followed, each such step made the mark shake. A real scroll is not lost: the offset is measured
+    /// from where the mark stays, so it grows past this and is followed then; a sideways scroll moves further at once.
+    /// </summary>
+    internal static bool Jitter(int dx, int dy, int lineHeight) =>
+        dy == 0 ? Math.Abs(dx) <= Math.Max(6, lineHeight / 2) : Math.Abs(dy) <= 2 && Math.Abs(dx) <= 3;
 
     /// <summary>
     /// A fast flick moves the text further than the near search looks: its own column over the whole area.
@@ -731,6 +893,7 @@ internal static class Finder
         tr.ContentAcc = 0;
         tr.PrevImg = null;
         tr.Screen = moved;
+        tr.MovedBefore = tr.MovedAt;
         tr.MovedAt = DateTime.UtcNow;
         var frame = Native.FrameRect(tr.Root);
         var c = new PointF(moved.X + moved.Width / 2f, moved.Y + moved.Height / 2f);
@@ -744,8 +907,12 @@ internal static class Finder
     /// </summary>
     private static void Lost(string key, Track tr, FindResult cur)
     {
+        // gone the way the content scrolled, or followed as it scrolled — or not gone anywhere: repainted (a new
+        // theme, a hovered or pressed button) the words only look different, and "scroll down" sent the user looking
+        // for a button that never moved. One step of the follower right before is no evidence: a repaint makes it
+        // jump to a look-alike spot first
         string? went = tr.Went();
-        bool moving = (DateTime.UtcNow - tr.MovedAt).TotalSeconds < 1 || went != null;
+        bool moving = went != null || tr.Scrolling;
         Tracks.TryRemove(key, out _);
         Results[key] = new FindResult(false, default, 1, cur.Rel, DateTime.UtcNow, cur.LastRel, cur.At, moving, went, cur.Size);
         TextSearchedAt.TryRemove(key, out _);
