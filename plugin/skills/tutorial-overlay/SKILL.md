@@ -50,6 +50,9 @@ restart Claude Code. Do not try to install or download it yourself.
 6. **Say when a step is done.** No `until`: done when all targets are clicked. Otherwise pick the condition that
    matches the result: `appear` for a window that opens, `uia` for a checkbox or toggle state, `pixel` for a cell
    that lights up, `key` for a shortcut, `drag`, `scroll`, `trace`. Use `opens` on a target that must open a window.
+   To get the user to something below the fold, give the step that thing as its target and
+   `{type: 'scroll', direction: 'down', until: 'visible'}`: it completes when the target shows up, however far the
+   page needed — a fixed number of `notches` is a guess, and touchpads scroll in no notches at all.
 7. **Check before starting:** `validate(spec)` resolves every anchor. Fix errors; warnings on later steps often
    mean a window an earlier step opens. Never start a step you have not validated, even a quick test one. A text
    target with `repeated` is on screen several times and the mark goes to the first: check which one the step means

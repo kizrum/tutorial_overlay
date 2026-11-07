@@ -368,6 +368,60 @@ internal static class Finder
     }
 
     /// <summary>
+    /// The text read again right where it stood (picture coordinates): cut out with room around it, enlarged, and once
+    /// more inverted — a selected row is light on a strong colour, which the recognizer often drops.
+    /// </summary>
+    private static RectangleF? ReadAround(Bitmap shot, RectangleF at, FindSpec f)
+    {
+        var cut = Rectangle.Intersect(Rectangle.Round(RectangleF.Inflate(at, at.Width * 0.4f + 8, at.Height)),
+                                      new Rectangle(0, 0, shot.Width, shot.Height));
+        if (cut.Width < 8 || cut.Height < 8) return null;
+        using var part = shot.Clone(cut, shot.PixelFormat);
+        for (int pass = 0; pass < 2; pass++)
+        {
+            using var big = new Bitmap(part.Width * 2, part.Height * 2);
+            using (var g = Graphics.FromImage(big))
+            {
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                if (pass == 0) g.DrawImage(part, 0, 0, big.Width, big.Height);
+                else
+                {
+                    var inv = new System.Drawing.Imaging.ColorMatrix(new[]
+                    {
+                        new float[] { -1, 0, 0, 0, 0 }, new float[] { 0, -1, 0, 0, 0 }, new float[] { 0, 0, -1, 0, 0 },
+                        new float[] { 0, 0, 0, 1, 0 }, new float[] { 1, 1, 1, 0, 1 },
+                    });
+                    using var ia = new System.Drawing.Imaging.ImageAttributes();
+                    ia.SetColorMatrix(inv);
+                    g.DrawImage(part, new Rectangle(0, 0, big.Width, big.Height), 0, 0, part.Width, part.Height, GraphicsUnit.Pixel, ia);
+                }
+            }
+            var lines = ReadFor(big, f, 1_000_000f).Select(x =>
+            {
+                var ol = new OcrLine();
+                foreach (var w in x.Words)
+                    ol.Words.Add(new OcrWord(w.Text, new RectangleF(cut.X + w.Rect.X / 2, cut.Y + w.Rect.Y / 2, w.Rect.Width / 2, w.Rect.Height / 2)));
+                return ol;
+            }).ToList();
+            var m = MatchAny(lines, f);
+            if (m.Count > 0) return m[0].Rect;
+        }
+        return null;
+    }
+
+    /// <summary>Something is written there (not an empty strip): the gray levels vary like letters do.</summary>
+    private static bool HasInk(Bitmap shot, RectangleF at)
+    {
+        var r = Rectangle.Intersect(Rectangle.Round(at), new Rectangle(0, 0, shot.Width, shot.Height));
+        if (r.Width < 4 || r.Height < 4) return false;
+        using var part = shot.Clone(r, shot.PixelFormat);
+        var g = Template.GrayFull(part);
+        double mean = 0; foreach (var v in g) mean += v; mean /= g.Length;
+        double var0 = 0; foreach (var v in g) var0 += (v - mean) * (v - mean);
+        return Math.Sqrt(var0 / g.Length) > 18;
+    }
+
+    /// <summary>
     /// Not found, but a line holds part of it ("B Reset preset..." for "Save preset": white "Save" on FL's dark-orange
     /// button was dropped by the recognizer): that line is read again, cut out with room on both sides and enlarged —
     /// small, dim or low-contrast words read there that a whole-window read loses. At most a few lines, and only
@@ -534,6 +588,29 @@ internal static class Finder
                 if (found.Count <= f.Nth && prev is { Found: true } && !moving && (DateTime.UtcNow - prev.At).TotalMilliseconds < HoldMs)
                     return prev;
                 if (found.Count <= f.Nth) { Tracks.TryRemove(a.Key, out _); return Miss(); }
+                // it stood still and now reads only far away: its own place turned unreadable (a list item got
+                // selected, white on blue) while the same words show elsewhere ("Counter-Strike 2 Update" in the news
+                // beside Steam's library list). Read the old place closer; still nothing, but words there: the mark
+                // stays. It moves only when the old place is empty or the content scrolled
+                if (prev is { Found: true } && !moving && prev.Size.Width > 0 && f.Nth == 0)
+                {
+                    var was0 = new PointF(frame.X + prev.Rel.X - readArea.X, frame.Y + prev.Rel.Y - readArea.Y);
+                    float lh = Math.Max(prev.Size.Height, 8);
+                    if (!found.Any(x => Math.Abs(x.Rect.X + x.Rect.Width / 2 - was0.X) + Math.Abs(x.Rect.Y + x.Rect.Height / 2 - was0.Y) < lh * 3))
+                    {
+                        var oldRect = new RectangleF(was0.X - prev.Size.Width / 2, was0.Y - lh / 2, prev.Size.Width, lh);
+                        if (ReadAround(shot, oldRect, f) is RectangleF again)
+                        {
+                            if (Log.Verbose) Log.Debug($"find text \"{f.TextShown}\": read again where it stood (the far copies are others)");
+                            found = new List<TextMatch> { new(f.Text!, again, 0) };
+                        }
+                        else if (HasInk(shot, oldRect))
+                        {
+                            if (Log.Verbose) Log.Debug($"find text \"{f.TextShown}\": unreadable where it stood, words still there — the mark stays");
+                            return prev;
+                        }
+                    }
+                }
                 m = found[f.Nth].Rect;
                 // seen a moment ago: the same occurrence, not whichever comes first in this read (the page's heading
                 // "In Game" above the tab "In Game")

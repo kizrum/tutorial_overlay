@@ -32,6 +32,11 @@ only fixes things.
   reaches into the next tile, and two buttons on one strip ("Reset", "Save preset…") are framed apart.
 - `--record` (development): a screenshot with the overlay for every lesson event and mark change, with the event and
   the marks' states beside it, in `%LOCALAPPDATA%\TutorialOverlay\records\`.
+- Scrolling seen in the pixels is judged in strips: a page that scrolls beside a list that stays (Steam's settings)
+  counts — touchpad scrolling in a browser-based app sends no wheel messages, so the pixels are all there is.
+- A text that stood still and turns unreadable (a selected list row, light on blue) while the same words show
+  elsewhere does not jump there: its place is read again, enlarged and inverted, and while words are still there the
+  mark stays — "Counter-Strike 2" in Steam's library list, not the "Counter-Strike 2 Update" news beside it.
 - A text is found from the start of a word on: "Reset" no longer lands on the "Presets" heading above the button
   ("Kick" still counts in "Kicks").
 - `match: "exact"` no longer takes one side of a dashed title for a menu-bar item: "Master" is not found in

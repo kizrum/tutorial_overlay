@@ -407,6 +407,34 @@ public static class ControlBoxTests
     }
 }
 
+public static class ContentShiftTests
+{
+    /// <summary>A picture: a still sidebar on the left quarter, a striped page on the rest, the page moved by dy.</summary>
+    private static byte[] Pic(int w, int h, int dy)
+    {
+        var g = new byte[w * h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                g[y * w + x] = x < w / 4 ? (byte)((y / 7) % 2 == 0 ? 60 : 120)          // the sidebar's own rows, still
+                                         : (byte)(((y + dy) / 5 * 37 + x / 9 * 11) % 200 + 20);   // the page, moving
+        return g;
+    }
+
+    public static void TestPageScrollingBesideAStillSidebar()
+    {
+        int w = 200, h = 160;
+        int shift = Engine.ContentShift(Pic(w, h, 0), Pic(w, h, 20), w, h, true, out _, out _);
+        A.Check(shift != 0, "the page moved while the list of sections stayed: " + shift);
+        A.Check(shift < 0, "content moved up = scrolled down: " + shift);
+    }
+
+    public static void TestNothingMoved()
+    {
+        int w = 200, h = 160;
+        A.Eq(0, Engine.ContentShift(Pic(w, h, 0), Pic(w, h, 0), w, h, true, out _, out _), "still");
+    }
+}
+
 public static class JitterTests
 {
     public static void TestHoverShakeIsNotAMove()

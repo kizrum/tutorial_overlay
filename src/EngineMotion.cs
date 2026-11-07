@@ -383,7 +383,32 @@ internal static partial class Engine
         Log.Debug("scroll watch: " + why);
     }
 
-    private static int ContentShift(byte[] a, byte[] b, int w, int h, bool vertical, out double still, out double bestDiff)
+    /// <summary>
+    /// The area is often a whole window whose parts do not all scroll (a settings window: its list of sections
+    /// stays, the page beside it moves), and one shift for all of it never fits clearly. So it is cut into strips
+    /// across the scroll direction (columns when scrolling up and down) and each strip is judged on its own: the
+    /// strip that moved most clearly gives the shift.
+    /// </summary>
+    internal static int ContentShift(byte[] a, byte[] b, int w, int h, bool vertical, out double still, out double bestDiff)
+    {
+        const int Strips = 4;
+        int across = vertical ? w : h;
+        still = 0; bestDiff = double.MaxValue;
+        int shift = 0; double bestRatio = 1;
+        for (int i = 0; i < Strips; i++)
+        {
+            int from = across * i / Strips, to = across * (i + 1) / Strips;
+            int sh = StripShift(a, b, w, h, vertical, from, to, out double st, out double bd);
+            still = Math.Max(still, st);
+            if (sh == 0) { bestDiff = Math.Min(bestDiff, bd); continue; }
+            double ratio = bd / Math.Max(0.01, st);
+            if (ratio < bestRatio) { bestRatio = ratio; shift = sh; bestDiff = bd; }
+        }
+        return shift;
+    }
+
+    /// <summary>One strip (from..to across the scroll direction): how far it moved, 0 if not clearly.</summary>
+    private static int StripShift(byte[] a, byte[] b, int w, int h, bool vertical, int from, int to, out double still, out double bestDiff)
     {
         int len = vertical ? h : w, max = len / 3;
         double Diff(int d)
@@ -391,15 +416,15 @@ internal static partial class Engine
             long sum = 0, n = 0;
             if (vertical)
                 for (int y = Math.Max(0, d); y < Math.Min(h, h + d); y += 2)
-                    for (int x = 0; x < w; x += 2) { sum += Math.Abs(a[(y - d) * w + x] - b[y * w + x]); n++; }
+                    for (int x = from; x < to; x += 2) { sum += Math.Abs(a[(y - d) * w + x] - b[y * w + x]); n++; }
             else
-                for (int y = 0; y < h; y += 2)
+                for (int y = from; y < to; y += 2)
                     for (int x = Math.Max(0, d); x < Math.Min(w, w + d); x += 2) { sum += Math.Abs(a[y * w + x - d] - b[y * w + x]); n++; }
             return n == 0 ? double.MaxValue : sum / (double)n;
         }
         still = Diff(0);
         bestDiff = still;
-        if (still < 2) return 0;                      // nothing changed
+        if (still < 2) return 0;                      // nothing changed here
         int best = 0;
         for (int d = -max; d <= max; d++)
         {
