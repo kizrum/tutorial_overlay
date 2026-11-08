@@ -54,7 +54,9 @@ restart Claude Code. Do not try to install or download it yourself.
    window that stays. A step whose target is in a menu the previous step opens gets `inMenu: true`; a target in a
    window gets `find.in`, and the click that must open a window gets `opens`. Then a menu or window closed by a
    wrong click sends the lesson back to the step that opens it, by itself, with a card saying so — the user is never
-   left on "click Render Image" with the menu gone.
+   left on "click Render Image" with the menu gone. A submenu that opens on hover (Blender, Windows menus) needs no
+   click either: the step that opens it is done once the next `inMenu` step's item shows up, so say "point at Mesh".
+   (An older TutorialOverlay waits for the click there: say "click Mesh", which opens it too.)
 5. **Teach, not just click.** Put the reason in each step's `why`: what the tool does, why this way, the usual
    mistake. Keep `say` (the mascot's line) under 60 characters.
 6. **Say when a step is done.** No `until`: done when all targets are clicked. Otherwise pick the condition that

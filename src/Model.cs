@@ -825,10 +825,12 @@ internal sealed class Step
     public bool CameBackAuto;                        // entered by going back on its own: its target's container is gone
     public int AutoBackDepth;                        // how many steps the lesson has gone back on its own to reach it
     public DateTime AutoBackAt;                      // when the lesson last went back from it on its own (kept across visits)
+    public bool NextSeenAbsent;                      // the next step's menu items were seen not there during this visit
+    public DateTime? NextAbsentSince;                // since when none of them is there
 
     public void ResetRuntime()
     {
-        SeenThisVisit = false; LostSince = null; CameBackAuto = false; AutoBackDepth = 0;
+        SeenThisVisit = false; LostSince = null; CameBackAuto = false; AutoBackDepth = 0; NextSeenAbsent = false; NextAbsentSince = null;
         foreach (var t in Targets) t.ResetRuntime();
         foreach (var c in Until) c.Reset();
         History.Clear();

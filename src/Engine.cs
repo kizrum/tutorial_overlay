@@ -635,6 +635,53 @@ internal static partial class Engine
         }
     }
 
+    /// <summary>
+    /// The items of the menu this step opens, when the next step is in it (inMenu) and this one waits only for its
+    /// click. Many menus open a submenu on hover (Blender, Windows menus, WinUI): the user points at "Mesh", the
+    /// submenu is there, and nobody clicks — the step must not wait for a click that never comes.
+    /// </summary>
+    private static IEnumerable<Mark> NextMenuItems(Tutorial? t, Step? s)
+    {
+        if (t is not { State: TutorialState.Running } || s == null || t.Index + 1 >= t.Steps.Count) return Enumerable.Empty<Mark>();
+        var next = t.Steps[t.Index + 1];
+        if (!next.InMenu || s.Until.Count != 1 || s.Until[0].Type != "all_clicked") return Enumerable.Empty<Mark>();
+        if (s.Targets.Any(m => m.Opens != null || m.Check != null)) return Enumerable.Empty<Mark>();
+        // an item, by its words or its element: a bare window says nothing about the menu being open
+        return next.Required.Where(m => !m.Anchor.IsScreen && (m.Anchor.Find != null || m.Anchor.Path.Count > 0));
+    }
+
+    /// <summary>
+    /// The step's menu is open without a click: the next step's items were not there during this visit and now all
+    /// are. Seen absent first, so a menu item that was already on screen (another menu left open, the same words
+    /// elsewhere) never completes the step by itself, and coming back to it does not bounce forward.
+    /// </summary>
+    private static void OpenedWithoutClick(Tutorial t, Step s)
+    {
+        var items = NextMenuItems(t, s).ToList();
+        // the user is at this step's item (its mark is shown), not somewhere else with that menu open
+        if (items.Count == 0 || !(s.SeenThisVisit || s.Targets.Any(m => m.Geo != null))) return;
+        int found = 0;
+        foreach (var m in items)
+        {
+            var (ok, at, verdict) = m.Anchor.Find != null
+                ? (Finder.Get(m.Anchor.Key) is { } fr ? (fr.Found, fr.At, true) : (false, default, false))
+                : (Resolver.Get(m.Anchor.Key) is { } rr ? (rr.Found, rr.At, rr.Reason != "searching") : (false, default, false));
+            if (!verdict || at < s.EnteredAt) return;          // no fresh word on it yet
+            if (ok) found++;
+        }
+        var now = DateTime.UtcNow;
+        // all of them away, and for a while: OCR losing a word that stays on screen for a read is not a closed menu
+        if (found == 0) s.NextAbsentSince ??= now; else s.NextAbsentSince = null;
+        if (s.NextAbsentSince is DateTime since && (now - since).TotalMilliseconds >= NextAbsentMs) s.NextSeenAbsent = true;
+        if (s.NextSeenAbsent && found == items.Count)
+        {
+            Log.Info($"step {t.Index}: the next step's items showed up without a click (a menu opened on hover)");
+            Complete("opened", immediate: true);
+        }
+    }
+
+    private const int NextAbsentMs = 400;
+
     private const int GoneBackMs = 1500, MaxAutoBackDepth = 2, AutoBackAgainSec = 60;
 
     /// <summary>
@@ -770,7 +817,8 @@ internal static partial class Engine
                 .Concat(step?.Until.Select(c => c.Anchor ?? c.Pixel?.Anchor).OfType<AnchorSpec>() ?? Enumerable.Empty<AnchorSpec>())
                 // the tutorial's main window stays resolved so the card can pick the right monitor
                 .Concat(t is { Active: true } && t.Defaults.Process != null ? new[] { t.Defaults } : Array.Empty<AnchorSpec>())
-                .Concat(InputAnchors(step));
+                .Concat(InputAnchors(step))
+                .Concat(NextMenuItems(t, step).Select(m => m.Anchor));
             MarkCount = marks.Count;
             var anchorList = anchors.ToList();
             Finder.SetWanted(anchorList);
@@ -786,6 +834,7 @@ internal static partial class Engine
             if (step != null && t != null && !step.Review) PinToOpenedWindow(step, t);
             foreach (var m in marks) ComputeMark(m, step != null && step.Targets.Contains(m) ? t : null, fgPid, now);
             if (step != null && t is { State: TutorialState.Running, AdvanceAt: null } && ReferenceEquals(t.Current, step)) BackIfContainerGone(t, step, now);
+            if (step != null && t is { State: TutorialState.Running, AdvanceAt: null } && ReferenceEquals(t.Current, step)) OpenedWithoutClick(t, step);
             if (Recorder.Enabled)
                 foreach (var m in marks)
                     if (!RecordedState.TryGetValue(m.Id, out var was) || was != m.Visibility)

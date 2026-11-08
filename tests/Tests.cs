@@ -568,6 +568,31 @@ public static class OcrTests
         A.Eq(1, Ocr.Find(new List<OcrLine> { title }, "Mixer - Master", "exact").Count, "the whole title still matches");
     }
 
+    public static void TestMenuGlyphsDoNotMoveTheMark()
+    {
+        // Blender's menu rows: OCR reads the submenu arrow and the icon now as a word of their own, now glued to the
+        // caption, now not at all. The mark must stay on the caption every time.
+        OcrLine Row(params (string t, float x, float w)[] words)
+        {
+            var l = new OcrLine();
+            foreach (var (t, x, w) in words) l.Words.Add(new OcrWord(t, new RectangleF(x, 0, w, 14)));
+            return l;
+        }
+        var plain = Ocr.Find(new List<OcrLine> { Row(("Mesh", 30, 34)) }, "Mesh", "exact").Single().Rect;
+        var arrow = Ocr.Find(new List<OcrLine> { Row(("Mesh", 30, 34), (">", 40 + 34, 8)) }, "Mesh", "exact");
+        A.Eq(1, arrow.Count, "an arrow as a word of its own beside the caption");
+        A.Eq(plain, arrow[0].Rect, "framed on the caption alone");
+        var glued = Ocr.Find(new List<OcrLine> { Row(("Mesh>", 30, 120)) }, "Mesh", "exact");
+        A.Eq(1, glued.Count, "an arrow glued to the caption across the row");
+        A.Check(Math.Abs(glued[0].Rect.X - plain.X) < 1 && glued[0].Rect.Width < 50, $"glued: the letters' part, not the row ({glued[0].Rect})");
+        var icon = Ocr.Find(new List<OcrLine> { Row(("©Torus", 12, 60)) }, "Torus").Single().Rect;
+        A.Check(Math.Abs(icon.Right - 72) < 1 && icon.Width < 55, $"a leading icon glued: the right part ({icon})");
+        var both = Ocr.Find(new List<OcrLine> { Row(("○", 12, 10), ("Shade", 30, 40), ("Smooth", 76, 50), ("▸", 200, 8)) }, "Shade Smooth", "exact");
+        A.Eq(1, both.Count, "an icon and an arrow around a two-word caption");
+        A.Check(both[0].Rect.X == 30 && both[0].Rect.Right == 126, $"framed on the two words ({both[0].Rect})");
+        A.Eq(0, Ocr.Find(new List<OcrLine> { Row(("Mesh", 30, 34), ("Tools", 70, 40)) }, "Mesh", "exact").Count, "a word beside it is still another line");
+    }
+
     public static void TestYoAndRegex()
     {
         A.Eq(1, Ocr.Find(Lines("Ещё раз"), "еще").Count, "ё = е");

@@ -346,11 +346,18 @@ internal static class Autopilot
                     Input.Hover(x, y, way);
                     Input.Pause();
                     var targetId = J.Str(visible, "id");
-                    var now = J.Items(J.Get(J.Get(J.Get(mcp.Call("status", new JsonObject()).Json, "tutorial"), "step"), "targets"))
+                    var tutNow = J.Get(mcp.Call("status", new JsonObject()).Json, "tutorial");
+                    // a submenu that opens on hover: pointing was the whole step, as for a person
+                    if (Past(tutNow, index)) { r.Action += " · done on hover, no click"; break; }
+                    var now = J.Items(J.Get(J.Get(tutNow, "step"), "targets"))
                         .FirstOrDefault(t => J.Str(t, "id") == targetId && J.Str(t, "visibility") is "visible");
                     if (now != null && Center(now) is (int nx, int ny))
                     {
-                        if (Math.Abs(nx - x) > 4 || Math.Abs(ny - y) > 4)
+                        // a frame that grew to the control the hover lit up (a menu row) holds the old one: not a twitch
+                        bool grew = Bounds(visible) is { } ob && Bounds(now) is { } nb2
+                                    && ob.X >= nb2.X - 3 && ob.Y >= nb2.Y - 3 && ob.Right <= nb2.Right + 3 && ob.Bottom <= nb2.Bottom + 3;
+                        if (grew && (Math.Abs(nx - x) > 4 || Math.Abs(ny - y) > 4)) r.Action += " · frame grew to the lit row";
+                        else if (Math.Abs(nx - x) > 4 || Math.Abs(ny - y) > 4)
                             r.Warnings.Add($"the mark of {J.Str(visible, "name") ?? targetId} moved from {x},{y} to {nx},{ny} while the hand was on it (twitching)");
                         (x, y) = (nx, ny);
                     }
@@ -548,6 +555,10 @@ internal static class Autopilot
 
     private static (int x, int y)? Center(JsonNode? target) =>
         J.Get(target, "center") is JsonArray c && c.Count >= 2 ? ((int)(double)c[0]!, (int)(double)c[1]!) : null;
+
+    private static System.Drawing.RectangleF? Bounds(JsonNode? target) =>
+        J.Get(target, "bounds") is JsonArray b && b.Count == 4
+            ? new System.Drawing.RectangleF((float)(double)b[0]!, (float)(double)b[1]!, (float)(double)b[2]!, (float)(double)b[3]!) : null;
 
     private static (int x, int y) ScreenCenter(JsonObject status) =>
         J.Get(status, "virtualScreen") is JsonArray v && v.Count == 4

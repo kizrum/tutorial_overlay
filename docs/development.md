@@ -120,11 +120,13 @@ completed on the robot's behalf and marked as skipped.
 It moves like a person: before acting it watches the step for 1.5 s, holds the pointer on the target for 1 s, looks
 again and aims where the mark is now. In menus the way matters, since many open a submenu on hover: from the menu bar
 into a menu (an `inMenu` step after one that is not) it goes down first, into a submenu (an `inMenu` step after
-another) along the row first, then down.
+another) along the row first, then down. A step already done while the pointer rests on its target (a submenu that
+opened on hover) gets no click, as a person would not click there either.
 
 A step fails on `target_not_found`, on a target that stays not visible (the server's reason is in the report), or when
 it does not complete within 20 s. Warnings: twitching (a mark or the card that moved more than 2 px while it watched,
-or a mark that moved while the pointer was on it, a target that blinked between visible and hidden), the card
+or a mark that moved while the pointer was on it — unless its frame only grew to the row the hover lit up — a target
+that blinked between visible and hidden), the card
 covering the target, a target partly off screen, misses and `no_effect`. The report (`results/<time>/report.html` next to the cases) has every step with a screenshot of the
 screen as the user saw it; failed cases are open. The exit code is the number of failed cases.
 

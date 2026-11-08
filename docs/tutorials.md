@@ -87,6 +87,12 @@ learned to live in the popup the previous step's click opened. Going back on its
 trap the user: only such targets; only after the target was on screen during the step and is gone for good (its
 window closed, or its words are not at its place any more — a word only repainted or under a tooltip is not gone);
 at most two steps back; and once a minute per step — gone again soon after, the card says what to reopen instead.
+
+Many menus open a submenu on hover: the user points at "Mesh", and nobody clicks. A step that waits only for its click,
+followed by an `inMenu` step, is therefore also done when that step's items show up (`step_completed` with
+`how: "opened"`) — provided they were all away for a moment during the step first, so words already on screen or one
+lost read of OCR never complete it. Moving off closes such a submenu again, and the lesson comes back to "Mesh" as
+above.
 A plain target that OCR misses for a moment, and steps that are actions (keys, drags, scrolling), never go back.
 Done and Skip always move on.
 

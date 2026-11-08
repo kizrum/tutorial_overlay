@@ -458,6 +458,25 @@ internal static unsafe class Ocr
     private static string Norm(string s) => Regex.Replace(s.ToLowerInvariant().Replace('ё', 'е'), @"\s+", " ").Trim();
 
     /// <summary>
+    /// The part of a word's box that its characters [from, from+len) take. The whole word when they are all of it.
+    /// Otherwise the letters keep the side away from the extra glyphs (a leading icon: the right side; a trailing
+    /// arrow: the left side), and their width is the smaller of their share of the box and what that many letters
+    /// take at this text height: an arrow at the far edge of a menu row widens the box far beyond its share.
+    /// </summary>
+    internal static RectangleF WordPart(OcrWord w, int from, int len)
+    {
+        var t = Norm(w.Text);
+        if (t.Length == 0 || (from <= 0 && from + len >= t.Length)) return w.Rect;
+        float share = w.Rect.Width * len / t.Length;
+        float letters = len * 0.62f * w.Rect.Height * 1.15f;
+        float width = Math.Min(share, letters);
+        float x = from == 0 ? w.Rect.X
+            : from + len >= t.Length ? w.Rect.Right - width
+            : w.Rect.X + w.Rect.Width * from / t.Length;
+        return new RectangleF(x, w.Rect.Y, width, w.Rect.Height);
+    }
+
+    /// <summary>
     /// Occurrences of <paramref name="query"/> in the recognised lines, best first. match: contains (default) |
     /// exact (the whole line) | regex. OCR misreads a letter now and then (l/I, 0/O), so contains/exact also accept
     /// a near match: up to one wrong character per 6 (score = share of wrong characters, 0 = exact).
@@ -472,18 +491,30 @@ internal static unsafe class Ocr
             // line text with each character mapped back to its word
             var sb = new StringBuilder();
             var owner = new List<int>();
+            var pos = new List<int>();   // each character's place in its word
             for (int i = 0; i < line.Words.Count; i++)
             {
-                if (i > 0) { sb.Append(' '); owner.Add(-1); }
+                if (i > 0) { sb.Append(' '); owner.Add(-1); pos.Add(-1); }
                 var wt = Norm(line.Words[i].Text);
                 sb.Append(wt);
-                for (int k = 0; k < wt.Length; k++) owner.Add(i);
+                for (int k = 0; k < wt.Length; k++) { owner.Add(i); pos.Add(k); }
             }
             var text = sb.ToString();
+            // the words the span covers; a word only partly in it (an icon or a submenu arrow OCR glued to the
+            // caption: "©Torus", "Mesh>") gives only the part the letters take, or the mark jumps whenever OCR
+            // reads the glyph glued and back
             RectangleF Span(int start, int len)
             {
-                var idx = owner.Skip(start).Take(len).Where(o => o >= 0).Distinct();
-                return OcrLine.Union(idx.Select(i => line.Words[i].Rect));
+                var parts = new List<RectangleF>();
+                for (int c = start; c < start + len && c < owner.Count; )
+                {
+                    int w = owner[c];
+                    if (w < 0) { c++; continue; }
+                    int from = pos[c], to = from;
+                    while (c < start + len && c < owner.Count && owner[c] == w) { to = pos[c]; c++; }
+                    parts.Add(WordPart(line.Words[w], from, to - from + 1));
+                }
+                return OcrLine.Union(parts);
             }
             string Original(int start, int len)
             {
@@ -503,12 +534,26 @@ internal static unsafe class Ocr
             if (match == "exact")
             {
                 int d = Distance(text, q, tol + 1);
-                if (d <= tol) { res.Add(new TextMatch(line.Text, line.Bounds, d / (float)q.Length)); continue; }
+                if (d <= tol)
+                {
+                    // the slip is a glyph glued at an end ("mesh>" for "Mesh", "©torus"): frame the letters only
+                    int at = text.StartsWith(q, StringComparison.Ordinal) && !text[q.Length..].Any(char.IsLetterOrDigit) ? 0
+                        : text.EndsWith(q, StringComparison.Ordinal) && !text[..^q.Length].Any(char.IsLetterOrDigit) ? text.Length - q.Length : -1;
+                    res.Add(new TextMatch(line.Text, at >= 0 && text.Length != q.Length ? Span(at, q.Length) : line.Bounds, d / (float)q.Length));
+                    continue;
+                }
                 // a menu bar or a toolbar is read as one line ("Steam View Friends Games Help"): its items, set apart
                 // by gaps wider than a word space, each count as a whole line of their own
-                foreach (var (from, to) in Items(line))
+                // a word of no letters at an end ("Mesh ▸", "○ Torus": the submenu arrow, an icon) is not part of
+                // the caption: OCR reads it one time and not the next, and the line must match and frame the same
+                bool Glyph(int i) => !Norm(line.Words[i].Text).Any(char.IsLetterOrDigit);
+                var seen = new HashSet<(int, int)>();
+                foreach (var (from0, to0) in Items(line).Prepend((0, line.Words.Count)))
                 {
-                    if (from == 0 && to == line.Words.Count) continue;
+                    int from = from0, to = to0;
+                    while (from < to && Glyph(from)) from++;
+                    while (to > from && Glyph(to - 1)) to--;
+                    if (from == to || (from == 0 && to == line.Words.Count) || !seen.Add((from, to))) continue;
                     var it = string.Join(" ", line.Words.Skip(from).Take(to - from).Select(w => Norm(w.Text)));
                     int di = Distance(it, q, tol + 1);
                     if (di <= tol)

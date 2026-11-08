@@ -14,6 +14,12 @@ only fixes things.
 - Fixed: a target in a menu of a modern Windows app (Notepad, Paint, Terminal and other WinUI 3 apps) was reported
   as "covered by another window" and not marked. Such apps draw their menus in a popup window of their own, and that
   popup counted as something over the target; the app's own captionless popup that holds the target now does not.
+- A submenu that opens on hover no longer waits for a click: the step that opens it (Blender's Add › Mesh) is done
+  when the next `inMenu` step's items show up (`step_completed` with `how: "opened"`). They must have been away for
+  a moment during the step first, so words already on screen never complete it.
+- Fixed: the mark on a menu item found by its text jumped sideways now and then (Blender's "Mesh ▸", "Torus"), and
+  a click on it could count as a miss. OCR reads the submenu arrow or the item's icon sometimes as a word of its own,
+  sometimes glued to the caption; the mark now frames the caption's letters either way.
 
 ## [0.5.0] - 2026-11-08
 

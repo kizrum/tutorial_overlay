@@ -74,7 +74,8 @@ internal static class Tools
             "{type:'scroll', in:{anchor|element, rect}, direction:'down'|'up'|'left'|'right', notches (3) | until:'visible'} | " +
             "{type:'uia', anchor|element|title, property:'exists'|'name'|'value'|'toggle'|'selected'|'expanded'|'enabled'|'focused'|'text', equals|contains|matches, not}], " +
             "untilMode:'any'|'all', numbered, checklist, sequence (targets one by one, e.g. right-click → popup item; chain restarts if the popup closes), " +
-            "inMenu (its targets are in a menu the previous step opens: if it closes, the lesson goes back to that step), " +
+            "inMenu (its targets are in a menu the previous step opens: if it closes, the lesson goes back to that step; " +
+            "when they show up without a click — a submenu opened on hover — the previous step counts as done, how 'opened'), " +
             "buttons:[{id,text,action,style}], controls:['back','undo','skip','done','stop']}]} " +
             "Or {name, startAt} to replay a saved one. No 'until': done when all targets clicked; no targets: waits for Done. " +
             "'disappear' needs the thing seen first. Clicks match by the PROCESS under the cursor. Anchors: see draw.anchor.",
