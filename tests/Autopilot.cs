@@ -122,6 +122,8 @@ internal static class Autopilot
         // closed afterwards, the app itself is left running
         bool attach = J.Get(launch, "attach")?.GetValue<bool>() == true;
         var shownBefore = attach && process != null ? ShownWindows(process) : new HashSet<IntPtr>();
+        // sandbox: {dir, files: {name: text}} — a folder the lesson may change (Explorer): made fresh before, removed after
+        var sandbox = J.Str(J.Get(launch, "sandbox"), "dir") is string sd ? Environment.ExpandEnvironmentVariables(sd) : null;
 
         try
         {
@@ -132,10 +134,12 @@ internal static class Autopilot
                 res.Note = $"{process} is already open — close it first (the robot never touches an app it did not start)";
                 return res;
             }
+            if (sandbox != null) MakeSandbox(sandbox, J.Get(launch, "sandbox"));
             if (J.Str(launch, "exe") is string exe)
             {
                 launchedAt = DateTime.Now.AddSeconds(-1);
-                Process.Start(new ProcessStartInfo(exe, J.Str(launch, "args") ?? "") { UseShellExecute = true });
+                Process.Start(new ProcessStartInfo(Environment.ExpandEnvironmentVariables(exe),
+                    Environment.ExpandEnvironmentVariables(J.Str(launch, "args") ?? "")) { UseShellExecute = true });
             }
 
             // ---- ready: the first step's target resolves
@@ -178,6 +182,7 @@ internal static class Autopilot
             mcp.TryCall("stop_tutorial", new JsonObject { ["outro"] = false });
             if (attach && process != null) CloseShown(process, shownBefore);
             else if (process != null) CloseStarted(process, launchedAt);
+            if (sandbox != null) { Thread.Sleep(800); try { Directory.Delete(sandbox, true); } catch { } }
             res.Ms = sw.ElapsedMilliseconds;
         }
         return res;
@@ -209,6 +214,20 @@ internal static class Autopilot
         keybd_event(0x12, 0, 0, IntPtr.Zero);
         keybd_event(0x12, 0, 2, IntPtr.Zero);
         SetForegroundWindow(h);
+    }
+
+    /// <summary>The sandbox folder made anew: whatever a failed run left in it is gone, the given files are there.</summary>
+    private static void MakeSandbox(string dir, JsonNode? spec)
+    {
+        // only a folder of its own under the temp folder: the robot deletes it after the run
+        var temp = Path.GetFullPath(Path.GetTempPath());
+        var full = Path.GetFullPath(dir);
+        if (!full.StartsWith(temp, StringComparison.OrdinalIgnoreCase) || full.TrimEnd('\\').Length <= temp.TrimEnd('\\').Length)
+            throw new InvalidOperationException($"sandbox must be a folder inside {temp}: {full}");
+        if (Directory.Exists(full)) Directory.Delete(full, true);
+        Directory.CreateDirectory(full);
+        if (J.Get(spec, "files") is JsonObject files)
+            foreach (var (name, text) in files) File.WriteAllText(Path.Combine(full, name), J.AsStr(text) ?? "");
     }
 
     private delegate bool EnumProc(IntPtr h, IntPtr l);

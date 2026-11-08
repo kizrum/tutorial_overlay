@@ -874,6 +874,7 @@ internal sealed class Tutorial
     public TutorialState State = TutorialState.Running;
     public string StateName => State.ToString().ToLowerInvariant();   // as tools and events report it
     public bool KeepOpen;
+    public readonly HashSet<IntPtr> MarkedWindows = new();   // windows a step's target has been shown in
     public bool Toggle;
     public float? Dim;
     public int AdvanceDelayMs = 450;

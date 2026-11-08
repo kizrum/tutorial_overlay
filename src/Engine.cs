@@ -1093,6 +1093,9 @@ internal static partial class Engine
     private static bool LessonsOwnWindow(IntPtr hwnd)
     {
         if (_tut is not { } t || t.Index < 0 || t.Current is not { } cur) return false;
+        // a target of this or an earlier step was shown in it: the lesson works there. Explorer's folder window is
+        // small beside the desktop, the biggest window of its process, and passed for a dialog over it
+        if (t.MarkedWindows.Contains(hwnd)) return true;
         string title = CleanTitle(Native.WindowTitle(hwnd)), cls = Native.ClassName(hwnd);
         // a target of this or an earlier step lives in it
         if (t.Steps.Take(t.Index + 1).SelectMany(s => s.Targets)
@@ -1486,6 +1489,7 @@ internal static partial class Engine
         }
         m.Geo = geo;
         m.Visibility = "visible";
+        if (t != null && ag.Root != IntPtr.Zero) t.MarkedWindows.Add(ag.Root);
     }
 
     /// <summary>Samples the app around the target (a ring just outside it, plus its centre) once per mark.</summary>

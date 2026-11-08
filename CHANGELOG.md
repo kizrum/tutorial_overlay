@@ -23,6 +23,9 @@ only fixes things.
 - Fixed: a menu item was reported as `target_not_found` in apps with a big, slow UI Automation tree (Steam): the
   "not found" came from a search of the main window that began before the menu opened. Such a verdict no longer
   counts against a window opened after it, and an element is now looked for in the newest window first.
+- Fixed: in Explorer, the folder window was taken for a dialog over the desktop (the biggest window of the explorer
+  process) on a step whose target was not shown yet: the card asked to close it, and the click on a menu item did
+  not count. A window a target of the lesson has been shown in is never such a dialog.
 - Marks no longer wait for slow UI Automation (Steam, apps drawn by Chromium, where one search takes seconds): after a
   second, an element named exactly by its caption is framed by that caption, found by OCR, until UIA answers
   (`status`: `via: "caption"`). `validate` marks such targets `slow` and suggests the caption anchor.
