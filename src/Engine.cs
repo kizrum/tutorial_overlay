@@ -1543,8 +1543,26 @@ internal static partial class Engine
         {
             var cls = Native.ClassName(root);
             if (cls.Contains("tooltip", StringComparison.OrdinalIgnoreCase)) return true;
+            if (ShowsAppPopup(root, ag)) return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// The window over the target is the app's own menu or flyout, and the target is in it. Modern apps (WinUI 3:
+    /// Notepad, Paint, Terminal…) list a menu's items in the main window's UI Automation tree but draw them in a popup
+    /// window of their own (Microsoft.UI.Content.PopupWindowSiteBridge), so the main window is the anchor's root and
+    /// the popup is what lies over the item. Such a popup is owned by the anchor's window, has no caption, and the
+    /// target lies wholly inside it. A dialog over the target (it has a caption) still occludes it.
+    /// </summary>
+    private static bool ShowsAppPopup(IntPtr popup, AnchorGeo ag)
+    {
+        if (ag.Bounds is not RectangleF b || ag.Root == IntPtr.Zero) return false;
+        if (Native.GetAncestor(popup, Native.GA_ROOTOWNER) != Native.GetAncestor(ag.Root, Native.GA_ROOTOWNER)) return false;
+        int style = Native.GetWindowLong(popup, Native.GWL_STYLE);
+        if ((style & Native.WS_POPUP) == 0 || (style & Native.WS_CAPTION) == Native.WS_CAPTION) return false;
+        var fr = Native.FrameRect(popup);
+        return b.Left >= fr.Left - 2 && b.Top >= fr.Top - 2 && b.Right <= fr.Right + 2 && b.Bottom <= fr.Bottom + 2;
     }
 
     private static (PointF pt, AnchorGeo ag)? ProbePoint(Mark m)

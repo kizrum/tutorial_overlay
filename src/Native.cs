@@ -23,7 +23,9 @@ internal static class Native
     public const int WM_QUIT = 0x0012;
     public const int LLMHF_INJECTED = 0x01;
 
-    public const uint GA_ROOT = 2;
+    public const uint GA_ROOT = 2, GA_ROOTOWNER = 3;
+    public const int GWL_STYLE = -16, WS_CAPTION = 0x00C00000;
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] public static extern int GetWindowLong(IntPtr hwnd, int index);
     public const int SW_HIDE = 0, SW_SHOWNOACTIVATE = 4;
     public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_NOCOPYBITS = 0x100;
     public static readonly IntPtr HWND_TOPMOST = new(-1);

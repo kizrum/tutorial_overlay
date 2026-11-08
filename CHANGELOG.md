@@ -9,6 +9,11 @@ only fixes things.
 - Tests check that the plugin and the program speak the same language: the skill calls only tools and arguments the
   server has and names only fields, events and answers the program uses, and the Stop hook reads only what
   lesson.json holds. A rename in the program that the plugin missed now fails `dotnet run --project tests`.
+- A robot user for testing (`dotnet run --project tests -- --autopilot <cases>`): it plays lessons in real apps,
+  clicking, pressing keys and scrolling like a person, and writes an HTML report with a screenshot of every step.
+- Fixed: a target in a menu of a modern Windows app (Notepad, Paint, Terminal and other WinUI 3 apps) was reported
+  as "covered by another window" and not marked. Such apps draw their menus in a popup window of their own, and that
+  popup counted as something over the target; the app's own captionless popup that holds the target now does not.
 
 ## [0.5.0] - 2026-11-08
 
