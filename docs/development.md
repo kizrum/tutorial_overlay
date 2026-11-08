@@ -107,7 +107,9 @@ dotnet run --project tests -- --autopilot examples/autopilot --case calc # only 
 
 A case file is `{name, launch: {exe, args, process, window, readyTimeoutMs}, spec}`. `process` is what the robot checks
 before it starts the app and what it closes afterwards: a case whose app is already open is skipped (the robot never
-touches a window it did not open). The app counts as ready when `validate` resolves the first step's target; when the app opened behind another window, the robot raises it (by `window`, its title, for apps another process hosts, such as Calculator in ApplicationFrameHost; else by `process`).
+touches a window it did not open). An app that keeps running in the tray (Steam) gets `attach: true`: the robot uses it as it runs, `exe` and `args`
+only bring its window up (`steam.exe steam://open/main`), and afterwards it closes the windows that were not on screen
+before (as their cross does) and leaves the app running. The app counts as ready when `validate` resolves the first step's target; when the app opened behind another window, the robot raises it (by `window`, its title, for apps another process hosts, such as Calculator in ApplicationFrameHost; else by `process`).
 
 What it does follows the step: a click with the target's `button` (left, right, middle); the step's keys, with the
 pointer on the target first (Blender's keys act on the area under the pointer); the wheel over the scroll's area; a

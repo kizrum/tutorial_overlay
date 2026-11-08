@@ -73,6 +73,9 @@ internal static partial class Engine
                                          && at >= step.EnteredAt.AddMilliseconds(-Finder.GraceFor(step.Review))
                                          && (now - at).TotalMilliseconds >= MissingAfterMs)
                              .OrderByDescending(w => WindowSince[w.Hwnd]).FirstOrDefault();
+            // a "not found" given before that window opened says nothing about it: an app with a big, slow UIA tree
+            // (Steam's library) keeps the resolver busy for seconds, and its menu opened in the middle of a search
+            if (win != null && VerdictAt(m.Anchor) is DateTime verdict && verdict < WindowSince[win.Hwnd]) continue;
             RectangleF? scope = null;
             string where = "new window";
             if (win == null)
@@ -107,6 +110,10 @@ internal static partial class Engine
             ReportMissing(t.Index, step, m, win, process, scope, where, where == "open window" && ScrollsToFind(m.Anchor));
         }
     }
+
+    /// <summary>When the anchor's latest verdict was given: its text search, else its element search.</summary>
+    private static DateTime? VerdictAt(AnchorSpec a) =>
+        a.Find != null ? Finder.Get(a.Key)?.At : a.Path.Count > 0 ? Resolver.Get(a.Key)?.At : null;
 
     /// <summary>The anchor does not resolve (as opposed to: resolved, but covered / inactive / scrolled out of view).</summary>
     internal static bool IsMissing(string visibility) =>

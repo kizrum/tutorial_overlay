@@ -20,6 +20,9 @@ only fixes things.
 - Fixed: the mark on a menu item found by its text jumped sideways now and then (Blender's "Mesh ▸", "Torus"), and
   a click on it could count as a miss. OCR reads the submenu arrow or the item's icon sometimes as a word of its own,
   sometimes glued to the caption; the mark now frames the caption's letters either way.
+- Fixed: a menu item was reported as `target_not_found` in apps with a big, slow UI Automation tree (Steam): the
+  "not found" came from a search of the main window that began before the menu opened. Such a verdict no longer
+  counts against a window opened after it, and an element is now looked for in the newest window first.
 - A tutorial without `lang` gets its card (buttons, "Step 3 of 12", the hint line) in the language its steps are
   written in, not in the overlay's setting: English steps no longer sit between Russian buttons.
 

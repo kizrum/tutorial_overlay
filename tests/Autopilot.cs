@@ -118,11 +118,15 @@ internal static class Autopilot
         var process = J.Str(launch, "process") ?? J.Str(spec, "app");
         var started = new List<Process>();
         DateTime launchedAt = DateTime.Now;
+        // attach: an app that lives in the tray (Steam) is used as it runs; only the windows the lesson opened are
+        // closed afterwards, the app itself is left running
+        bool attach = J.Get(launch, "attach")?.GetValue<bool>() == true;
+        var shownBefore = attach && process != null ? ShownWindows(process) : new HashSet<IntPtr>();
 
         try
         {
             // ---- launch, never into an app the user has open
-            if (process != null && Process.GetProcessesByName(process).Length > 0)
+            if (!attach && process != null && Process.GetProcessesByName(process).Length > 0)
             {
                 res.Verdict = "skip";
                 res.Note = $"{process} is already open — close it first (the robot never touches an app it did not start)";
@@ -172,7 +176,8 @@ internal static class Autopilot
         finally
         {
             mcp.TryCall("stop_tutorial", new JsonObject { ["outro"] = false });
-            if (process != null) CloseStarted(process, launchedAt);
+            if (attach && process != null) CloseShown(process, shownBefore);
+            else if (process != null) CloseStarted(process, launchedAt);
             res.Ms = sw.ElapsedMilliseconds;
         }
         return res;
@@ -204,6 +209,28 @@ internal static class Autopilot
         keybd_event(0x12, 0, 0, IntPtr.Zero);
         keybd_event(0x12, 0, 2, IntPtr.Zero);
         SetForegroundWindow(h);
+    }
+
+    private delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc p, IntPtr l);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+
+    /// <summary>The process's top-level windows on screen now.</summary>
+    private static HashSet<IntPtr> ShownWindows(string process)
+    {
+        var pids = Process.GetProcessesByName(process).Select(p => (uint)p.Id).ToHashSet();
+        var res = new HashSet<IntPtr>();
+        EnumWindows((h, _) => { if (IsWindowVisible(h) && GetWindowThreadProcessId(h, out var pid) != 0 && pids.Contains(pid)) res.Add(h); return true; }, IntPtr.Zero);
+        return res;
+    }
+
+    /// <summary>Closes (WM_CLOSE, as the cross does) the windows of an attached app that were not on screen before.</summary>
+    private static void CloseShown(string process, HashSet<IntPtr> before)
+    {
+        foreach (var h in ShownWindows(process).Where(h => !before.Contains(h)))
+            PostMessage(h, 0x0010, IntPtr.Zero, IntPtr.Zero);
     }
 
     /// <summary>Closes the app's windows the robot opened (started after the launch), then kills what is left.</summary>

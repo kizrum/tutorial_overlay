@@ -53,6 +53,7 @@ internal static class Resolver
 
     /// <summary>When each watched window was first seen (MinValue: already open when watching began).</summary>
     public static readonly System.Collections.Concurrent.ConcurrentDictionary<IntPtr, DateTime> Since = new();
+    private const int FreshWindowSec = 10;
 
     public static void Start()
     {
@@ -352,7 +353,13 @@ internal static class Resolver
             return new AnchorResult(true, w.Hwnd, null, pids.Length > 0 ? pids : new[] { w.Pid }, "window", DateTime.UtcNow, WindowValue(a, w));
         }
         if (wins.Count == 0) return AnchorResult.Missing("no visible window", pids);
-        return ResolvePath(a, a.Path, wins, pids, useCache);
+        // an element is looked for in a window that has just opened first (a menu, a dialog: what the user is looking
+        // at), then from the biggest. A menu popup searched after a big main window waited for that window's whole UIA
+        // tree (Steam: seconds), and the menu item was reported missing meanwhile
+        var fresh = DateTime.UtcNow.AddSeconds(-FreshWindowSec);
+        // the newest first: the main window shown a moment before its menu is fresh too
+        var order = wins.OrderByDescending(w => Since.TryGetValue(w.Hwnd, out var opened) && opened >= fresh ? opened : DateTime.MinValue).ToList();
+        return ResolvePath(a, a.Path, order, pids, useCache);
     }
 
     private static AnchorResult ResolvePath(AnchorSpec a, List<ElementSpec> path, List<TopWindow> wins, int[] pids, bool useCache)
