@@ -595,6 +595,25 @@ public static class OcrTests
         A.Eq(null, Loc.LangOf(Spec("OK", "7")), "too few letters to tell");
     }
 
+    public static void TestMisreadTextIsNotSentScrolling()
+    {
+        // words that nearly spell the text are read in the area: it is there, misread — no wheel says to scroll
+        List<OcrLine> Read(params string[] words)
+        {
+            var l = new OcrLine();
+            float x = 0;
+            foreach (var w in words) { l.Words.Add(new OcrWord(w, new RectangleF(x, 0, w.Length * 8, 14))); x += w.Length * 8 + 6; }
+            return new List<OcrLine> { l };
+        }
+        A.Check(Ocr.Find(Read("Audio", "settinqs.."), "Audio settings", "exact").Count == 0, "the misread line is not a match");
+        A.Check(Ocr.Resembles(Read("Audio", "settinqs.."), "Audio settings"), "but it nearly spells it");
+        A.Check(Ocr.Resembles(Read("General", "Interfase", "Library"), "Interface"), "one word of a tab strip");
+        A.Check(Ocr.Resembles(Read("Аудио", "нстройки"), "Аудио настройки"), "a letter dropped");
+        A.Check(!Ocr.Resembles(Read("Track", "2"), "Track 12"), "other digits: another item of the list, scroll for it");
+        A.Check(!Ocr.Resembles(Read("Downloads", "Library"), "Settings"), "other words");
+        A.Check(!Ocr.Resembles(Read("Fil"), "Fit"), "too short to judge");
+    }
+
     public static void TestMenuGlyphsDoNotMoveTheMark()
     {
         // Blender's menu rows: OCR reads the submenu arrow and the icon now as a word of their own, now glued to the

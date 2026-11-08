@@ -6,6 +6,9 @@ only fixes things.
 
 ## [Unreleased]
 
+- Fixed: a text on screen that OCR misread ("Settinqs") got the "scroll here" wheel, sending the user scrolling
+  away from it. A text not found where words that nearly spell it are read (a third of the letters off at most,
+  the same digits) gets no wheel; a list of like items ("Track 2" for "Track 12") still does.
 - Fixed: in a checklist step the mascot jerked from the target just done to the next one without walking (FL
   Studio's step grid). The next target of the same step was taken for the old one moved with its window; it is now
   a new spot to walk to, or just to turn the arm toward. The same for a target that is found a moment after its step

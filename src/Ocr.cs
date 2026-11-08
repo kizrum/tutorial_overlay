@@ -613,6 +613,33 @@ internal static unsafe class Ocr
         return false;
     }
 
+    /// <summary>
+    /// Some words read here nearly spell <paramref name="query"/> (a third of its letters wrong at most): the text is
+    /// likely on screen, only misread ("Settinqs", "Аудио нстройки"). Digits must agree — "Track 12" is not "Track 2",
+    /// so a list of like items still says to scroll. Too short a text to judge (under 4 signs): no.
+    /// </summary>
+    internal static bool Resembles(List<OcrLine> lines, string query)
+    {
+        var q = Norm(query);
+        int signs = q.Count(char.IsLetterOrDigit);
+        if (signs < 4) return false;
+        string digits = new(q.Where(char.IsDigit).ToArray());
+        int qWords = q.Split(' ').Length, limit = Math.Max(1, (int)(signs * 0.34));
+        foreach (var line in lines)
+        {
+            var words = line.Words.Select(w => Norm(w.Text)).Where(w => w.Length > 0).ToList();
+            for (int n = Math.Max(1, qWords - 1); n <= qWords + 1; n++)
+                for (int i = 0; i + n <= words.Count; i++)
+                {
+                    var win = string.Join(" ", words.Skip(i).Take(n));
+                    if (new string(win.Where(char.IsDigit).ToArray()) != digits) continue;
+                    if (Math.Abs(win.Length - q.Length) > limit) continue;
+                    if (Distance(win, q, 1) <= limit) return true;
+                }
+        }
+        return false;
+    }
+
     // Edit distance where swapping look-alikes costs 1, and swapping other characters or dropping/adding a digit
     // costs `hard` (more than the tolerance, so such a line never matches). Dropping/adding a letter costs 1.
     private static int Distance(string a, string b, int hard)

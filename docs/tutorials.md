@@ -218,7 +218,9 @@ edge of its pane (a UIA element's rectangle outside the visible part; a text or 
 icon with running arrows appears at that edge, and the mascot stands next to it and says "Scroll down". The
 direction: for UIA elements, from their rectangle, and then the distance shows too ("≈ 6" notches); for texts and
 templates, from the way they were moving before they vanished, or the edge where they were last seen (no distance
-here). Scrolled past it, the hint turns round. Once the target shows, the mascot goes to it and the mark is back on
+here). A text not seen yet inside a list or a panel gets a wheel with no direction, at the pane — but not when words
+that nearly spell it are read there ("Settinqs" for "Settings", the digits the same): it is on screen and only
+misread, so scrolling would take it away. Scrolled past it, the hint turns round. Once the target shows, the mascot goes to it and the mark is back on
 it. While a text is out of view it is read twice as often. All this stays inside the overlay: the agent gets no
 pictures and no events; `anchor_found/lost` come at most once in 3 s per anchor, so scrolling a long list back and
 forth does not flood the agent with events.

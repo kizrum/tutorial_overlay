@@ -1419,7 +1419,10 @@ internal static partial class Engine
             // a text/template not seen yet: which way is unknown, but where to scroll is — the area it is looked for in.
             // Only inside a named element or part (a list, a panel): a text looked for in a whole app is usually in a
             // menu or dialog not open yet, and a wheel in the window's corner would send the user the wrong way
-            m.ScrollHint = reason is "text not visible" or "template not visible" && ScrollsToFind(m.Anchor) && FindArea(m.Anchor) is RectangleF fa
+            // Not when words that nearly spell it are read there: it is on screen, misread, and a wheel would send the
+            // user scrolling away from it
+            m.ScrollHint = reason is "text not visible" or "template not visible" && ScrollsToFind(m.Anchor)
+                           && Finder.Get(m.Anchor.Key)?.LooksLike != true && FindArea(m.Anchor) is RectangleF fa
                 ? ("any", fa, new PointF(fa.X + fa.Width / 2, fa.Y + fa.Height / 2), -1) : null;
             return;
         }

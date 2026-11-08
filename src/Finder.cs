@@ -82,7 +82,7 @@ internal sealed class Template
 /// <summary>Where a template / text was last found; PrevRel is the sighting before LastRel (which way it was moving).</summary>
 /// <summary>Size: of the found text / template piece (what a shape without coordinates frames); kept while it is out of view.</summary>
 internal sealed record FindResult(bool Found, PointF Rel, float Score, PointF? LastRel, DateTime At, PointF? PrevRel = null, DateTime LastSeenAt = default, bool Moving = false, string? Went = null, SizeF Size = default, IntPtr Root = default, RectangleF? Visible = null, RectangleF? Box = null,
-                              PointF[]? Places = null, string? Closed = null, bool InkLeft = false);
+                              PointF[]? Places = null, string? Closed = null, bool InkLeft = false, bool LooksLike = false);
 
 /// <summary>
 /// Visual anchors: finds templates inside the anchor's element using the window's own pixels (PrintWindow),
@@ -361,9 +361,11 @@ internal static class Finder
     /// </summary>
     internal static List<OcrLine> ReadForBench(Bitmap shot, FindSpec f) => ReadFor(shot, f, WholeAreaBudget);
 
-    internal static List<TextMatch> FindIn(Bitmap shot, FindSpec f, float budget = WholeAreaBudget)
+    internal static List<TextMatch> FindIn(Bitmap shot, FindSpec f, float budget = WholeAreaBudget) => FindIn(shot, f, out _, budget);
+
+    internal static List<TextMatch> FindIn(Bitmap shot, FindSpec f, out List<OcrLine> read, float budget = WholeAreaBudget)
     {
-        var lines = ReadFor(shot, f, budget);
+        var lines = read = ReadFor(shot, f, budget);
         var found = MatchAny(lines, f);
         if (found.Count == 0 && f.TextMatch != "regex") found = Closer(shot, lines, f, out lines);
         return Rank(found.OrderBy(m => Math.Round(m.Rect.Y / 8)).ThenBy(m => m.Rect.X).ToList(), lines, f);
@@ -582,7 +584,7 @@ internal static class Finder
         {
         if (tpl == null)
         {
-            var found = FindIn(shot, f, followed != null ? 1_000_000f : WholeAreaBudget);
+            var found = FindIn(shot, f, out var read, followed != null ? 1_000_000f : WholeAreaBudget);
             if (followed != null && found.Count == 0)
             {
                 // not in the band around where it was followed to: read the whole area before calling it gone
@@ -593,7 +595,7 @@ internal static class Finder
                 shotAt = DateTime.UtcNow;
                 shot = ScreenCapture.CaptureWindow(r.Root, Rectangle.Round(readArea));
                 if (shot == null) return Miss();
-                found = FindIn(shot, f, WholeAreaBudget);
+                found = FindIn(shot, f, out read, WholeAreaBudget);
             }
             RectangleF m;
             if (followed != null)
@@ -619,7 +621,10 @@ internal static class Finder
                         var was1 = new PointF(frame.X + prev.Rel.X - readArea.X, frame.Y + prev.Rel.Y - readArea.Y);
                         sameWord = SameShape(shot, new Point((int)Math.Round(was1.X - lostTrack.W / 2f), (int)Math.Round(was1.Y - lostTrack.H / 2f)), lostTrack);
                     }
-                    return Miss() with { InkLeft = sameWord || prev?.InkLeft == true && !prev.Found };
+                    // words that nearly spell it are read in the area: it is likely there, only misread — scrolling
+                    // would not bring it, so no wheel says to
+                    bool looksLike = f.Texts.Any(t => Ocr.Resembles(read, t));
+                    return Miss() with { InkLeft = sameWord || prev?.InkLeft == true && !prev.Found, LooksLike = looksLike };
                 }
                 // it stood still and now reads only far away: its own place turned unreadable (a list item got
                 // selected, white on blue) while the same words show elsewhere ("Counter-Strike 2 Update" in the news
