@@ -6,6 +6,10 @@ only fixes things.
 
 ## [Unreleased]
 
+- Fixed: the card shook when dragged against the screen's edge or the taskbar (the placement pulled it back while
+  the hand pushed it out). While held, only the hand moves it, and the edge stops the drag itself; dropped, it
+  keeps to the monitor it was dropped on instead of the app's.
+
 - The mascot has a new look: a light rim and a soft top light so it stands out on dark apps, lids when it
   blinks, mitten hands and capsule feet, and a thin dark outline on its limbs so they read on light apps too.
 - The mascot never puts a hand, foot or sparkle on the card: spots are checked against everything it draws, the

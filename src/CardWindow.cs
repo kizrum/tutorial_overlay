@@ -191,8 +191,11 @@ internal sealed class CardWindow : NoActivateForm
         if (_flash != null && Environment.TickCount64 > _flashUntil) { _flash = null; Invalidate(); }
         if (_pinned && _pinnedStepVersion != m.StepVersion && Intersects(Bounds, m.Avoid)) _pinned = false;
         var work = Native.WorkAreaAt(m.Focus == default ? new PointF(0, 0) : m.Focus);
-        if (!_pinned) Place(m, work);
-        else MoveTo(Anchored(Bounds, _size, work));
+        // while the user holds the card, only the hand moves it (pulling it back here fought the drag at the screen's
+        // edge and the taskbar: the card shook); dropped, it keeps to the monitor it was dropped on
+        if (_dragFrom != null) { if (Size != _size) MoveTo(new Rectangle(Location, _size)); }
+        else if (!_pinned) Place(m, work);
+        else MoveTo(Anchored(Bounds, _size, Native.WorkAreaAt(new PointF(Left + Width / 2f, Top + Height / 2f))));
         ShowQuiet();
         Engine.CardRect = Bounds;
         _compose?.Follow(ComposeScreenRect());
@@ -787,7 +790,11 @@ internal sealed class CardWindow : NoActivateForm
         if (_dragFrom is Point from && e.Button == MouseButtons.Left)
         {
             var cur = Cursor.Position;
-            MoveTo(new Rectangle(_dragOrigin.X + cur.X - from.X, _dragOrigin.Y + cur.Y - from.Y, Width, Height));
+            // the screen's edge and the taskbar stop the card itself: it slides along them, whole and still
+            var work = Native.WorkAreaAt(new PointF(cur.X, cur.Y));
+            int x = Math.Clamp(_dragOrigin.X + cur.X - from.X, work.Left, Math.Max(work.Left, work.Right - Width));
+            int y = Math.Clamp(_dragOrigin.Y + cur.Y - from.Y, work.Top, Math.Max(work.Top, work.Bottom - Height));
+            MoveTo(new Rectangle(x, y, Width, Height));
             _pinned = true;
             _pinnedStepVersion = _model.StepVersion;
             return;
