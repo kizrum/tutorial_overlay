@@ -23,6 +23,9 @@ only fixes things.
 - Fixed: a menu item was reported as `target_not_found` in apps with a big, slow UI Automation tree (Steam): the
   "not found" came from a search of the main window that began before the menu opened. Such a verdict no longer
   counts against a window opened after it, and an element is now looked for in the newest window first.
+- Marks no longer wait for slow UI Automation (Steam, apps drawn by Chromium, where one search takes seconds): after a
+  second, an element named exactly by its caption is framed by that caption, found by OCR, until UIA answers
+  (`status`: `via: "caption"`). `validate` marks such targets `slow` and suggests the caption anchor.
 - A tutorial without `lang` gets its card (buttons, "Step 3 of 12", the hint line) in the language its steps are
   written in, not in the overlay's setting: English steps no longer sit between Russian buttons.
 

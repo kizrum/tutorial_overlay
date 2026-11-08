@@ -445,6 +445,12 @@ internal sealed class Mark
     public DateTime? OpensArmedAt;        // clicked, waiting for Opens to show up
     public HashSet<IntPtr>? OpensBefore;  // matching top-level windows at click time
     public bool OpensPresentBefore;
+    // while UI Automation is slow to answer (Steam's big tree): the element found by its caption meanwhile
+    public AnchorSpec? StandIn;           // built once: null when its caption cannot stand for it
+    public bool StandInBuilt;
+    public DateTime? PendingSince;        // since when its UIA search has not answered
+    public bool StandInWanted;            // its caption is being looked for
+    public bool ViaStandIn;               // the mark stands on the caption now, not on the element
 
     public bool HasHitArea => Shapes.Any(s => s.IsTarget);
     public bool HasButtons => Shapes.Any(s => s.Type == "button");
@@ -496,6 +502,7 @@ internal sealed class Mark
     {
         Dismissed = false; Hits = 0; CheckOk = null; CheckAt = default; Geo = null; Visibility = "resolving"; ShownAt = null;
         CheckSampling = false; Epoch++;
+        PendingSince = null; StandInWanted = false; ViaStandIn = false;
         OpensArmedAt = null; OpensBefore = null; OpensPresentBefore = false; AutoColor = null;
     }
 }

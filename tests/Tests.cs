@@ -568,6 +568,21 @@ public static class OcrTests
         A.Eq(1, Ocr.Find(new List<OcrLine> { title }, "Mixer - Master", "exact").Count, "the whole title still matches");
     }
 
+    public static void TestCaptionStandsInOnlyForCaptionedElements()
+    {
+        AnchorSpec Anc(string json) => AnchorSpec.Parse(JsonNode.Parse(json), null);
+        var tab = Engine.TextStandIn(Anc("""{"process":"steamwebhelper","window":"Steam Settings","element":{"name":"Interface","role":"TabItem","match":"exact"}}"""));
+        A.Check(tab?.Find is { Text: "Interface", TextMatch: "exact", Lang: "en-US" }, "an exactly named tab: its caption, read in English");
+        A.Check(tab!.Path.Count == 0 && tab.Window == "Steam Settings" && tab.Process == "steamwebhelper", "same window, no UIA path");
+        A.Check(Engine.TextStandIn(Anc("""{"process":"x","element":{"name":"Настройки","role":"MenuItem","match":"exact"}}"""))?.Find?.Lang == null, "a Cyrillic caption: the user's languages");
+        A.Check(Engine.TextStandIn(Anc("""{"process":"x","element":{"name":"Interface","role":"TabItem"}}""")) == null, "a name that only contains: no");
+        A.Check(Engine.TextStandIn(Anc("""{"process":"x","element":{"name":"24-hour clock","role":"CheckBox","match":"exact"}}""")) == null, "a check box: its name is a label beside it");
+        A.Check(Engine.TextStandIn(Anc("""{"process":"x","element":{"name":"PLAY","role":"Button","match":"exact","index":1}}""")) == null, "the second of several: no");
+        A.Check(Engine.TextStandIn(Anc("""{"process":"x","element":{"name":"Seven","role":"Button","match":"exact"},"offset":[10,0]}""")) == null, "a point beside it: no");
+        A.Check(Engine.TextStandIn(Anc("""{"process":"x","element":{"name":"OK","role":"Button","match":"exact"}}""")) != null, "a short caption still counts");
+        A.Check(Engine.TextStandIn(Anc("""{"process":"x","element":{"name":"7","role":"Button","match":"exact"}}""")) == null, "no letters: no");
+    }
+
     public static void TestCardSpeaksTheStepsLanguage()
     {
         JsonNode Spec(params string[] says) => new JsonObject

@@ -136,6 +136,13 @@ A target named with a number that changes as the user works (`Ln 36, Col 1`, `3 
 steady part of the name: anchor by that part (`find.text`) or by the element's position, or the mark is lost the
 moment the number changes.
 
+Some windows answer UI Automation slowly: Steam and other apps drawn by Chromium hand over their whole tree, and one
+search takes seconds. `validate` marks such a target `slow` and gives the anchor by its caption to use instead. A lesson
+written with the element still works: while UIA has not answered for a second, the mark stands on the element's
+caption, found by OCR in a tenth of a second (`status` shows `via: "caption"`), and moves to the element's own frame
+once UIA answers. This is done only where the caption surely is the element: an exactly named button, menu item, tab,
+link, list item or text, without an offset, whose caption is on screen exactly once.
+
 ## Steps and conditions
 
 ```json

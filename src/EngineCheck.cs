@@ -190,6 +190,7 @@ internal static partial class Engine
         {
             if (J.Has(r, "repeated")) warnings++;
             if (J.Has(r, "volatile")) warnings++;
+            if (J.Has(r, "slow")) warnings++;
             if (J.Bool(r, "ok") == true) return;
             // a program a later step works in is usually started by an earlier one (Start menu, a link, "opens")
             if (J.Str(r, "reason") == "process not running" && curIndex != firstIndex)
@@ -212,8 +213,26 @@ internal static partial class Engine
                          "warnings on later steps are often things an earlier step opens; check them when you get there " +
                          "(validate again, or watch anchor_found events). 'occluded'/'inactive' only mean another window is in front now. " +
                          "'repeated': the text is on screen more than once — make sure the mark is on the right one. " +
-                         "'volatile': the name has numbers that may change (cursor position, counters, time) — anchor on the part that stays.",
+                         "'volatile': the name has numbers that may change (cursor position, counters, time) — anchor on the part that stays. " +
+                         "'slow': UI Automation takes seconds in this window — anchor by the caption (find.text) as it says.",
         };
+    }
+
+    private const int SlowUiaMs = 1500;
+
+    /// <summary>
+    /// What to say about an element whose UI Automation search took long (Steam, Chromium pages: the whole tree is
+    /// walked): the mark will come late on every visit; its caption is found in a tenth of a second.
+    /// </summary>
+    private static string SlowNote(AnchorSpec a, long ms)
+    {
+        var took = ms >= 3000 ? "over 3 s" : $"{ms / 1000.0:0.0} s";
+        var note = $"UI Automation took {took} to find it: its mark comes late on every visit.";
+        if (Engine.TextStandIn(a) is { Find: FindSpec f })
+            note += $" Anchor it by its caption instead: find:{{text:'{f.Text}', match:'exact'{(f.Lang != null ? $", lang:'{f.Lang}'" : "")}}} " +
+                    "(until UIA answers, the mark already stands on that caption)";
+        else note += " Anchor it by its caption (find.text) if it has one.";
+        return note;
     }
 
     /// <summary>Resolves an anchor synchronously and says whether its point is visible now, and why not.</summary>
@@ -242,7 +261,13 @@ internal static partial class Engine
         try
         {
             var wf = a.WithoutFind();
-            if (_resolved == null || !_resolved.TryGetValue(wf.Key, out r!)) { r = Resolver.ResolveWithin(wf, 3000); if (_resolved != null) _resolved[wf.Key] = r; }
+            if (_resolved == null || !_resolved.TryGetValue(wf.Key, out r!))
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                r = Resolver.ResolveWithin(wf, 3000);
+                if (_resolved != null) _resolved[wf.Key] = r;
+                if (wf.Path.Count > 0 && sw.ElapsedMilliseconds >= SlowUiaMs) o["slow"] = SlowNote(a, sw.ElapsedMilliseconds);
+            }
         }
         catch (Exception e) when (Resolver.IsGone(e) || e is InvalidOperationException) { return Bad("element vanished while reading it: " + e.Message); }
         if (!r.Found) return Bad(r.Reason == "process not running" ? "process not running" : "not found: " + r.Reason, r.Reason == "process not running" ? "error" : "warning");

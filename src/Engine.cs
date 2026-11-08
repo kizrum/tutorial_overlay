@@ -821,7 +821,8 @@ internal static partial class Engine
                 // the tutorial's main window stays resolved so the card can pick the right monitor
                 .Concat(t is { Active: true } && t.Defaults.Process != null ? new[] { t.Defaults } : Array.Empty<AnchorSpec>())
                 .Concat(InputAnchors(step))
-                .Concat(NextMenuItems(t, step).Select(m => m.Anchor));
+                .Concat(NextMenuItems(t, step).Select(m => m.Anchor))
+                .Concat(marks.Where(m => m.StandInWanted && m.StandIn != null).Select(m => m.StandIn!));
             MarkCount = marks.Count;
             var anchorList = anchors.ToList();
             Finder.SetWanted(anchorList);
@@ -1352,9 +1353,62 @@ internal static partial class Engine
         return geo;
     }
 
+    private const int StandInAfterMs = 1000;
+
+    // roles whose name is the caption drawn on them: the words on screen are the element. Not a check box, a combo box
+    // or an edit: their name is a label beside them, and a mark on the label is not on the control
+    private static readonly HashSet<string> CaptionRoles = new(StringComparer.OrdinalIgnoreCase)
+        { "Button", "MenuItem", "TabItem", "Text", "Hyperlink", "ListItem", "TreeItem", "SplitButton", "HeaderItem", "DataItem" };
+
+    /// <summary>
+    /// The element by its caption, for while UI Automation does not answer: an app with a big tree (Steam's library,
+    /// a Chromium page) takes seconds per search, and the user would wait on a step without a mark. Only an element
+    /// named exactly, with a caption role, no offset and no pane path (a title); null otherwise.
+    /// </summary>
+    internal static AnchorSpec? TextStandIn(AnchorSpec a)
+    {
+        if (a.IsScreen || a.Find != null || a.Path.Count == 0 || a.HasPoint || a.Title != null || a.Read != null) return null;
+        var seg = a.Path[^1];
+        if (!seg.NameExact || seg.Name is not string name || seg.Role == null || !CaptionRoles.Contains(seg.Role)) return null;
+        if (seg.Index is > 0 || seg.AutomationId != null || seg.ClassName != null) return null;
+        name = name.Trim();
+        if (name.Length is < 2 or > 60 || !name.Any(char.IsLetter)) return null;
+        var c = a.WithoutFind();
+        c.Path = new List<ElementSpec>();
+        // a Latin caption is read with the English recogniser: a Russian one reads "Cube" as "Сиве"
+        bool latin = name.All(ch => ch < 0x370);
+        c.Find = new FindSpec { Text = name, Texts = new List<string> { name }, TextMatch = "exact", Lang = latin ? "en-US" : null };
+        return c;
+    }
+
+    /// <summary>
+    /// The mark's geometry by its caption while its UIA search has not answered for a second; null when not (yet).
+    /// The caption must be on screen exactly once: two of them and the mark could stand on the wrong one.
+    /// </summary>
+    private static AnchorGeo? ViaCaption(Mark m, string reason, DateTime now)
+    {
+        if (reason is not ("resolving" or "not answering")) { m.PendingSince = null; m.StandInWanted = false; return null; }
+        if (!m.StandInBuilt) { m.StandInBuilt = true; m.StandIn = TextStandIn(m.Anchor); }
+        if (m.StandIn == null) return null;
+        m.PendingSince ??= now;
+        if ((now - m.PendingSince.Value).TotalMilliseconds < StandInAfterMs) return null;
+        m.StandInWanted = true;
+        if (Finder.Get(m.StandIn.Key) is not { Found: true } fr || fr.Places is { Length: > 1 }) return null;
+        var g = AnchorNow(m.StandIn, out _);
+        return g is { FromLastKnown: false } ? g : null;
+    }
+
     private static void ComputeMark(Mark m, Tutorial? t, int fgPid, DateTime now)
     {
         var ag = AnchorNow(m.Anchor, out var reason);
+        if (ag == null && ViaCaption(m, reason, now) is AnchorGeo cg)
+        {
+            if (!m.ViaStandIn) Log.Info($"mark {m.Id}: UI Automation is slow, framed by its caption \"{m.StandIn!.Find!.Text}\" meanwhile");
+            m.ViaStandIn = true;
+            ag = cg;
+        }
+        else if (ag != null) { m.ViaStandIn = false; m.PendingSince = null; m.StandInWanted = false; }
+        else m.ViaStandIn = false;
         if (ag == null)
         {
             m.Geo = null;
@@ -2364,6 +2418,7 @@ internal static partial class Engine
             ["id"] = m.Id, ["name"] = m.Label, ["anchor"] = m.Anchor.Describe(), ["visibility"] = m.Dismissed && m.Visibility == "visible" ? "dismissed" : m.Visibility,
             ["dismissed"] = m.Dismissed, ["satisfied"] = m.Satisfied, ["hits"] = m.Hits,
         };
+        if (m.ViaStandIn) o["via"] = "caption";   // UIA is slow: framed by its words until the element answers
         if (m.Check != null) o["check"] = new JsonObject { ["expr"] = m.Check.Expr, ["ok"] = m.CheckOk };
         if (m.Geo != null)
         {

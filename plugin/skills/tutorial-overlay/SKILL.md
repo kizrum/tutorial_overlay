@@ -73,6 +73,9 @@ restart Claude Code. Do not try to install or download it yourself.
    not the "Save" button of a dialog.
    A target with `volatile` has numbers in its name that change ("Ln 36, Col 1", "3 unread", a time): anchor on the
    part that stays, or the mark is lost as soon as the number changes.
+   A target with `slow` sits in a window whose UI Automation takes seconds (Steam, pages drawn by Chromium): anchor
+   it by its caption as the note says (`find.text`, `match: 'exact'`), or its mark comes late on every visit. An
+   older TutorialOverlay does not say `slow`: when `inspect` takes many seconds on a window, do the same there.
 8. **Start and follow:** `start_tutorial(spec)`, then `events(since, timeoutMs)` to see hits, misses, `no_effect`
    and `help`. For a long lesson use `keepOpen: true` and `append_steps`. While the lesson runs, keep an `events`
    long-poll going all the time (`timeoutMs: 100000`: it returns at once when something happens, so a long one only
