@@ -24,6 +24,7 @@ internal sealed class MascotInput
     public string? Gesture;                // "drag" | "scroll": nothing to point at, the step is a motion — it shows it
     public bool ScrollUp;
     public string StepKey = "";            // a new step re-shows the bubble and may move it
+    public string TargetKey = "";          // which of the step's targets: the next one of a checklist is a new spot, not a ride-along
     public List<RectangleF> Avoid = new(); // marks, captions, popups
     public float Scale = 1;
 }
@@ -72,6 +73,7 @@ internal sealed class MascotWindow : Form
     private float _alpha;
     private string _spotKey = "";                // the step whose spot was chosen
     private PointF _spotTarget;
+    private string _spotTargetKey = "";          // which target of the step the spot was chosen for
     private DateTime _targetMovedAt;
     private bool _respot;               // the glued spot went bad while the target moved: choose again once it rests
     // No clean spot existed when this one was chosen: keep it until the target or the card moves. Without this the
@@ -238,6 +240,7 @@ internal sealed class MascotWindow : Form
         StartAppear(dest);
         if (inp.Target is PointF tt) { _offset = new PointF(dest.X - tt.X, dest.Y - tt.Y); _spotTarget = tt; }
         _spotKey = inp.StepKey;
+        _spotTargetKey = inp.TargetKey;
     }
 
     /// <summary>Decide where to be for this frame's target, and how to get there.</summary>
@@ -271,10 +274,14 @@ internal sealed class MascotWindow : Form
             if (TouchesCard(spot, t, s)) { Tuck(); _alpha = 0; }
             _offset = new PointF(spot.X - t.X, spot.Y - t.Y);
             _spotKey = inp.StepKey;
+            _spotTargetKey = inp.TargetKey;
             _spotTarget = t;
             return;
         }
 
+        // the next target of the same step (a checklist's next cell) is somewhere else to go to: walk there or turn
+        // the arm, never ride along with the jump as if the window had moved
+        if (_spotKey == inp.StepKey && _spotTargetKey != inp.TargetKey) _spotKey = "";
         if (_spotKey == inp.StepKey)
         {
             // same step: ride along with the target (window dragged, content scrolled)
@@ -305,6 +312,7 @@ internal sealed class MascotWindow : Form
         // a new step (or a spot that went bad)
         _respot = false;
         _spotKey = inp.StepKey;
+        _spotTargetKey = inp.TargetKey;
         _spotTarget = t;
         if (Reaches(inp, t, size, s) && SpotOk(inp, _pos, size, s))
         {

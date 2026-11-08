@@ -129,6 +129,7 @@ internal static partial class Engine
             return step.Targets.Any(x => !x.Satisfied && !x.Optional) ? null : m;
         }
 
+        m.TargetKey = step.Targets.IndexOf(target).ToString();
         var g = target.Geo!;
         var h = g.Hits.FirstOrDefault();
         m.Target = h == null ? g.Center : h.Circle ? h.C : new PointF(h.Rect.X + h.Rect.Width / 2, h.Rect.Y + h.Rect.Height / 2);

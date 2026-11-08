@@ -6,6 +6,10 @@ only fixes things.
 
 ## [Unreleased]
 
+- Fixed: in a checklist step the mascot jerked from the target just done to the next one without walking (FL
+  Studio's step grid). The next target of the same step was taken for the old one moved with its window; it is now
+  a new spot to walk to, or just to turn the arm toward. The same for a target that is found a moment after its step
+  begins.
 - Tests check that the plugin and the program speak the same language: the skill calls only tools and arguments the
   server has and names only fields, events and answers the program uses, and the Stop hook reads only what
   lesson.json holds. A rename in the program that the plugin missed now fails `dotnet run --project tests`.
