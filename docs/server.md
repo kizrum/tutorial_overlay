@@ -163,7 +163,9 @@ next to it as `config.json.broken-<date>` rather than lost.
 
 `autoColor` (default `true`): the marks' colour is matched to the app. The overlay samples the pixels around the
 step's first target and picks, out of bright colours (magenta, orange, yellow, cyan, red, violet), the one least like
-the interface. An explicit `color` on a shape wins. `lang`: `ru` or `en` (the card's and hints' text). `"none"`
+the interface. An explicit `color` on a shape wins. `lang`: `ru` or `en` (the card's and hints' text); a
+tutorial without its own `lang` gets the card in the language its steps are written in, so English steps never sit
+between Russian buttons. `"none"`
 turns a hotkey off. The hint line at the bottom of the card is built from the hotkeys in effect.
 
 Default hotkeys (active while the card is shown): **Ctrl+Alt+→** done, **←** back, **↓** skip, **Z** undo a hit,

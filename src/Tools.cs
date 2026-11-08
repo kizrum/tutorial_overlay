@@ -62,7 +62,7 @@ internal static class Tools
         Tool("clear", "Remove free marks (all, or one id).", Obj(("id", T("string", "omit for all")))),
         Tool("start_tutorial", "Start a tutorial; only the current step's targets show, steps advance by themselves. " +
             "spec={title, app (default process for anchors), window, dim, toggle, keepOpen (wait for append_steps after last step), advanceDelayMs, hideWhenInactive, startAt, " +
-            "outro (default true: end card offers Save/Repeat/Keep learning), lang:'ru'|'en', accent, hotkeys:{done,back,skip,undo,stop:'Ctrl+Alt+Right'|'none'}, " +
+            "outro (default true: end card offers Save/Repeat/Keep learning), lang:'ru'|'en' (the card's own words; default: the language the steps are written in), accent, hotkeys:{done,back,skip,undo,stop:'Ctrl+Alt+Right'|'none'}, " +
             "mascot (default true: a character flies to each target, points and says the step's 'say' line), " +
             "steps:[{id, title, text, why (shown on the card: teach the idea, not just the click), say (mascot's short line, ≤60 chars; default title), anchor, " +
             "targets:[{id, name, anchor, shapes, toggle, check, button, optional, doneStyle:'hide'|'check', hint, number, arrow, " +

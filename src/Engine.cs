@@ -126,7 +126,10 @@ internal static partial class Engine
             int templates = TemplateStore.LoadFrom(spec);
             var defaults0 = DefaultsOf(spec);
             var scaleNote = Rescale((JsonObject)spec, defaults0);
-            ApplySettings(Settings.Global.Clone().Apply(spec));
+            var look = Settings.Global.Clone().Apply(spec);
+            // no "lang": the card speaks the language the steps are written in
+            if (J.Str(spec, "lang") == null && J.Str(spec, "language") == null && Loc.LangOf(spec) is string written) look.Lang = written;
+            ApplySettings(look);
             var t = new Tutorial
             {
                 Title = J.Str(spec, "title") ?? "",

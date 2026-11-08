@@ -58,7 +58,8 @@ restart Claude Code. Do not try to install or download it yourself.
    click either: the step that opens it is done once the next `inMenu` step's item shows up, so say "point at Mesh".
    (An older TutorialOverlay waits for the click there: say "click Mesh", which opens it too.)
 5. **Teach, not just click.** Put the reason in each step's `why`: what the tool does, why this way, the usual
-   mistake. Keep `say` (the mascot's line) under 60 characters.
+   mistake. Keep `say` (the mascot's line) under 60 characters. Write the steps in the user's language, and set the
+   spec's `lang` ('ru' | 'en') to it, so the card's own buttons match the steps.
 6. **Say when a step is done.** No `until`: done when all targets are clicked. Otherwise pick the condition that
    matches the result: `appear` for a window that opens, `uia` for a checkbox or toggle state, `pixel` for a cell
    that lights up, `key` for a shortcut, `drag`, `scroll`, `trace`. Use `opens` on a target that must open a window.

@@ -568,6 +568,18 @@ public static class OcrTests
         A.Eq(1, Ocr.Find(new List<OcrLine> { title }, "Mixer - Master", "exact").Count, "the whole title still matches");
     }
 
+    public static void TestCardSpeaksTheStepsLanguage()
+    {
+        JsonNode Spec(params string[] says) => new JsonObject
+        {
+            ["steps"] = new JsonArray(says.Select(s => (JsonNode)new JsonObject { ["title"] = s }).ToArray()),
+        };
+        A.Eq("en", Loc.LangOf(Spec("Click Torus", "Point at the 3D view and press Delete")), "English steps");
+        A.Eq("ru", Loc.LangOf(Spec("Наведите на Mesh", "Нажмите Torus — это наш бублик")), "Russian steps naming Latin items");
+        A.Eq("en", Loc.LangOf(Spec("Click «Файл», then choose Save as and pick a folder")), "an English step quoting a Russian button");
+        A.Eq(null, Loc.LangOf(Spec("OK", "7")), "too few letters to tell");
+    }
+
     public static void TestMenuGlyphsDoNotMoveTheMark()
     {
         // Blender's menu rows: OCR reads the submenu arrow and the icon now as a word of their own, now glued to the

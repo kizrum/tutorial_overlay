@@ -20,6 +20,8 @@ only fixes things.
 - Fixed: the mark on a menu item found by its text jumped sideways now and then (Blender's "Mesh ▸", "Torus"), and
   a click on it could count as a miss. OCR reads the submenu arrow or the item's icon sometimes as a word of its own,
   sometimes glued to the caption; the mark now frames the caption's letters either way.
+- A tutorial without `lang` gets its card (buttons, "Step 3 of 12", the hint line) in the language its steps are
+  written in, not in the overlay's setting: English steps no longer sit between Russian buttons.
 
 ## [0.5.0] - 2026-11-08
 

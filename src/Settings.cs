@@ -263,6 +263,29 @@ internal sealed class Loc
     };
 
     public static Loc For(string? lang) => (lang ?? "ru").StartsWith("en", StringComparison.OrdinalIgnoreCase) ? En : Ru;
+
+    /// <summary>
+    /// The language a lesson is written in, from the words of its title and steps: "ru" when a good share of the
+    /// letters is Cyrillic, "en" when they are Latin, null when there are too few to tell. A spec without "lang"
+    /// gets its card in that language, so English steps do not sit between Russian buttons. A Russian lesson names
+    /// Latin items ("Mesh", "File") and an English one may quote a Russian button, hence a share, not any letter.
+    /// </summary>
+    public static string? LangOf(JsonNode? spec)
+    {
+        int cyr = 0, lat = 0;
+        void Count(string? s)
+        {
+            if (s == null) return;
+            foreach (var ch in s)
+                if (ch is >= 'А' and <= 'я' or 'Ё' or 'ё') cyr++;
+                else if (ch is >= 'A' and <= 'Z' or >= 'a' and <= 'z') lat++;
+        }
+        Count(J.Str(spec, "title"));
+        foreach (var s in J.Items(J.Get(spec, "steps")))
+            foreach (var k in new[] { "title", "say", "why", "text" }) Count(J.Str(s, k));
+        if (cyr + lat < 12) return null;
+        return cyr >= (cyr + lat) * 0.3 ? "ru" : "en";
+    }
 }
 
 /// <summary>
