@@ -105,9 +105,9 @@ dotnet run --project tests -- --autopilot examples/autopilot             # every
 dotnet run --project tests -- --autopilot examples/autopilot --case calc # only cases whose file name has "calc"
 ```
 
-A case file is `{name, launch: {exe, args, process, readyTimeoutMs}, spec}`. `process` is what the robot checks
+A case file is `{name, launch: {exe, args, process, window, readyTimeoutMs}, spec}`. `process` is what the robot checks
 before it starts the app and what it closes afterwards: a case whose app is already open is skipped (the robot never
-touches a window it did not open). The app counts as ready when `validate` resolves the first step's target.
+touches a window it did not open). The app counts as ready when `validate` resolves the first step's target; when the app opened behind another window, the robot raises it (by `window`, its title, for apps another process hosts, such as Calculator in ApplicationFrameHost; else by `process`).
 
 A step fails on `target_not_found`, on a target that stays not visible (the server's reason is in the report), or when
 it does not complete within 20 s. A step that waits for a drag, a trace, a count or Done is completed on the robot's

@@ -29,6 +29,10 @@ internal static class Autopilot
 {
     private const int StepTimeoutMs = 20000, VisibleTimeoutMs = 8000, AfterActionMs = 4000;
 
+    /// <summary>How long the robot looks at each step before it acts (a person reads the card first): the time the
+    /// marks and the card are watched for twitching.</summary>
+    private const int WatchMs = 1500;
+
     public static int Run(string[] args)
     {
         Native.SetProcessDpiAwarenessContext(Native.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);   // physical pixels
@@ -138,6 +142,10 @@ internal static class Autopilot
             {
                 val = mcp.Call("validate", new JsonObject { ["spec"] = spec.DeepClone() }).Json;
                 if (J.Get(val, "steps") is JsonArray st && st.Count > 0 && FirstStepOk(st[0])) break;
+                // Windows may open the app behind the window in front (it limits focus stealing): a person clicks it
+                // to the front, the robot raises it the same way
+                var why = val?.ToJsonString() ?? "";
+                if (why.Contains("occluded") || why.Contains("inactive")) BringToFront(process, J.Str(launch, "window"));
                 Thread.Sleep(700);
             }
             if (J.Get(val, "steps") is not JsonArray vs || vs.Count == 0 || !FirstStepOk(vs[0]))
@@ -172,6 +180,31 @@ internal static class Autopilot
 
     private static bool FirstStepOk(JsonNode? step) =>
         J.Items(J.Get(step, "targets")).Any() ? J.Items(J.Get(step, "targets")).All(t => J.Get(t, "ok")?.GetValue<bool>() == true) : true;
+
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, IntPtr extra);
+
+    /// <summary>
+    /// Raises the app's window: the one titled <paramref name="title"/> (apps hosted by another process, such as
+    /// Calculator in ApplicationFrameHost), else the process's main window. A tap of Alt first: Windows lets a
+    /// process that just had input raise another window.
+    /// </summary>
+    private static void BringToFront(string? process, string? title)
+    {
+        IntPtr h = IntPtr.Zero;
+        if (title != null)
+            h = Process.GetProcesses().Where(p => { try { return p.MainWindowHandle != IntPtr.Zero && p.MainWindowTitle.Contains(title, StringComparison.OrdinalIgnoreCase); } catch { return false; } })
+                .Select(p => p.MainWindowHandle).FirstOrDefault();
+        if (h == IntPtr.Zero && process != null)
+            h = Process.GetProcessesByName(process).Select(p => p.MainWindowHandle).FirstOrDefault(x => x != IntPtr.Zero);
+        if (h == IntPtr.Zero) return;
+        if (IsIconic(h)) ShowWindow(h, 9);   // SW_RESTORE
+        keybd_event(0x12, 0, 0, IntPtr.Zero);
+        keybd_event(0x12, 0, 2, IntPtr.Zero);
+        SetForegroundWindow(h);
+    }
 
     /// <summary>Closes the app's windows the robot opened (started after the launch), then kills what is left.</summary>
     private static void CloseStarted(string process, DateTime since)
@@ -248,6 +281,11 @@ internal static class Autopilot
             if (!shot)
             {
                 Thread.Sleep(600);   // the marks and the card settle (the mascot flies in)
+                status = Watch(mcp, WatchMs, r) ?? status;
+                var tut2 = J.Get(status, "tutorial");
+                if (Past(tut2, index)) break;   // completed while it watched (a condition met by itself)
+                visible = J.Items(J.Get(J.Get(tut2, "step"), "targets"))
+                    .FirstOrDefault(t => J.Get(t, "satisfied")?.GetValue<bool>() != true && J.Str(t, "visibility") is "visible") ?? visible;
                 LookChecks(status!, visible, r);
                 Shoot(mcp, r, reportDir, caseName);
                 shot = true;
@@ -327,6 +365,46 @@ internal static class Autopilot
         var list = J.Items(J.Get(ans, "events")).Select(e => (JsonNode?)e).ToList();
         foreach (var e in list) seq = Math.Max(seq, (long)(J.Num(e, "seq") ?? seq));
         return list;
+    }
+
+    /// <summary>
+    /// Looks at the step for a while before acting, as a person reads the card first, and samples where the marks and
+    /// the card are. Nothing moves the app meanwhile, so a mark or the card that moves, or a target that blinks
+    /// between visible and hidden, is the overlay twitching. Returns the last status.
+    /// </summary>
+    private static JsonObject? Watch(Mcp mcp, int ms, StepResult r)
+    {
+        var marks = new Dictionary<string, List<double[]>>();
+        var card = new List<double[]>();
+        var vis = new Dictionary<string, List<string>>();
+        JsonObject? last = null;
+        var sw = Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < ms)
+        {
+            last = mcp.Call("status", new JsonObject()).Json?.AsObject();
+            foreach (var t in J.Items(J.Get(J.Get(J.Get(last, "tutorial"), "step"), "targets")))
+            {
+                var id = J.Str(t, "id") ?? "?";
+                var v = J.Str(t, "visibility") ?? "";
+                if (!vis.TryGetValue(id, out var vl)) vis[id] = vl = new List<string>();
+                if (vl.Count == 0 || vl[^1] != v) vl.Add(v);
+                if (J.Get(t, "bounds") is JsonArray b && b.Count == 4)
+                {
+                    if (!marks.TryGetValue(id, out var ml)) marks[id] = ml = new List<double[]>();
+                    ml.Add(b.Select(x => (double)x!).ToArray());
+                }
+            }
+            if (J.Get(last, "card") is JsonArray c && c.Count == 4) card.Add(c.Select(x => (double)x!).ToArray());
+            Thread.Sleep(100);
+        }
+        static double Spread(List<double[]> l) =>
+            l.Count < 2 ? 0 : Enumerable.Range(0, 4).Max(i => l.Max(a => a[i]) - l.Min(a => a[i]));
+        foreach (var (id, l) in marks)
+            if (Spread(l) > 2) r.Warnings.Add($"the mark of {id} moved {Spread(l):0} px while nothing moved the app (twitching)");
+        if (Spread(card) > 2) r.Warnings.Add($"the card moved {Spread(card):0} px while it should rest");
+        foreach (var (id, l) in vis)
+            if (l.Count > 1) r.Warnings.Add($"{id} blinked between {string.Join(" → ", l)}");
+        return last;
     }
 
     /// <summary>What a person would see wrong: a target off screen, the card over the target.</summary>
@@ -541,6 +619,10 @@ internal static class Autopilot
         private const uint MOUSE = 0, KEYBOARD = 1;
         private const uint LEFTDOWN = 0x02, LEFTUP = 0x04, WHEEL = 0x0800, HWHEEL = 0x1000, KEYUP = 0x02;
 
+        /// <summary>A person looks before acting: the pause after the hand arrives (or before keys), so hover
+        /// effects, the mascot and the card react as they would to a real user.</summary>
+        private const int HumanPauseMs = 1000;   // on top of WatchMs: about 2.5 s per step
+
         private static void Send(params INPUT[] i) => SendInput((uint)i.Length, i, Marshal.SizeOf<INPUT>());
         private static INPUT M(uint flags, uint data = 0) => new() { type = MOUSE, u = new InputUnion { mi = new MOUSEINPUT { dwFlags = flags, mouseData = data } } };
         private static INPUT K(uint vk, bool up) => new() { type = KEYBOARD, u = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)vk, dwFlags = up ? KEYUP : 0 } } };
@@ -549,7 +631,7 @@ internal static class Autopilot
         public static void Click(int x, int y)
         {
             MoveTo(x, y);
-            Thread.Sleep(120);
+            Thread.Sleep(HumanPauseMs);
             Send(M(LEFTDOWN));
             Thread.Sleep(60);
             Send(M(LEFTUP));
@@ -558,7 +640,7 @@ internal static class Autopilot
         public static void Wheel(int x, int y, int delta, bool horizontal)
         {
             MoveTo(x, y);
-            Thread.Sleep(100);
+            Thread.Sleep(HumanPauseMs);
             int notches = Math.Abs(delta) / 120;
             for (int i = 0; i < notches; i++)
             {
@@ -574,6 +656,7 @@ internal static class Autopilot
             if ((mods & Native.MOD_ALT) != 0) down.Add(0x12);
             if ((mods & Native.MOD_SHIFT) != 0) down.Add(0x10);
             if ((mods & Native.MOD_WIN) != 0) down.Add(0x5B);
+            Thread.Sleep(HumanPauseMs);
             foreach (var k in down) { Send(K(k, false)); Thread.Sleep(30); }
             Send(K(vk, false));
             Thread.Sleep(60);
