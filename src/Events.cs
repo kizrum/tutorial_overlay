@@ -123,6 +123,9 @@ internal static class Events
     private static int _listeners;
     private static long _lastListenTicks;
 
+    /// <summary>UTC ticks when the last events long-poll ended (0: none yet).</summary>
+    public static long LastListenTicks => Interlocked.Read(ref _lastListenTicks);
+
     /// <summary>
     /// An agent follows the lesson: a long-poll is waiting now, or one ended a moment ago (the agent is between two
     /// polls, reacting to what the last one brought). An agent whose turn has ended polls nothing — what the user

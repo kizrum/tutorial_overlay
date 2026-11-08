@@ -45,7 +45,7 @@ try {
 
     $what = if ($lesson.state -eq 'waiting') { 'is waiting for your next steps' } else { "is on step $($lesson.step) of $($lesson.total)" }
     $reason = "TutorialOverlay: the lesson `"$($lesson.title)`" $what, and the user is in it. " +
-        "The card's buttons (Help, Keep learning) reach you only through events: keep calling events(since, timeoutMs: 60000) " +
+        "The card's buttons (Help, Keep learning) reach you only through events: keep calling events(since, timeoutMs: 100000) " +
         "and react to hit / miss / help / continue_requested. The user's chat messages still reach you between calls. " +
         "End the turn after stop_tutorial (then release), or when the user asks you to stop."
     @{ decision = 'block'; reason = $reason } | ConvertTo-Json -Compress

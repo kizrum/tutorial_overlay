@@ -102,6 +102,7 @@ internal sealed class CardWindow : NoActivateForm
         public bool IconOnly;      // quiet round icon button; its name shows in the bottom line on hover
         public bool Left;          // content aligned left (the help choices)
         public bool Status;        // shows a state ("Got it!"): drawn bright, but not clickable
+        public bool Offline;       // needs the agent, which is away: dimmed, a click only says to write to it in the chat
     }
 
     private enum Part { Head, Banner, Title, Text, WhyRow, WhyBody, Check, Marked, Note, Hint }
@@ -113,8 +114,12 @@ internal sealed class CardWindow : NoActivateForm
     private readonly List<Btn> _buttons = new();
     private readonly List<(Part part, RectangleF r, int index)> _parts = new();
     private Btn? _hover, _pressed;
-    private RectangleF _closeRect, _whyRect;
-    private bool _hoverClose, _hoverWhy;
+    private RectangleF _closeRect, _whyRect, _agentRect;
+    private bool _hoverClose, _hoverWhy, _hoverAgent;
+    // a dimmed button was pressed: the bottom line says what to do instead, for a few seconds
+    private string? _flash;
+    private long _flashUntil;
+    private const int FlashMs = 4000;
     private Point? _dragFrom;
     private Point _dragOrigin;
     private bool _pinned;
@@ -159,6 +164,7 @@ internal sealed class CardWindow : NoActivateForm
             Invalidate();
         }
         if (Busy(m)) Invalidate();          // the spinner keeps turning while we wait for the assistant
+        if (_flash != null && Environment.TickCount64 > _flashUntil) { _flash = null; Invalidate(); }
         if (_pinned && _pinnedStepVersion != m.StepVersion && Intersects(Bounds, m.Avoid)) _pinned = false;
         var work = Native.WorkAreaAt(m.Focus == default ? new PointF(0, 0) : m.Focus);
         if (!_pinned) Place(m, work);
@@ -170,7 +176,7 @@ internal sealed class CardWindow : NoActivateForm
     private static string Signature(CardModel m, float s) =>
         string.Join("\u0001", Settings.Current.Lang, Settings.Current.Accent.ToArgb(), Settings.Current.HotkeySignature, m.State, m.Index, m.Prep, m.Total, m.Title, m.Text, m.Done, m.Required, m.Completed, m.CanBack, m.CanUndo,
             string.Join(",", m.Checklist.Select(c => c.label + c.done)), string.Join(",", m.Extra.Select(b => b.Id + b.Text)),
-            string.Join(",", m.Controls), m.Why, m.Hint, m.HintTitle, m.Issue, m.HelpPending, m.Highlighting, m.Review, m.Checking, s);
+            string.Join(",", m.Controls), m.Why, m.Hint, m.HintTitle, m.Issue, m.HelpPending, m.Highlighting, m.Review, m.Checking, m.Agent, s);
 
     /// <summary>Moves the "why" height a frame's worth toward open or closed (the UI tick calls us every ~30 ms).</summary>
     private void StepWhy()
@@ -265,7 +271,7 @@ internal sealed class CardWindow : NoActivateForm
             if (note is { top: false } low) Block(Part.Note, NoteHeight(low), 12 * s);
         }
         BuildButtons(ref y);
-        if (m.State is not ("waiting" or "outro") || HintHeight() > 0)
+        if (m.State is not ("waiting" or "outro") || HintHeight() > 0 || m.Agent == "off")
             Block(Part.Hint, Math.Max(HintHeight(), HintFont.Height), 10 * s);
         return new Size((int)Math.Ceiling(ContentWidth + Pad * 2), (int)Math.Ceiling(y + Pad * 0.7f));
     }
@@ -282,9 +288,10 @@ internal sealed class CardWindow : NoActivateForm
             float x = x0, bh = 34 * s;
             foreach (var b in m.Extra)
             {
-                float w = TextW(b.Text) + 28 * s;
+                bool off = b.Id == "outro_continue" && m.Agent == "off";   // the next lesson is the agent's to write
+                float w = TextW(b.Text) + 28 * s + (off ? 22 * s : 0);
                 if (x + w > right && x > x0) { x = x0; y += bh + gap; }
-                _buttons.Add(new Btn { Id = b.Id, Text = b.Text, Style = b.Style, Action = b.Action, Custom = true, Rect = new RectangleF(x, y, Math.Min(w, ContentWidth), bh) });
+                _buttons.Add(new Btn { Id = b.Id, Text = b.Text, Style = b.Style, Action = b.Action, Custom = true, Offline = off, Rect = new RectangleF(x, y, Math.Min(w, ContentWidth), bh) });
                 x += w + gap;
             }
             y += bh;
@@ -299,7 +306,8 @@ internal sealed class CardWindow : NoActivateForm
             float lh = 40 * s;
             foreach (var (id, text, icon) in new[] { ("cant_find", loc.CantFind, "search"), ("dont_understand", loc.DontGet, "bulb"), ("help_other", loc.Other, "message") })
             {
-                _buttons.Add(new Btn { Id = id, Action = id, Text = text, Icon = icon, Left = true, Rect = new RectangleF(x0, y, ContentWidth, lh) });
+                // "something else" is a question for the agent; the other two the card answers itself
+                _buttons.Add(new Btn { Id = id, Action = id, Text = text, Icon = icon, Left = true, Offline = id == "help_other" && m.Agent == "off", Rect = new RectangleF(x0, y, ContentWidth, lh) });
                 y += lh + gap;
             }
             float cw = Math.Max(96 * s, TextW(loc.Cancel) + 32 * s);
@@ -442,6 +450,7 @@ internal sealed class CardWindow : NoActivateForm
         g.Clear(Palette.Ink);
         using (var pen = new Pen(Palette.Line, 1)) g.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
         _closeRect = RectangleF.Empty;
+        _agentRect = RectangleF.Empty;
         var note = Note(m);
         foreach (var (part, r, index) in _parts)
         {
@@ -503,9 +512,20 @@ internal sealed class CardWindow : NoActivateForm
             Theme.IconCross(g, new PointF(_closeRect.X + 13 * s, cy), 14 * s, _hoverClose ? Palette.Text : Palette.TextDim, 2 * s);
         }
 
+        // the assistant: green while it follows the lesson, grey and struck through while it is away; none for a replay
+        float edge = _closeRect.IsEmpty ? r.Right : _closeRect.X - 2 * s;
+        if (m.Agent.Length > 0)
+        {
+            bool on = m.Agent == "on";
+            _agentRect = new RectangleF(edge - 24 * s, cy - 12 * s, 24 * s, 24 * s);
+            var color = on ? Palette.Success : Palette.WithAlpha(Palette.TextDim, _hoverAgent ? 1f : 0.75f);
+            Theme.IconAgent(g, new PointF(_agentRect.X + 12 * s, cy + 1 * s), 16 * s, color, 1.6f * s, !on);
+            edge = _agentRect.X;
+        }
+
         // the mini progress strip
         if (m.Total <= 0) return;
-        float stripRight = (_closeRect.IsEmpty ? r.Right : _closeRect.X) - 10 * s;
+        float stripRight = edge - 8 * s;
         float avail = stripRight - (tx + 20 * s);
         int passed = outro ? m.Total : Math.Clamp((m.Prep ? 0 : m.Index) + (m.Completed ? 1 : 0), 0, m.Total);
         int now = outro || waiting || m.Prep || m.Completed ? -1 : m.Index;
@@ -628,22 +648,43 @@ internal sealed class CardWindow : NoActivateForm
     /// <summary>The hotkeys; while the pointer is on an action, that action's name and key instead.</summary>
     private void DrawHint(Graphics g, RectangleF r)
     {
+        var loc = Settings.Current.Text;
         string line;
-        if (_hover is { Custom: false, Enabled: true } hb && hb.Text.Length > 0 && hb.Action is not ("help_cancel" or "cant_find" or "dont_understand" or "help_other"))
+        bool loud = false, dot = false;
+        if (_flash != null) { line = _flash; loud = true; }
+        else if (_hoverAgent && _model.Agent.Length > 0) { line = AgentStatus(); loud = true; dot = true; }
+        else if (_hover is { Offline: true } ob) line = ob.Id == "outro_continue" ? loc.AgentOffContinue : loc.AgentOff;
+        else if (_hover is { Custom: false, Enabled: true } hb && hb.Text.Length > 0 && hb.Action is not ("help_cancel" or "cant_find" or "dont_understand" or "help_other"))
         {
             var key = hb.Id == "help" ? "help" : hb.Action ?? "";
             line = Settings.Current.Hotkeys.TryGetValue(key, out var ch) ? $"{hb.Text} · {ch}" : hb.Text;
         }
         else line = Settings.Current.HintLine(_model.State is "waiting" or "outro");
         if (line.Length == 0) return;
-        using var b = new SolidBrush(Palette.WithAlpha(Palette.TextDim, 0.85f));
+        if (dot)
+        {
+            // the state the icon stands for, in its colour, before the words
+            float d = 7 * _s, cy = r.Y + HintFont.Height / 2f;
+            using (var db = new SolidBrush(_model.Agent == "on" ? Palette.Success : Palette.TextDim)) g.FillEllipse(db, r.X, cy - d / 2, d, d);
+            r = new RectangleF(r.X + d + 6 * _s, r.Y, r.Width - d - 6 * _s, r.Height);
+        }
+        using var b = new SolidBrush(loud ? Palette.Text : Palette.WithAlpha(Palette.TextDim, 0.85f));
         g.DrawString(line, HintFont, b, new RectangleF(r.X, r.Y, r.Width, r.Height + 2), Theme.Wrap);
+    }
+
+    /// <summary>What the assistant icon means now: here, or away (and for how long, once it is a minute or more).</summary>
+    private string AgentStatus()
+    {
+        var loc = Settings.Current.Text;
+        if (_model.Agent == "on") return loc.AgentOn;
+        int min = _model.AgentSeen == default ? 0 : (int)(DateTime.UtcNow - _model.AgentSeen).TotalMinutes;
+        return min >= 1 ? string.Format(loc.AgentOffFor, min) : loc.AgentOff;
     }
 
     private void DrawButton(Graphics g, Btn b)
     {
         float s = _s;
-        bool hover = _hover == b && b.Enabled;
+        bool hover = _hover == b && b.Enabled && !b.Offline;
         var r = b.Rect;
         if (b.IconOnly)
         {
@@ -651,8 +692,14 @@ internal sealed class CardWindow : NoActivateForm
             DrawIcon(g, b.Icon, new PointF(r.X + r.Width / 2, r.Y + r.Height / 2), hover ? Palette.Text : Palette.TextDim);
             return;
         }
-        bool lit = b.Enabled || b.Status;
+        bool lit = (b.Enabled && !b.Offline) || b.Status;
         var fg = Theme.OutlineButton(g, r, b.Style, hover, lit, s);
+        if (b.Offline)
+        {
+            // the struck-through assistant at the end says why it is dimmed; the caption keeps the rest of the room
+            Theme.IconAgent(g, new PointF(r.Right - 18 * s, r.Y + r.Height / 2 + 1 * s), 15 * s, Palette.WithAlpha(Palette.TextDim, 0.7f), 1.5f * s, true);
+            r = new RectangleF(r.X, r.Y, r.Width - 22 * s, r.Height);
+        }
         var f = Theme.Font(13.5f * s, true);
         float iconW = b.Icon.Length > 0 ? 18 * s : 0;
         float textW = b.Text.Length > 0 ? Math.Min(Theme.Measure(b.Text, f, r.Width).Width, r.Width - iconW - (iconW > 0 ? 8 * s : 0) - (b.Left ? 28 : 16) * s) : 0;
@@ -699,11 +746,11 @@ internal sealed class CardWindow : NoActivateForm
             return;
         }
         var hover = _buttons.FirstOrDefault(b => b.Rect.Contains(e.Location));
-        bool hc = _closeRect.Contains(e.Location), hw = _whyRect.Contains(e.Location);
-        if (hover != _hover || hc != _hoverClose || hw != _hoverWhy)
+        bool hc = _closeRect.Contains(e.Location), hw = _whyRect.Contains(e.Location), ha = _agentRect.Contains(e.Location);
+        if (hover != _hover || hc != _hoverClose || hw != _hoverWhy || ha != _hoverAgent)
         {
-            _hover = hover; _hoverClose = hc; _hoverWhy = hw;
-            Cursor = hover is { Enabled: true } || hc || hw ? Cursors.Hand : Cursors.Default;
+            _hover = hover; _hoverClose = hc; _hoverWhy = hw; _hoverAgent = ha;
+            Cursor = hover is { Enabled: true, Offline: false } || hc || hw ? Cursors.Hand : Cursors.Default;
             Invalidate();
         }
     }
@@ -711,7 +758,7 @@ internal sealed class CardWindow : NoActivateForm
     protected override void OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
-        if (_hover != null || _hoverClose || _hoverWhy) { _hover = null; _hoverClose = false; _hoverWhy = false; Invalidate(); }
+        if (_hover != null || _hoverClose || _hoverWhy || _hoverAgent) { _hover = null; _hoverClose = false; _hoverWhy = false; _hoverAgent = false; Invalidate(); }
     }
 
     protected override void OnMouseDown(MouseEventArgs e)
@@ -743,6 +790,15 @@ internal sealed class CardWindow : NoActivateForm
         var b = _buttons.FirstOrDefault(x => x.Rect.Contains(e.Location) && x.Enabled);
         if (b == null || b != _pressed) return;
         _pressed = null;
+        if (b.Offline)
+        {
+            // nobody would answer: say where the answer comes from instead of sending the press into the void
+            var loc = Settings.Current.Text;
+            _flash = b.Id == "outro_continue" ? loc.AgentOffContinue : loc.AgentOff;
+            _flashUntil = Environment.TickCount64 + FlashMs;
+            Invalidate();
+            return;
+        }
         if (b.Custom) Engine.ButtonPressed("card", b.Id, b.Action, "card");
         else if (b.Action == "help_open") { _helpOpen = true; _helpStepVersion = _model.StepVersion; Relayout(); }
         else if (b.Action == "help_cancel") { _helpOpen = false; Relayout(); }

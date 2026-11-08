@@ -157,6 +157,10 @@ internal sealed class Loc
         HelpHidden = "Нужно нажать «{0}». {1}", HelpAgentToo = "Ассистент тоже посмотрит и подскажет подробнее.",
         HelpAgentIdle = "Ассистент сейчас не следит за уроком: чтобы он ответил, напишите ему в чат «помоги» — шаг и ваш вопрос он увидит.";
     public string ContinueUnheard = "Ассистент сейчас не следит за уроком. Напишите ему в чат «продолжай» — он увидит, что вы нажали эту кнопку, и подготовит следующий урок.";
+    public string AgentOn = "Ассистент на связи: «Помощь» дойдёт до него сразу",
+        AgentOff = "Ассистент не на связи — напишите ему в чат",
+        AgentOffFor = "Ассистент не на связи {0} мин — напишите ему в чат",
+        AgentOffContinue = "Чтобы продолжить, напишите ассистенту в чат «продолжай»";
     public string HelpSent = "Передал ассистенту — сейчас подскажу.", Highlighting = "Подсвечиваю, куда нажать…", Checking = "Уточняю, где этот пункт…";
     public string IssueMinimized = "Окно свёрнуто — разверните его.", IssueOccluded = "Нужное место закрыто другим окном.",
         IssueInactive = "Переключитесь в нужное приложение.", IssueMissing = "Не нахожу нужный элемент на экране.",
@@ -228,6 +232,10 @@ internal sealed class Loc
         HelpHidden = "Click «{0}». {1}", HelpAgentToo = "The assistant will look too and say more.",
         HelpAgentIdle = "The assistant isn't following the lesson right now: to get its answer, write \"help\" to it in the chat — it will see the step and your question.",
         ContinueUnheard = "The assistant isn't following the lesson right now. Write \"continue\" to it in the chat: it will see you pressed this button and prepare the next lesson.",
+        AgentOn = "The assistant is here: Help reaches it at once",
+        AgentOff = "The assistant is away — write to it in the chat",
+        AgentOffFor = "The assistant has been away {0} min — write to it in the chat",
+        AgentOffContinue = "To keep learning, write \"continue\" to the assistant in the chat",
         HelpSent = "Told the assistant — a hint is coming.", Highlighting = "Highlighting where to click…", Checking = "Checking where this item is…",
         IssueMinimized = "The window is minimized — restore it.", IssueOccluded = "Another window covers the spot.",
         IssueInactive = "Switch to the app.", IssueMissing = "Can't find the element on screen.",

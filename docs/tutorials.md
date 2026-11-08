@@ -19,7 +19,9 @@ Clickable (separate windows that do not take the focus from the app):
 - **the step card** — "Step n of N" with a short progress strip beside it, title, text, a folded "Why" (click to
   open; it stays open for the rest of the lesson), a checklist of targets, quiet "Back", "↶" (undo the last hit,
   shown only after one) and "Skip" icons, "Help", "Done", "✕" (stop) and the step's own buttons (`buttons`). A
-  problem that blocks the step is shown at the top of the card.
+  problem that blocks the step is shown at the top of the card. Next to "✕", the assistant's icon: green while the
+  agent follows the lesson, grey and struck through while it is away (its turn is over); then what needs the agent
+  is dimmed (see [Helping the user](#helping-the-user) and server.md, "Is the agent listening?").
 
 The default shape (a target without `shapes`): an anchor's element gets a frame round it; a found text or
 template (`find`) gets a frame the size of the found piece; a point inside an element (`offset`) gets a ring. A
@@ -321,7 +323,8 @@ steps[0].targets[1].shapes[0].type: unknown shape 'circel' (did you mean 'circle
 ## Helping the user
 
 The card has a **"Help"** button (hotkey **Ctrl+Alt+H**). It opens the choices **"I can't find where to click"**,
-**"I don't get what to do"** and **"Something else"** (the user describes it in their own words).
+**"I don't get what to do"** and **"Something else"** (the user describes it in their own words). While the agent
+is away, "Something else" is dimmed: a press says to write to the assistant in the chat.
 
 - The agent gets the `help` event: the reason; for each target whether it is visible and why not (`visible`,
   `occluded`, `minimized`, `inactive`, `element not found`…) and where it is on screen; the step's latest misses; the

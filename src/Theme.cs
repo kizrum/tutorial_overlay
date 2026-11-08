@@ -279,6 +279,21 @@ internal static class Theme
         g.DrawPolygon(pen, new[] { new PointF(l, t), new PointF(r, t), new PointF(r, b), new PointF(c.X - s * 0.05f, b), new PointF(l, c.Y + s * 0.44f), new PointF(l, t) });
     }
 
+    /// <summary>The assistant: a speech bubble with a spark in it; struck through while it is away.</summary>
+    public static void IconAgent(Graphics g, PointF c, float s, Color color, float w, bool away)
+    {
+        IconMessage(g, c, s, color, w);
+        using var pen = new Pen(color, w) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        float cy = c.Y - s * 0.08f, k = s * 0.13f;
+        g.DrawLine(pen, c.X - k, cy, c.X + k, cy);
+        g.DrawLine(pen, c.X, cy - k, c.X, cy + k);
+        if (!away) return;
+        // the stroke cuts through the bubble: an ink-coloured band first, so the line reads as a slash, not a crack
+        PointF a = new(c.X - s * 0.48f, c.Y - s * 0.48f), b = new(c.X + s * 0.48f, c.Y + s * 0.48f);
+        using (var gap = new Pen(Palette.Ink, w * 2.6f) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLine(gap, a, b);
+        g.DrawLine(pen, a, b);
+    }
+
     /// <summary>A magnifying glass: "I can't find it".</summary>
     public static void IconSearch(Graphics g, PointF c, float s, Color color, float w)
     {

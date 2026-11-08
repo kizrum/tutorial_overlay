@@ -53,10 +53,17 @@ removed with `server.json`:
 call in the transcript is `start_tutorial` or `append_steps`) is `running` or `waiting` and the user acted in the last
 15 minutes, ending the turn is refused with a reminder to keep calling `events`. Any doubt lets the turn end.
 
-**Is the agent listening?** An agent follows the lesson while an `events` long-poll is waiting or one ended less
-than 20 s ago. One whose turn is over polls nothing, and the card says so instead of promising an answer: Help gives
-its local hint and adds "write to the assistant in the chat" (the `help` event carries `heard: false`); "Keep
-learning" says the same and waits up to 10 minutes instead of 30 s (`continue_requested` with `heard: false`).
+**Is the agent listening?** An agent follows the lesson while an `events` long-poll is waiting, or one ended or it
+called any tool less than 45 s ago (it is answering what the poll brought). This is seen only from the agent's own
+calls: nothing is sent to it to find out. An `events` long-poll may last up to 5 minutes (`timeoutMs: 300000`) and
+returns as soon as something happens; the skill asks for 100 s, since Claude Code moves a tool call longer than 120 s
+to the background.
+One whose turn is over polls nothing, and the card shows it: the assistant icon in the card's header turns grey and
+struck through, "Something else" (in Help) and "Keep learning" (on the end card) are dimmed, and pressing them only
+says, in the bottom line, to write to the assistant in the chat. Help's own two choices keep working. Should a press
+slip through just as the agent leaves, Help adds "write to the assistant in the chat" to its local hint (the `help`
+event carries `heard: false`) and "Keep learning" says the same and waits up to 10 minutes instead of 30 s
+(`continue_requested` with `heard: false`). A lesson replayed from the library has no agent and no icon.
 
 **Stopping.** `--stop` asks the running server to quit the same way as "Quit" in its menu: the icon leaves the tray
 and `server.json` is deleted. On a restart from the settings window the old process's icon is removed before the

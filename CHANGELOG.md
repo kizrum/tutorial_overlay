@@ -6,6 +6,15 @@ only fixes things.
 
 ## [Unreleased]
 
+- The step card shows whether the assistant is there: its icon next to the close cross is green while the agent
+  follows the lesson and grey, struck through, once its turn is over. What only the agent can do is dimmed then:
+  "Something else" in Help and "Keep learning" on the end card; pressing them says, in the bottom line, to write to
+  the assistant in the chat. Hovering the icon names the state. Known only from the agent's own calls (an `events`
+  poll, or any tool call in the last 45 s): nothing is sent to the agent to find out.
+- `events` long-polls up to 5 minutes (`timeoutMs` up to 300000, was 60000): it returns as soon as something happens.
+  The skill and the plugin's Stop hook ask for 100 s (Claude Code moves a tool call longer than 120 s to the
+  background): an agent following a quiet lesson wakes less often than with 60 s.
+
 ## [0.4.0] - 2026-11-07
 
 - The plugin has a `Stop` hook: while a lesson its session started is running and the user acted in it in the last

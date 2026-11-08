@@ -31,6 +31,8 @@ internal sealed class CardModel
     public RectangleF? AppFrame;
     public int StepVersion;
     public object? Lesson;               // the tutorial shown: what the card remembers (an open "why") lasts for one lesson
+    public string Agent = "";            // the agent that runs the lesson: "on" (follows events), "off" (does not), "" (none: a replay)
+    public DateTime AgentSeen;           // UTC: the agent's last poll or call (how long it has been away)
 }
 
 /// <summary>
@@ -466,7 +468,7 @@ internal static partial class Engine
     {
         long ticks = System.Threading.Interlocked.Read(ref McpServer.LastRequestTicks);
         var last = ticks == 0 ? t.WaitingSince : new DateTime(Math.Max(ticks, t.WaitingSince.Ticks), DateTimeKind.Utc);
-        if (t.WaitUnheard && Events.Listening(ListenGrace)) t.WaitUnheard = false;   // the agent is back
+        if (t.WaitUnheard && AgentListening()) t.WaitUnheard = false;   // the agent is back
         if (now - last < (t.WaitUnheard ? WaitForUnheard : WaitForSteps)) return;
         FinishNow(t, "no_more_steps");
         _stepVersion++;
@@ -1834,6 +1836,9 @@ internal static partial class Engine
     {
         card.StepVersion = _stepVersion;
         card.Lesson = t;
+        card.Agent = t?.Owner == null ? "" : AgentState(t) == "listening" ? "on" : "off";
+        long seen = Math.Max(Events.LastListenTicks, System.Threading.Interlocked.Read(ref McpServer.LastRequestTicks));
+        card.AgentSeen = seen == 0 ? default : new DateTime(seen, DateTimeKind.Utc);
         if (t is { OutroOpen: true })
         {
             BuildOutroCard(card, t, fgPid);
@@ -2038,7 +2043,18 @@ internal static partial class Engine
     /// "gone": no agent holds the server for this lesson (a replay from the library, a client that left).
     /// </summary>
     private static string AgentState(Tutorial t) =>
-        t.Owner == null || McpServer.Lease.Holder != t.Owner ? "gone" : Events.Listening(ListenGrace) ? "listening" : "idle";
+        t.Owner == null || McpServer.Lease.Holder != t.Owner ? "gone" : AgentListening() ? "listening" : "idle";
+
+    /// <summary>
+    /// An agent is at work: it polls events now, or it polled or called any tool a moment ago (it is answering what the
+    /// last poll brought). Seen only from its own calls: nothing is sent to the agent to find out.
+    /// </summary>
+    internal static bool AgentListening()
+    {
+        if (Events.Listening(ListenGrace)) return true;
+        long ticks = System.Threading.Interlocked.Read(ref McpServer.LastRequestTicks);
+        return ticks != 0 && DateTime.UtcNow.Ticks - ticks < ListenGrace.Ticks;
+    }
 
     /// <summary>What lesson.json says (see <see cref="Instances.LessonFile"/>): built under the lock, written outside it.</summary>
     public static JsonObject LessonInfo()
