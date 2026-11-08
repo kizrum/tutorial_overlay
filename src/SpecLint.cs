@@ -22,9 +22,9 @@ internal static class SpecLint
     private static readonly HashSet<string> Check = Set("anchor", "at", "expr", "when", "radius");
     private static readonly HashSet<string> Shape = Set("type", "shape", "x", "y", "w", "width_px", "wide", "h", "height", "r", "radius_px", "to", "length",
         "text", "label", "n", "color", "thickness", "stroke", "lineWidth", "size", "fontSize", "target", "title", "id", "buttonId", "style", "action",
-        "width", "pad", "points", "path", "smooth", "radius", "opacity", "from", "dir");
+        "width", "pad", "points", "path", "smooth", "radius", "opacity", "from", "dir", "curve", "end", "taper", "route");
     private static readonly HashSet<string> Mark = Set("id", "anchor", "dismissOnClick", "toggle", "button", "optional", "name", "label", "text",
-        "doneStyle", "hideWhenInactive", "opens", "check", "shapes", "number", "hint", "caption", "arrow", "grid");
+        "doneStyle", "hideWhenInactive", "opens", "check", "shapes", "number", "hint", "caption", "arrow", "grid", "group");
     private static readonly HashSet<string> Opens = Union(Anchor, Set("anchor", "anyProcess", "timeoutMs"));
     private static readonly HashSet<string> Grid = Set("from", "step", "dx", "dy", "rows", "cols", "cells", "w", "h");
     private static readonly HashSet<string> Step = Union(Mark, Set("id", "title", "text", "description", "body", "why", "explain", "because", "say",
@@ -40,7 +40,7 @@ internal static class SpecLint
         "hideFromCapture", "scale", "templates", "description", "version", "replace");
     private static readonly HashSet<string> Draw = Union(Mark, Set("shapes", "anchor", "dismissOnClick", "id", "toggle", "check", "button",
         "hideWhenInactive", "marks", "replace"));
-    private static readonly HashSet<string> ShapeTypes = Set("circle", "rect", "arrow", "badge", "label", "info", "check", "checkbox", "button", "dim", "path");
+    private static readonly HashSet<string> ShapeTypes = Set("circle", "rect", "auto", "brackets", "pill", "marker", "band", "forbid", "arrow", "badge", "label", "info", "check", "checkbox", "button", "dim", "path");
     private static readonly HashSet<string> CondTypes = Set("all_clicked", "appear", "disappear", "pixel", "count", "manual", "key", "drag", "trace", "scroll", "uia");
     private static readonly HashSet<string> Controls = Set("back", "undo", "skip", "done", "stop", "help");
 
@@ -129,6 +129,13 @@ internal static class SpecLint
                 var type = ShapeSpec.Parse(sho).Type;
                 if (!ShapeTypes.Contains(type))
                     res.Add($"{at}shapes[{i}].type: unknown shape '{J.Str(sho, "type") ?? J.Str(sho, "shape")}'{Guess(type, ShapeTypes)} — nothing is drawn for it");
+                var spec = ShapeSpec.Parse(sho);
+                if (spec.End is string end && !ShapeSpec.Ends.Contains(end))
+                    res.Add($"{at}shapes[{i}].end: unknown end '{end}'{Guess(end, Set(ShapeSpec.Ends))} — the arrow keeps its arrowhead");
+                if (spec.Route is string route && route != "elbow")
+                    res.Add($"{at}shapes[{i}].route: unknown route '{route}' — 'elbow' or leave it out (straight)");
+                if (spec.Taper is string taper && !ShapeSpec.Tapers.Contains(taper))
+                    res.Add($"{at}shapes[{i}].taper: unknown taper '{taper}'{Guess(taper, Set(ShapeSpec.Tapers))} — the line stays even");
             }
             i++;
         }

@@ -275,6 +275,28 @@ internal static class Autopilot
         JsonObject? status = WaitForStep(mcp, index, 5000);
         if (status == null) { r.Verdict = "fail"; r.Note = "the lesson never reached this step"; return r; }
 
+        // a step the user only looks at (Done on the card): look as a person does — read it, then point at each
+        // target in turn. Nothing is clicked, so a mark that moves meanwhile (a hovered field lit up and the frame
+        // or a group's outline followed it) is twitching. Then Done on the robot's behalf.
+        if (kind == "manual" && J.Items(J.Get(J.Get(J.Get(status, "tutorial"), "step"), "targets")).Any())
+        {
+            Thread.Sleep(600);
+            status = Watch(mcp, WatchMs, r) ?? status;
+            Shoot(mcp, r, reportDir, caseName);
+            foreach (var t in J.Items(J.Get(J.Get(J.Get(status, "tutorial"), "step"), "targets")).ToList())
+            {
+                if (J.Str(t, "visibility") is not "visible" || Center(t) is not (int tx, int ty)) continue;
+                Input.Hover(tx, ty);
+                var before = r.Warnings.Count;
+                Watch(mcp, 1500, r);
+                for (int w = before; w < r.Warnings.Count; w++) r.Warnings[w] += $" — with the hand on {J.Str(t, "name") ?? J.Str(t, "id")}";
+            }
+            r.Action = "manual · looked at each target";
+            mcp.Call("complete_step", new JsonObject { ["expectIndex"] = index, ["immediate"] = true });
+            WaitPast(mcp, index, 3000);
+            r.Ms = sw.ElapsedMilliseconds;
+            return r;
+        }
         if (kind is "count" or "manual")
         {
             r.Verdict = "skip";
@@ -391,7 +413,17 @@ internal static class Autopilot
                     if (way != Input.Way.Straight) r.Action = "click · " + (way == Input.Way.AcrossThenDown ? "into a submenu" : "into a menu");
                     // a person aims at where the mark is when they press, not where it was a moment ago: hover, look
                     // again, correct the aim. A mark that moved meanwhile, with nothing moving the app, is twitching.
-                    Input.Hover(x, y, way);
+                    // an arrow at the target is the way to go there (move the mouse along it, then click): from its
+                    // tail, along its curve, as a person traces what the arrow draws
+                    var path = J.Items(J.Get(visible, "path")).Select(q => (x: (int)Math.Round(J.AsNum(q?[0]) ?? 0), y: (int)Math.Round(J.AsNum(q?[1]) ?? 0))).ToList();
+                    if (path.Count >= 2)
+                    {
+                        Input.Hover(path[0].x, path[0].y);
+                        Input.Pause();
+                        Input.Follow(path.Append((x, y)).ToList());
+                        r.Action += " · along the arrow";
+                    }
+                    else Input.Hover(x, y, way);
                     Input.Pause();
                     var targetId = J.Str(visible, "id");
                     var tutNow = J.Get(mcp.Call("status", new JsonObject()).Json, "tutorial");
@@ -582,7 +614,11 @@ internal static class Autopilot
         static double Spread(List<double[]> l) =>
             l.Count < 2 ? 0 : Enumerable.Range(0, 4).Max(i => l.Max(a => a[i]) - l.Min(a => a[i]));
         foreach (var (id, l) in marks)
-            if (Spread(l) > 2) r.Warnings.Add($"the mark of {id} moved {Spread(l):0} px while nothing moved the app (twitching)");
+            if (Spread(l) > 2)
+            {
+                static string Box(double[] a) => $"[{a[0]:0},{a[1]:0},{a[2]:0},{a[3]:0}]";
+                r.Warnings.Add($"the mark of {id} moved {Spread(l):0} px while nothing moved the app (twitching): {string.Join(" → ", l.Select(Box).Distinct())}");
+            }
         if (Spread(card) > 2) r.Warnings.Add($"the card moved {Spread(card):0} px while it should rest");
         foreach (var (id, l) in vis)
             if (l.Count > 1) r.Warnings.Add($"{id} blinked between {string.Join(" → ", l)}");
@@ -873,6 +909,24 @@ internal static class Autopilot
             Thread.Sleep(120);
             Send(M(up));
             foreach (var k in Enumerable.Reverse(hold)) { Thread.Sleep(40); Send(K(k, true)); }
+        }
+
+        /// <summary>Moves the hand through the points without pressing, densely (every few pixels), as a hand traces a line.</summary>
+        public static void Follow(List<(int x, int y)> points)
+        {
+            if (points.Count == 0) return;
+            var (px, py) = points[0];
+            foreach (var (x, y) in points.Skip(1))
+            {
+                double len = Math.Sqrt((x - px) * (x - px) + (y - py) * (y - py));
+                int n = Math.Max(1, (int)(len / 6));
+                for (int i = 1; i <= n; i++)
+                {
+                    MoveRaw(px + (x - px) * i / n, py + (y - py) * i / n);
+                    Thread.Sleep(8);
+                }
+                (px, py) = (x, y);
+            }
         }
 
         public enum Way { Straight, DownThenAcross, AcrossThenDown }

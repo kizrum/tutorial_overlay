@@ -309,6 +309,55 @@ internal static class Finder
         return box is Rectangle b ? new RectangleF(b.X + dx, b.Y + dy, b.Width, b.Height) : null;
     }
 
+    private static readonly ConcurrentDictionary<string, RectangleF> TemplateBoxes = new();
+
+    /// <summary>
+    /// The thing a template found: what <see cref="VisibleAt"/> measured, unless that is bigger than the template
+    /// itself. Hovered, a button in a row of alike ones (Blender's shading spheres) lights up on a background it
+    /// shares with its neighbours, and the measure takes the whole row — a pill then jumped onto the neighbours. The
+    /// last box that fit is kept (relative to the match) and used instead.
+    /// </summary>
+    internal static RectangleF? TemplateThing(string key, RectangleF? measured, PointF at, Template tpl) =>
+        ThingWithin(TemplateBoxes, key, measured, at, tpl.FW, tpl.FH);
+
+    /// <summary>
+    /// The thing a template match lies on, measured as for a spot but stricter when that takes in its neighbours: in
+    /// a row of buttons a pixel apart (Blender's shading spheres) edges joined across a 3 px gap make the whole row,
+    /// across 1 px only the one button. The first measure no bigger than the template and centred on the match.
+    /// </summary>
+    internal static RectangleF? VisibleOfTemplate(Bitmap pic, Point at, float dx, float dy, float tw, float th, PointF matchRel)
+    {
+        var gray = Template.GrayFull(pic);
+        RectangleF? first = null;
+        foreach (var (join, contrast) in new[] { (3, Icons.EdgeContrast), (3, 15), (1, 30), (1, Icons.EdgeContrast), (1, 15) })
+        {
+            if (Icons.TargetBox(gray, pic.Width, pic.Height, at, join: join, contrast: contrast) is not Rectangle b) continue;
+            var r = new RectangleF(b.X + dx, b.Y + dy, b.Width, b.Height);
+            first ??= r;
+            if (Fits(r, matchRel, tw, th)) return r;
+        }
+        return first;
+    }
+
+    private static bool Fits(RectangleF v, PointF at, float w, float h) =>
+        v.Width <= w + 2 && v.Height <= h + 2
+        && Math.Abs(v.X + v.Width / 2 - at.X) <= Math.Max(4, v.Width / 4) && Math.Abs(v.Y + v.Height / 2 - at.Y) <= Math.Max(4, v.Height / 4);
+
+    internal static RectangleF? ThingWithin(ConcurrentDictionary<string, RectangleF> kept, string key, RectangleF? measured, PointF at, float w, float h)
+    {
+        // the thing is what the template was cut round: no bigger than it, and centred on the match (in a row of
+        // alike buttons on one background the measure can slide onto the gap between two of them)
+        if (measured is RectangleF v && Fits(v, at, w, h))
+        {
+            kept[key] = new RectangleF(v.X - at.X, v.Y - at.Y, v.Width, v.Height);
+            return v;
+        }
+        if (kept.TryGetValue(key, out var k)) return new RectangleF(at.X + k.X, at.Y + k.Y, k.Width, k.Height);
+        // nothing measured that fits: the middle of the template (it was cut with a margin round the thing)
+        float side = Math.Min(w, h) * 0.8f;
+        return new RectangleF(at.X - side / 2, at.Y - side / 2, side, side);
+    }
+
     private static volatile AnchorSpec[] _measured = Array.Empty<AnchorSpec>();
     private static readonly ConcurrentDictionary<string, (RectangleF rel, DateTime at)> Measured = new();
     private const int MeasureEveryMs = 1500;
@@ -712,7 +761,7 @@ internal static class Finder
                 {
                     var hitNear = new PointF(area.X + near.X + px + tpl.FW / 2f, area.Y + near.Y + py + tpl.FH / 2f);
                     return new FindResult(true, new PointF(hitNear.X - frame.X, hitNear.Y - frame.Y), ps, last, DateTime.UtcNow, Size: new SizeF(tpl.FW, tpl.FH),
-                                          Visible: VisibleAt(part, new Point(px + tpl.FW / 2, py + tpl.FH / 2), area.X + near.X - frame.X, area.Y + near.Y - frame.Y));
+                                          Visible: TemplateThing(a.Key, VisibleOfTemplate(part, new Point(px + tpl.FW / 2, py + tpl.FH / 2), area.X + near.X - frame.X, area.Y + near.Y - frame.Y, tpl.FW, tpl.FH, new PointF(hitNear.X - frame.X, hitNear.Y - frame.Y)), new PointF(hitNear.X - frame.X, hitNear.Y - frame.Y), tpl));
                 }
             }
         }
@@ -725,7 +774,7 @@ internal static class Finder
             var g = good[f.Nth];
             var hitN = new PointF(area.X + g.x + tpl.FW / 2f, area.Y + g.y + tpl.FH / 2f);
             return new FindResult(true, new PointF(hitN.X - frame.X, hitN.Y - frame.Y), g.score, last, DateTime.UtcNow, Size: new SizeF(tpl.FW, tpl.FH),
-                                  Visible: VisibleAt(shot, new Point(g.x + tpl.FW / 2, g.y + tpl.FH / 2), area.X - frame.X, area.Y - frame.Y));
+                                  Visible: TemplateThing(a.Key, VisibleOfTemplate(shot, new Point(g.x + tpl.FW / 2, g.y + tpl.FH / 2), area.X - frame.X, area.Y - frame.Y, tpl.FW, tpl.FH, new PointF(hitN.X - frame.X, hitN.Y - frame.Y)), new PointF(hitN.X - frame.X, hitN.Y - frame.Y), tpl));
         }
         var img = Template.Gray(shot, out int iw, out int ih);
         // the same picture of the same place (relative to the window) as last time: the answer is the same too
@@ -753,7 +802,7 @@ internal static class Finder
             // and a piece cut from the very edge of its pane does not count as "scrolled past the edge"
             var hit = new PointF(area.X + bx + tpl.FW / 2f, area.Y + by + tpl.FH / 2f);
             res = new FindResult(true, new PointF(hit.X - frame.X, hit.Y - frame.Y), score, last, DateTime.UtcNow, Size: new SizeF(tpl.FW, tpl.FH),
-                                 Visible: VisibleAt(shot, new Point(bx + tpl.FW / 2, by + tpl.FH / 2), area.X - frame.X, area.Y - frame.Y));
+                                 Visible: TemplateThing(a.Key, VisibleOfTemplate(shot, new Point(bx + tpl.FW / 2, by + tpl.FH / 2), area.X - frame.X, area.Y - frame.Y, tpl.FW, tpl.FH, new PointF(hit.X - frame.X, hit.Y - frame.Y)), new PointF(hit.X - frame.X, hit.Y - frame.Y), tpl));
         }
         LastLook[a.Key] = (hash, tpl, place, res);
         return res;

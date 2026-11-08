@@ -51,6 +51,17 @@ must read only the `lesson.json` fields and states the program writes. When the 
 tests name the line of the plugin to fix. A fallback the skill keeps for an older TutorialOverlay goes into
 `PluginContractTests.Legacy` with its reason.
 
+## Shape gallery
+
+```powershell
+dotnet run --project tests -- --shapes out.png            # every shape
+dotnet run --project tests -- --shapes out.png elbow      # only cells whose caption has "elbow"
+```
+
+Draws each shape the way a tutorial writes it, through the real `Layout` and `Renderer`, over plain stand-ins for
+an app (a button, a field, a segmented control, a line of text, a table, a dark grid). For looking at a shape's
+design without starting a lesson; add a cell in `tests/ShapeGallery.cs` when adding a shape.
+
 ## OCR bench
 
 Saved screenshots of real apps with the text to look for and where it truly is, read through the same path as a
@@ -119,8 +130,11 @@ pointer on the target first (Blender's keys act on the area under the pointer); 
 `drag` from `from` to `to`, or a `trace` along its path, with the condition's button pressed and its `hold` keys down.
 Where a region or path lies is asked from the server (a one-step `validate`), so it is resolved as the lesson resolves
 it. Input goes through `SendInput`, moves included, so the overlay's hooks see it as a person's; Delete, Home, the
-arrows and other keys the number pad shares are sent as extended keys. A step that waits for a count or Done is
-completed on the robot's behalf and marked as skipped.
+arrows and other keys the number pad shares are sent as extended keys. A step that waits for Done is looked at: the robot
+points at each of its targets in turn and reports a mark that moves under the hand, then completes it on its own
+behalf; a step that waits for a count is completed on its behalf and marked as skipped. An arrow at a target is
+the way there: the robot moves along its curve, tail to tip (the server gives the line as the target's `path` in
+`status`), then clicks.
 
 It moves like a person: before acting it watches the step for 1.5 s, holds the pointer on the target for 1 s, looks
 again and aims where the mark is now. In menus the way matters, since many open a submenu on hover: from the menu bar

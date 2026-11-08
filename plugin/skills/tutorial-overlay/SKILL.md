@@ -42,10 +42,27 @@ restart Claude Code. Do not try to install or download it yourself.
    games, presets), a dialog you have never seen. Write that step as "open the list", read it when it is open
    (`find_text`, `inspect`), and `append_steps` everything after it in one call. (Without `retarget`, an older
    TutorialOverlay: watch `anchor_found`/`no_effect` events, then `describe` the new window and `append_steps`.)
-3. **Leave the outline to the overlay.** Give a target no `shapes` (or `{type: 'auto'}`): it is framed at its own
-   size — the element, the found text, the icon, the caption at a spot, measured live. Your own shapes are for
-   arrows, labels and notes, not for the outline; `validate` warns when a hand-made ring or frame does not fit the
-   target. (An older TutorialOverlay has no `auto`: frame elements and texts with `rect` and no size.) A caption on
+3. **Leave the outline to the overlay; pick a mark by what it must say.** Give a target no `shapes` (or
+   `{type: 'auto'}`): it is framed at its own size — the element, the found text, the icon, the caption at a spot,
+   measured live. Your own shapes add to the outline; `validate` warns when a hand-made ring or frame does not fit
+   the target, a marker sits on a control, or an arrow is a target's only mark. Choose by the thing, not by looks:
+   - a button, icon, menu item, tab, checkbox — `auto` (the default);
+   - a field, a panel, a big area whose inside must stay readable — `{type: 'brackets'}` (corners only);
+   - one segment or button in a row of alike ones (Day | Week | Month, a toolbar) — `{type: 'pill'}`;
+   - a phrase *in text* (a line in a document, a help page, a dialog's message), anchored with `find.text` —
+     `{type: 'marker'}`. Never on a control: a menu item or button under a see-through band reads as a smudge;
+   - a whole row or column of a list or table — `{type: 'band'}`;
+   - several targets of one step ticked as one (three checkboxes) — the same `group: 'name'` on each;
+   - a dangerous control right next to the target — a mark of its own `{type: 'forbid'}` (never waited for).
+   **Arrows are not for pointing at a control** — on their own they leave the user guessing which thing at the tip
+   is meant. Use an arrow for a *direction or a path*: a drag (the `drag` condition draws source → arrow → drop
+   zone), a move in a viewport (the `path` shape), which way to scroll or pan, or from the card toward a far area
+   that is framed too. A drawn movement the user must follow is a `path` + `trace`. An arrow that would cut across
+   other content can bow round it (`curve: 0.2`; the side is picked for you) and end in what the tip means:
+   `end: 'dot'` an element, `'bar'` an edge, `'ring'` a spot; in a dense grid it goes only across and down:
+   `route: 'elbow'`. (An older TutorialOverlay draws nothing for `brackets`, `pill`, `marker`, `forbid`, `band` —
+   `validate` says "unknown shape": keep `auto` there — ignores `group`, draws every arrow straight with an
+   arrowhead, and has no `auto`: frame elements and texts with `rect` and no size.) A caption on
    a bigger control (a tab, a drop-down with its arrow, a menu-bar item) is framed and clicked as that control
    (`validate` shows it as `visible`). (An older TutorialOverlay frames only the words: there, give a `rect` the
    size of the control, or a click on the arrow beside the text is a miss.)

@@ -334,7 +334,7 @@ internal sealed class PixelCheck
 
 internal sealed class ShapeSpec
 {
-    public string Type = "circle";   // circle | rect | arrow | badge | label | info | check | checkbox | button | dim
+    public string Type = "circle";   // circle | rect | auto | brackets | pill | marker | band | forbid | arrow | badge | label | info | check | checkbox | button | dim | path
     public float? X, Y, W, H, R;
     public PointF? From, To;
     public string? FromDir;
@@ -346,13 +346,20 @@ internal sealed class ShapeSpec
     public float? Width;
     public float? Size;
     public float Pad = 6;
+    public bool PadGiven;            // pad was written in the spec (else each shape has its own)
     public float Radius = 8;
     public bool? Target;
     public float Opacity = 0.5f;
     public List<PointF>? Points;     // path: points relative to the anchor point
     public bool Smooth = true;       // path: a curve through the points (false: straight segments)
+    public float? Curve;             // arrow: how far it bows, as a share of its length (the side is chosen by us)
+    public string? End;              // arrow: what its tip ends in — arrow | dot | chevron | bar | ring | none
+    public string? Taper;            // arrow: none | tail (thin at the tail, full at the tip) | both (thin–thick–thin)
+    public string? Route;            // arrow: elbow — only across and down, a rounded corner between (dense grids)
 
-    public bool IsTargetDefault => Type is "circle" or "rect" or "checkbox" or "auto";
+    public bool IsTargetDefault => Type is "circle" or "rect" or "checkbox" or "auto" or "brackets" or "pill" or "marker" or "band";
+    /// <summary>Shapes that take the target at its own size, measured live — the frame of <c>auto</c>, corners, a capsule, a highlighter band.</summary>
+    public bool FitsTarget => Type is "auto" or "brackets" or "pill" or "marker";
     public bool IsTarget => Target ?? IsTargetDefault;
 
     public static ShapeSpec Parse(JsonNode n)
@@ -370,6 +377,11 @@ internal sealed class ShapeSpec
             "toggle" or "cell" => "checkbox",
             "btn" => "button",
             "ring" or "ellipse" => "circle",
+            "corners" or "bracket" or "viewfinder" => "brackets",
+            "capsule" or "segment" or "lozenge" => "pill",
+            "highlight" or "highlighter" => "marker",
+            "row" or "stripe" or "strip" => "band",
+            "forbidden" or "danger" or "avoid" or "no" or "dont" => "forbid",
             "trajectory" or "curve" or "polyline" or "route" => "path",
             _ => t
         };
@@ -394,12 +406,18 @@ internal sealed class ShapeSpec
         };
         if (J.Num(n, "w") == null && J.Num(n, "width") is double wd && t == "rect") s.W = (float)wd;
         else if (J.Num(n, "width") is double lw && s.Width == null) s.Width = (float)lw;
-        if (J.Num(n, "pad") is double pad) s.Pad = (float)pad;
+        if (J.Num(n, "pad") is double pad) { s.Pad = (float)pad; s.PadGiven = true; }
         if (t == "path")
         {
             s.Points = Condition.ParsePoints(J.Get(n, "points") ?? J.Get(n, "path"));
             s.Smooth = J.Bool(n, "smooth") ?? true;
         }
+        if (J.Num(n, "curve") is double cv) s.Curve = (float)Math.Clamp(cv, 0, 0.5);
+        else if (J.Bool(n, "curve") == true || J.Str(n, "curve")?.ToLowerInvariant() == "auto") s.Curve = DefaultCurve;
+        s.End = EndOf(J.Str(n, "end"));
+        s.Taper = TaperOf(J.Str(n, "taper"));
+        if (J.Str(n, "route")?.Trim().ToLowerInvariant() is string route)
+            s.Route = route is "elbow" or "orthogonal" or "ortho" or "manhattan" or "grid" ? "elbow" : route is "straight" or "line" or "direct" ? null : route;
         if (J.Num(n, "radius") is double rad) { if (t == "circle" || t == "badge") s.R = (float)rad; else s.Radius = (float)rad; }
         if (J.Num(n, "opacity") is double op) s.Opacity = (float)Math.Clamp(op, 0, 1);
         var from = J.Get(n, "from");
@@ -410,6 +428,33 @@ internal sealed class ShapeSpec
     }
 
     private static float? F(double? d) => d is double v ? (float)v : null;
+
+    /// <summary>The bow of <c>curve: true</c>: a fifth of the arrow's length.</summary>
+    public const float DefaultCurve = 0.2f;
+    public static readonly string[] Ends = { "arrow", "dot", "chevron", "bar", "ring", "none" };
+    public static readonly string[] Tapers = { "none", "tail", "both" };
+
+    /// <summary>An arrow's end by its name or a common other word for it; an unknown word is kept for the lint to name.</summary>
+    public static string? EndOf(string? v) => v?.Trim().ToLowerInvariant() switch
+    {
+        null or "" => null,
+        "head" or "triangle" or "arrowhead" => "arrow",
+        "point" or "disc" or "dot" => "dot",
+        "open" or "v" or "chevron" => "chevron",
+        "line" or "tee" or "t" or "edge" or "bar" => "bar",
+        "circle" or "o" or "click" or "ring" => "ring",
+        "no" or "false" or "nothing" or "none" => "none",
+        var x => x,
+    };
+
+    public static string? TaperOf(string? v) => v?.Trim().ToLowerInvariant() switch
+    {
+        null or "" => null,
+        "no" or "false" or "flat" or "even" or "none" => "none",
+        "true" or "yes" or "start" or "tail" => "tail",
+        "brush" or "hand" or "both" => "both",
+        var x => x,
+    };
 }
 
 /// <summary>A clickable group of shapes sharing one anchor. Clicking its hit area dismisses all of it.</summary>
@@ -452,6 +497,9 @@ internal sealed class Mark
     public bool StandInWanted;            // its caption is being looked for
     public bool ViaStandIn;               // the mark stands on the caption now, not on the element
 
+    public string? Group;                 // targets of a step with the same group are outlined together, the group's name on the outline
+    public PointF? OffscreenAt;           // where it is while off every monitor (a tab at the screen's edge points there)
+
     public bool HasHitArea => Shapes.Any(s => s.IsTarget);
     public bool HasButtons => Shapes.Any(s => s.Type == "button");
 
@@ -470,6 +518,7 @@ internal sealed class Mark
             Label = J.Str(n, "name") ?? J.Str(n, "label") ?? J.Str(n, "text"),
             DoneStyle = (J.Str(n, "doneStyle") ?? "hide").ToLowerInvariant(),
             HideInactive = J.Bool(n, "hideWhenInactive"),
+            Group = J.Str(n, "group"),
         };
         if (J.Pt(n, "__cell") is PointF cell) m.Anchor = m.Anchor.With(cell.X, cell.Y);
         if (J.Unwrap(J.Get(n, "opens")) is JsonNode on)

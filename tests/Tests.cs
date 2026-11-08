@@ -19,6 +19,7 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--ocr-read") return OcrBench.ReadOut(args.Skip(1).ToArray());
         if (args.Length > 0 && args[0] == "--ocr-capture") return OcrBench.Capture(args.Skip(1).ToArray());
         if (args.Length > 0 && args[0] == "--autopilot") return Autopilot.Run(args.Skip(1).ToArray());
+        if (args.Length > 0 && args[0] == "--shapes") return ShapeGallery.Run(args.Skip(1).ToArray());
         var filter = args.Length > 0 ? args[0] : null;
         var tests = typeof(Program).Assembly.GetTypes()
             .SelectMany(t => t.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
@@ -976,6 +977,14 @@ public static class LayoutTests
         var p = Shape("""{"process": "FL64", "element": {"name": "Mixer"}, "offset": [224, 273]}""");
         A.Eq(PrimKind.Rect, p.Kind, "default shape of a point: a frame, never a ring around a tall caption");
     }
+
+    /// <summary>A spot counted from a found caption (a place in a 3D view) is never measured: a ring, not a small square.</summary>
+    public static void TestSpotOffAFoundCaptionGetsARing()
+    {
+        var m = Mark.Parse(A.Json("""{"anchor": {"process": "blender", "find": {"text": "User Perspective"}, "offset": [600, 800]}}"""), null, "spot");
+        var ag = new AnchorGeo { Bounds = new Rectangle(0, 0, 2560, 1528), P = new PointF(766, 974), Scale = 1 };
+        A.Eq(PrimKind.Circle, Layout.Build(m, ag, false).Prims[0].Kind, "a ring at the spot");
+    }
 }
 
 public static class ToolAnnotationTests
@@ -1661,5 +1670,249 @@ public static class VolatileNameTests
         A.Check(Engine.VolatileNote("Run (F5)") == null, "function key");
         A.Check(Engine.VolatileNote("Explorer (Ctrl+Shift+E)") == null, "no digits");
         A.Check(Engine.VolatileNote(null) == null, "no name");
+    }
+}
+
+public static class CurveTests
+{
+    private static ShapeSpec Spec(string json) => ShapeSpec.Parse(A.Json(json));
+
+    public static void TestCurveEndTaperParse()
+    {
+        var s = Spec("""{"type":"arrow","curve":true,"end":"point","taper":"brush"}""");
+        A.Eq(ShapeSpec.DefaultCurve, s.Curve ?? 0, "curve: true is the default bow");
+        A.Eq("dot", s.End, "point is a dot");
+        A.Eq("both", s.Taper, "brush thins at both ends");
+        A.Eq(0.5f, Spec("""{"type":"arrow","curve":0.9}""").Curve ?? 0, "bow capped at half the length");
+        A.Eq(ShapeSpec.DefaultCurve, Spec("""{"type":"arrow","curve":"auto"}""").Curve ?? 0, "curve: auto");
+        A.Check(Spec("""{"type":"arrow"}""").Curve == null, "straight unless asked");
+    }
+
+    public static void TestLintKnowsArrowFields()
+    {
+        A.Eq(0, SpecLint.CheckDraw(A.Json("""{"shapes":[{"type":"arrow","curve":0.2,"end":"ring","taper":"tail"}]}""")).Count, "clean arrow fields");
+        var w = SpecLint.CheckDraw(A.Json("""{"shapes":[{"type":"arrow","end":"chevorn","taper":"thin"}]}"""));
+        A.Check(w.Any(x => x.Contains("unknown end 'chevorn'") && x.Contains("'chevron'")), "end typo: " + string.Join("; ", w));
+        A.Check(w.Any(x => x.Contains("unknown taper 'thin'")), "unknown taper");
+    }
+
+    /// <summary>The bow's middle lies the bow off the straight line, on the side its sign says.</summary>
+    public static void TestQuadMiddleIsTheBow()
+    {
+        var pts = Prim.Quad(new PointF(0, 0), new PointF(100, 0), 20, 16);
+        A.Check(Math.Abs(pts[8].X - 50) < 0.01 && Math.Abs(pts[8].Y + 20) < 0.01, $"left of a rightward line is up ({pts[8]})");
+        A.Eq(2, Prim.Quad(new PointF(0, 0), new PointF(100, 0), 0, 16).Length, "no bow: a straight line");
+    }
+
+    /// <summary>
+    /// A curved arrow's head points at the target: its last stretch, carried on, passes through the target's middle
+    /// (placed for a straight arrow, the tip would leave the bowed head pointing past a small icon).
+    /// </summary>
+    public static void TestCurvedTipAimsAtTheTarget()
+    {
+        var m = Mark.Parse(A.Json("""{"anchor": {"screen": true}, "shapes": [{"type":"arrow","from":"sw","length":220,"curve":0.3}]}"""), null, "aim");
+        var t = new RectangleF(900, 500, 24, 24);
+        var ag = new AnchorGeo { Bounds = Rectangle.Round(t), P = new PointF(912, 512), Scale = 1 };
+        var arrow = Layout.Build(m, ag, false).Prims.Single(p => p.Kind == PrimKind.Arrow);
+        A.Check(Math.Abs(arrow.Bend) > 1, "bowed");
+        var line = arrow.ArrowLine();
+        PointF a = line[^2], b = line[^1];
+        float dx = b.X - a.X, dy = b.Y - a.Y, l = (float)Math.Sqrt(dx * dx + dy * dy);
+        // distance from the target's centre to the head's line
+        float off = Math.Abs((912 - a.X) * dy - (512 - a.Y) * dx) / l;
+        A.Check(off < 4, $"head's line passes {off:0.0} px from the centre");
+        float reach = (float)Math.Sqrt((b.X - 912) * (b.X - 912) + (b.Y - 512) * (b.Y - 512));
+        A.Check(reach < 12 + 2 + 6, $"tip stops close to an icon with no outline ({reach:0.0} px from the centre)");
+    }
+
+    /// <summary>validate's shape notes: a marker belongs on text, an arrow does not mark a target alone.</summary>
+    public static void TestShapeMisuse()
+    {
+        string? Note(string json) => Engine.ShapeMisuse(Mark.Parse(A.Json(json), null, "m"));
+        A.Check(Note("""{"anchor":{"element":{"name":"Edit","role":"MenuItem"}},"shapes":[{"type":"marker"}]}""")?.Contains("MenuItem") == true, "marker on a menu item");
+        A.Check(Note("""{"anchor":{"element":{"name":"Text editor"},"find":{"text":"Hello"}},"shapes":[{"type":"marker"}]}""") == null, "marker on found text");
+        A.Check(Note("""{"anchor":{"element":{"name":"Help","role":"Text"}},"shapes":[{"type":"marker"}]}""") == null, "marker on a text element");
+        A.Check(Note("""{"anchor":{"element":{"name":"Bold","role":"Button"}},"shapes":[{"type":"arrow"}]}""")?.Contains("only mark") == true, "a lone arrow");
+        A.Check(Note("""{"anchor":{"element":{"name":"Bold","role":"Button"}},"shapes":[{"type":"auto"},{"type":"arrow"}]}""") == null, "an arrow beside the outline");
+    }
+
+    /// <summary>A template's thing that measures bigger than the template (a hovered button lit with its row) keeps the last fit.</summary>
+    public static void TestTemplateThingKeepsTheButton()
+    {
+        var kept = new System.Collections.Concurrent.ConcurrentDictionary<string, RectangleF>();
+        var fit = Finder.ThingWithin(kept, "k", new RectangleF(103, 103, 33, 33), new PointF(120, 120), 40, 40);
+        A.Check(fit is RectangleF f && f.Width == 33, "a box inside the template is the thing");
+        var hovered = Finder.ThingWithin(kept, "k", new RectangleF(40, 100, 140, 40), new PointF(124, 120), 40, 40);
+        A.Check(hovered is RectangleF h && h.Width == 33 && Math.Abs(h.X - 107) < 0.01, $"the row is not: the last fit, moved with the match ({hovered})");
+        var none = Finder.ThingWithin(kept, "other", new RectangleF(0, 0, 140, 40), new PointF(70, 20), 40, 40);
+        A.Check(none is RectangleF n && n.Width == 32 && n.X == 54, $"nothing kept: the template's middle ({none})");
+        // Blender's shading spheres: the match at 2034, the measure slid onto the gap toward the next sphere
+        var slid = Finder.ThingWithin(kept, "sphere", new RectangleF(2030, 75, 33, 33), new PointF(2034, 89), 40, 40);
+        A.Check(slid is RectangleF sl && Math.Abs(sl.X + sl.Width / 2 - 2034) < 0.01, $"a measure off the match's centre is not the thing ({slid})");
+    }
+
+    /// <summary>
+    /// A row of buttons a pixel apart (Blender's shading spheres): the thing under a template match is the one button,
+    /// not the row its edges join into.
+    /// </summary>
+    public static void TestTemplateThingInARowOfButtons()
+    {
+        using var bmp = new Bitmap(200, 60);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(Color.FromArgb(40, 40, 40));
+            using var face = new SolidBrush(Color.FromArgb(84, 84, 84));
+            using var ring = new Pen(Color.FromArgb(200, 200, 200), 2);
+            for (int i = 0; i < 4; i++)
+            {
+                int x = 40 + i * 28;
+                g.FillRectangle(face, x, 17, 27, 27);
+                g.DrawEllipse(ring, x + 4, 21, 19, 19);
+            }
+        }
+        // the third button: 96..123, centre 109.5, 30.5
+        var r = Finder.VisibleOfTemplate(bmp, new Point(110, 31), 0, 0, 40, 40, new PointF(110, 31));
+        A.Check(r is RectangleF b && b.Width <= 34 && Math.Abs(b.X + b.Width / 2 - 110) <= 3, $"one button, not the row ({r})");
+    }
+
+    public static void TestBendGoesToTheFreeSide()
+    {
+        var mon = new RectangleF(0, 0, 1920, 1080);
+        PointF a = new(800, 500), b = new(1100, 500);
+        // something above the line: bow downward (a negative bend is to the right of a rightward line: down)
+        var above = new List<RectangleF> { new(900, 400, 100, 80) };
+        A.Check(Layout.ChooseBend(a, b, 40, mon, above, 1) > 0 == false, "obstacle above → bows down");
+        var below = new List<RectangleF> { new(900, 520, 100, 80) };
+        A.Check(Layout.ChooseBend(a, b, 40, mon, below, 1) > 0, "obstacle below → bows up");
+        // along the top edge of the screen the bow stays on screen
+        A.Check(Layout.ChooseBend(new PointF(800, 20), new PointF(1100, 20), 40, mon, null, 1) < 0, "at the top edge → bows down");
+        // nothing anywhere: away from the screen's centre (the line is below the centre → down)
+        A.Check(Layout.ChooseBend(new PointF(800, 800), new PointF(1100, 800), 40, mon, null, 1) < 0, "tie → away from the centre");
+    }
+
+    public static void TestCurvedArrowBoxHoldsTheBow()
+    {
+        var p = new Prim { Kind = PrimKind.Arrow, A = new PointF(0, 100), B = new PointF(200, 100), Bend = 50, Width = 3, Scale = 1 };
+        A.Check(p.Tight().Top < 55, $"tight box reaches the bow ({p.Tight()})");
+        A.Check(p.TailDir().X < 0 && p.TailDir().Y > 0, $"the tail leaves downward-left of a bow upward ({p.TailDir()})");
+    }
+
+    public static void TestTaperWidths()
+    {
+        var pts = new[] { new PointF(0, 0), new PointF(50, 0), new PointF(100, 0) };
+        var tail = Renderer.TaperWidths(pts, 10, "tail");
+        A.Check(Math.Abs(tail[0] - 3.5) < 0.01 && Math.Abs(tail[2] - 10) < 0.01, "tail: thin start, full tip");
+        var both = Renderer.TaperWidths(pts, 10, "both");
+        A.Check(both[0] < 4 && both[2] < 4 && Math.Abs(both[1] - 10) < 0.01, "both: full only in the middle");
+        A.Eq(2, Renderer.TrimEnd(new[] { new PointF(0, 0), new PointF(10, 0) }, 4).Length, "trim keeps the line");
+        A.Eq(6f, Renderer.TrimEnd(new[] { new PointF(0, 0), new PointF(10, 0) }, 4)[1].X, "trimmed by 4");
+    }
+}
+
+public static class FittedShapeTests
+{
+    private static MarkGeo Build(string shapes, RectangleF? bounds = null)
+    {
+        var m = Mark.Parse(A.Json($$$"""{"anchor": {"process": "x", "element": {"name": "Field"}}, "shapes": {{{shapes}}}}"""), null, "t");
+        var ag = new AnchorGeo { Bounds = bounds ?? new RectangleF(100, 100, 200, 30), P = new PointF(200, 115), Scale = 1 };
+        return Layout.Build(m, ag, false);
+    }
+
+    public static void TestAliasesAndTargets()
+    {
+        A.Eq("brackets", ShapeSpec.Parse(A.Json("""{"type":"corners"}""")).Type, "corners");
+        A.Eq("pill", ShapeSpec.Parse(A.Json("""{"type":"capsule"}""")).Type, "capsule");
+        A.Eq("marker", ShapeSpec.Parse(A.Json("""{"type":"highlighter"}""")).Type, "highlighter");
+        foreach (var t in new[] { "brackets", "pill", "marker" })
+        {
+            var sp = ShapeSpec.Parse(A.Json($$"""{"type":"{{t}}"}"""));
+            A.Check(sp.IsTarget && sp.FitsTarget, t + " is a target at its own size");
+        }
+        A.Eq(0, SpecLint.CheckDraw(A.Json("""{"shapes":[{"type":"brackets"},{"type":"pill"},{"type":"marker"},{"type":"auto"}]}""")).Count, "lint knows them");
+    }
+
+    public static void TestEachWrapsTheElement()
+    {
+        var b = Build("""[{"type":"brackets"}]""");
+        A.Eq(PrimKind.Brackets, b.Prims[0].Kind, "brackets prim");
+        A.Eq(new RectangleF(94, 94, 212, 42), b.Prims[0].Rect, "pad 6 round the element");
+        A.Eq(1, b.Hits.Count, "clickable target");
+        var p = Build("""[{"type":"pill"}]""").Prims[0];
+        A.Eq(new RectangleF(97, 97, 206, 36), p.Rect, "capsule pad 3");
+        A.Eq(18f, p.Radius, "capsule ends are half its height");
+        var m = Build("""[{"type":"marker","pad":4}]""").Prims[0];
+        A.Eq(new RectangleF(96, 98, 208, 34), m.Rect, "marker: given pad sideways, half of it up and down");
+    }
+
+    public static void TestCornersStayShortOnBigTargets()
+    {
+        A.Eq(14f, Renderer.CornerLength(new RectangleF(0, 0, 400, 300), 1), "big panel: 14");
+        A.Eq(8f, Renderer.CornerLength(new RectangleF(0, 0, 32, 32), 1), "icon: a quarter");
+        A.Eq(6f, Renderer.CornerLength(new RectangleF(0, 0, 12, 12), 1), "never under 6");
+    }
+}
+
+public static class AreaShapeTests
+{
+    private static MarkGeo Build(string shapes, RectangleF bounds, PointF p, RectangleF? view = null)
+    {
+        var m = Mark.Parse(A.Json($$$"""{"anchor": {"process": "x", "element": {"name": "Row"}}, "shapes": {{{shapes}}}}"""), null, "t");
+        return Layout.Build(m, new AnchorGeo { Bounds = bounds, P = p, Scale = 1, View = view }, false);
+    }
+
+    public static void TestElbowGoesAcrossThenDown()
+    {
+        var g = Build("""[{"type":"rect"},{"type":"arrow","from":[-200,-120],"route":"elbow"}]""", new RectangleF(400, 300, 40, 16), new PointF(420, 308));
+        var arrow = g.Prims.First(p => p.Kind == PrimKind.Arrow);
+        A.Eq("elbow-h", arrow.Route, "longer way first: across");
+        var line = arrow.ArrowLine();
+        A.Check(Math.Abs(line[1].Y - line[0].Y) < 0.01, "first leg level");
+        A.Check(Math.Abs(line[^1].X - line[^2].X) < 0.01, "last leg straight down");
+        A.Check(Math.Abs(arrow.B.X - 420) < 0.5 && arrow.B.Y < 300, $"into the middle of the top side ({arrow.B})");
+        var level = Build("""[{"type":"arrow","from":"w","route":"elbow"}]""", new RectangleF(400, 300, 60, 30), new PointF(430, 315)).Prims[0];
+        A.Check(level.Route == null && Math.Abs(level.A.Y - level.B.Y) < 0.5, "level with the target: one straight leg");
+        A.Check(SpecLint.CheckDraw(A.Json("""{"shapes":[{"type":"arrow","route":"zigzag"}]}""")).Any(x => x.Contains("unknown route")), "lint names a bad route");
+    }
+
+    public static void TestBandSpansThePane()
+    {
+        var view = new RectangleF(100, 200, 500, 400);
+        var g = Build("""[{"type":"band"}]""", new RectangleF(150, 300, 120, 24), new PointF(160, 312), view);
+        A.Eq(PrimKind.Band, g.Prims[0].Kind, "band");
+        A.Check(g.Prims[0].Rect.Left == 100 && g.Prims[0].Rect.Right == 600, $"row across the pane ({g.Prims[0].Rect})");
+        A.Eq(1, g.Hits.Count, "a row is a target");
+        var col = Build("""[{"type":"band","dir":"column"}]""", new RectangleF(150, 300, 120, 24), new PointF(160, 312), view).Prims[0];
+        A.Check(col.Vertical && col.Rect.Top == 200 && col.Rect.Bottom == 600, "column down the pane");
+    }
+
+    public static void TestForbidIsNotATarget()
+    {
+        var g = Build("""[{"type":"forbid"}]""", new RectangleF(100, 100, 200, 40), new PointF(200, 120));
+        A.Eq(PrimKind.Forbid, g.Prims[0].Kind, "forbid");
+        A.Eq(0, g.Hits.Count, "nothing to click there");
+        A.Check(!string.IsNullOrEmpty(g.Prims[0].Text), "tag says so");
+        var m = Mark.Parse(A.Json("""{"anchor": {"process": "x"}, "shapes": [{"type":"danger","text":"не трогать"}]}"""), null, "f");
+        A.Check(!m.HasHitArea, "a forbid-only target is not waited for");
+        A.Check(g.Prims[0].Extent().Top < 100 - 10, "extent holds the tag over the top edge");
+    }
+
+    public static void TestGroupField()
+    {
+        var m = Mark.Parse(A.Json("""{"anchor": {"process": "x"}, "group": "все три"}"""), null, "g");
+        A.Eq("все три", m.Group, "group name");
+        A.Eq(0, SpecLint.CheckDraw(A.Json("""{"marks":[{"group":"a","shapes":[{"type":"band"},{"type":"forbid"}]}]}""")).Count, "lint knows group, band, forbid");
+    }
+
+    public static void TestEdgeTabSitsOnTheEdgeItIsPast()
+    {
+        var area = new RectangleF(0, 0, 1920, 1040);
+        var right = Engine.EdgeTabFor(new PointF(2300, 500), area, 1);
+        A.Check(right.Rect.Right <= 1920 && right.Rect.Right > 1900 && right.B.X == 1, $"right edge, pointing out ({right.Rect})");
+        A.Check(Math.Abs(right.Rect.Y + right.Rect.Height / 2 - 500) < 1, "on the line toward the target");
+        var top = Engine.EdgeTabFor(new PointF(900, -300), area, 1);
+        A.Check(top.Rect.Top >= 0 && top.Rect.Top < 10 && top.B.Y == -1, "top edge");
+        var corner = Engine.EdgeTabFor(new PointF(-50, 5000), area, 1);
+        A.Check(corner.B.Y == 1 && corner.Rect.Left >= 0, "furthest past the bottom: bottom edge, kept on screen");
+        A.Check(right.Text == null || right.EdgeTabLabel().Right <= right.Rect.Left, "caption on the screen's side");
     }
 }

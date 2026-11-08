@@ -7,7 +7,21 @@
 On the canvas (clicks go straight through to the app):
 
 - `circle` — a ring; `rect` — a frame (without `w/h` it frames the anchor's element); `arrow` — an arrow (aims at
-  the target by itself, the tail faces the centre of the screen);
+  the target by itself, the tail faces the centre of the screen). An arrow can bow: `curve: 0.2` (a share of its
+  length, `true` = 0.2; 12–60 px) — the side is chosen by the overlay: the one that stays on screen and crosses fewer
+  of the other marks, else away from the screen's centre. `end` says what is at the tip: `arrow` (a direction, the
+  default), `dot` (an element), `chevron` (soft, for text), `bar` (an edge), `ring` (a spot to click), `none`.
+  `taper: tail` thins the shaft toward the tail, `taper: both` at both ends (a hand-drawn look). `route: "elbow"`
+  goes only across and down with a rounded corner — for dense grids (a piano roll), where a slanted or bowed arrow
+  would cross cells: the longer way first, into the middle of the target's side (straight in when level with it);
+- `brackets` — four corners round the target (a field, a panel, an icon): they show its bounds without covering it
+  or its neighbours; `pill` — a capsule tight on a segment or a button in a row of alike ones, with a dot under it;
+  `marker` — a highlighter band over a phrase in text (the words stay readable). Like `auto`, they take the target at
+  its own size, measured live; `pad` widens them (6 / 3 / 3 px by default), `style: "thin"` drops the glow;
+- `band` — a whole row across the visible part of its pane (`dir: "column"` — a column down it): a light fill and a
+  line along each long edge; a target, like a frame;
+- `forbid` — a place not to click (a dangerous button next to the target): stripes in the warning colour, a dashed
+  outline and a tag "don't click" (`text` to say it otherwise). It is never a target and a step does not wait for it;
 - `badge` — a number; `label` — a caption; `info` — an info box with a title and an icon;
 - `check` — a check mark; `checkbox` — a checkbox that ticks itself when the target is done (handy for FL's cells);
 - `dim` — darkens the screen, with "windows" over the targets.
@@ -27,6 +41,30 @@ The default shape (a target without `shapes`): an anchor's element gets a frame 
 template (`find`) gets a frame the size of the found piece; a point inside an element (`offset`) gets a ring. A
 frame of the right size round a point is given explicitly: `{"type": "rect", "x": -60, "y": -18, "w": 120, "h": 36}`
 (`x, y` from the anchor point).
+
+Targets of one step with the same `"group": "name"` get one dashed outline round all of them, the name on its top
+edge, instead of a frame on each (two or more of them on screen; when one is done its tick still shows). A target
+whose spot is off every monitor (a window dragged half off the screen) gets a tab on the nearest screen edge, on the
+line toward it, saying "off screen"; the card says what to do.
+
+### Which mark for what
+
+Pick a mark by what it has to say about the thing, not by how it looks:
+
+| The thing | Mark |
+|---|---|
+| a button, icon, menu item, tab, checkbox | no `shapes` (`auto`) |
+| a field, panel or big area whose inside must stay readable | `brackets` |
+| one segment or button in a row of alike ones | `pill` |
+| a phrase in text (a document line, help, a dialog's message), anchored with `find.text` | `marker` — never on a control |
+| a whole row or column of a list or table | `band` |
+| several targets of one step ticked as one | the same `group` |
+| a dangerous control next to the target | a mark of its own with `forbid` |
+| where to drag, which way to move, scroll or pan | `drag` condition, `path` shape (+ `trace`), an arrow |
+
+An arrow is a direction or a path, not a pointer at a control: on its own, near several controls, it leaves the
+user guessing which one is meant. Next to a target it goes together with that target's outline. `validate` notes a
+marker on a control and an arrow that is a target's only mark (`shapeNote`).
 
 Layout without overlaps: rings of neighbouring targets shrink, labels, info boxes and buttons without explicit
 `x,y` find free room around the target (a label goes to the arrow's tail), and the card keeps clear of everything

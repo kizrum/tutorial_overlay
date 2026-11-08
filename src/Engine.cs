@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -826,7 +827,7 @@ internal static partial class Engine
             MarkCount = marks.Count;
             var anchorList = anchors.ToList();
             Finder.SetWanted(anchorList);
-            Finder.SetMeasured(marks.Where(m => !m.Anchor.IsScreen && m.Anchor.Find == null && m.Anchor.HasPoint && m.Shapes.Any(x => x.Type == "auto")).Select(m => m.Anchor));
+            Finder.SetMeasured(marks.Where(m => !m.Anchor.IsScreen && m.Anchor.Find == null && m.Anchor.HasPoint && m.Shapes.Any(x => x.FitsTarget)).Select(m => m.Anchor));
             Resolver.SetWanted(anchorList.Select(a => a.Find != null ? a.WithoutFind() : a),
                 t is { Active: true } && t.Defaults.Process != null ? new[] { t.Defaults.Process } : Array.Empty<string>());
 
@@ -878,6 +879,7 @@ internal static partial class Engine
             float dim = 0;
             // with the mascot on, a step's highlight appears when it has arrived (appeared, or stopped walking)
             bool holdTargets = step != null && HoldForMascot(t!, step, now);
+            var grouped = holdTargets || step == null ? new HashSet<Mark>() : GroupedTargets(step);
             foreach (var m in visible)
             {
                 var g = m.Geo!;
@@ -891,7 +893,8 @@ internal static partial class Engine
                 float alpha = Animate ? (float)Math.Clamp((now - m.ShownAt.Value).TotalMilliseconds / 180.0, 0, 1) : 1f;
                 if (!m.Satisfied)
                 {
-                    foreach (var p in g.Prims) sc.Prims.Add((p, alpha));
+                    // in a group the common outline stands for each one's own frame
+                    foreach (var p in g.Prims) if (!(grouped.Contains(m) && IsOutline(p))) sc.Prims.Add((p, alpha));
                     foreach (var b in g.Buttons) f.Buttons.Add(b);
                     foreach (var h in g.Hits) sc.Holes.Add(h);
                     dim = Math.Max(dim, g.Dim);
@@ -905,6 +908,8 @@ internal static partial class Engine
                 f.Card.Avoid.Add(g.Bounds);
             }
             foreach (var m in marks.Where(m => m.Geo == null)) m.ShownAt = null;
+            if (grouped.Count > 0) AddGroupVisuals(grouped, sc, f.Card.Avoid);
+            if (step != null && !holdTargets) AddOffscreenVisuals(step, sc, f.Card.Avoid);
             if (step != null) AddDragVisuals(step, sc, f.Card.Avoid, fgPid);
             if (step != null && t!.AdvanceAt == null) AddMotionVisuals(step, sc, f.Card.Avoid, fgPid);
             if (step != null && t!.AdvanceAt == null) AddDialogVisuals(step, sc, f.Card.Avoid);
@@ -1267,6 +1272,35 @@ internal static partial class Engine
         }
     }
 
+    private static readonly ConcurrentDictionary<string, (PointF rel, DateTime at)> HeldFinds = new();
+    private static readonly ConcurrentDictionary<string, ConcurrentDictionary<(float, float), byte>> FindOffsets = new();
+
+    /// <summary>
+    /// Where a found text or icon is taken to be: where it was a moment ago while the user's hand rests on its mark.
+    /// Pointing changes what the app shows there — a hovered sphere lights up and no longer looks like its picture,
+    /// a field's tooltip shows the same words just below — and a search then finds a neighbour or the tooltip: the
+    /// mark jumped from under the hand and back (Blender's shading spheres, the Location X / Y / Z fields). Kept
+    /// relative to the window, so a window that moves still takes its marks along. Every mark on the anchor counts
+    /// (three fields counted from one caption hold together).
+    /// </summary>
+    private static PointF HoldUnderHand(AnchorSpec a, PointF hit, RectangleF frame, float s)
+    {
+        var offsets = FindOffsets.GetOrAdd(a.Key, _ => new());
+        offsets.TryAdd((a.Dx, a.Dy), 0);
+        var rel = new PointF(hit.X - frame.X, hit.Y - frame.Y);
+        if (HeldFinds.TryGetValue(a.Key, out var was) && (DateTime.UtcNow - was.at).TotalSeconds < 30
+            && (Math.Abs(was.rel.X - rel.X) > 3 || Math.Abs(was.rel.Y - rel.Y) > 3)
+            && Native.GetCursorPos(out var cur))
+        {
+            var old = new PointF(frame.X + was.rel.X, frame.Y + was.rel.Y);
+            float reach = 24 * s;
+            bool under = offsets.Keys.Any(o => Math.Abs(cur.X - (old.X + o.Item1)) <= reach && Math.Abs(cur.Y - (old.Y + o.Item2)) <= reach);
+            if (under) return old;
+        }
+        HeldFinds[a.Key] = (rel, DateTime.UtcNow);
+        return hit;
+    }
+
     public static AnchorGeo? AnchorNow(AnchorSpec a, out string reason)
     {
         reason = "ok";
@@ -1316,13 +1350,19 @@ internal static partial class Engine
             PointF? seen = fr.Found ? fr.Rel : fr.LastRel;
             if (seen is not PointF m) { reason = a.Find.Text != null ? "text not visible" : "template not visible"; return null; }
             var hit = new PointF(frame.X + m.X, frame.Y + m.Y);
+            var held = HoldUnderHand(a, hit, frame, geo.Scale);
+            float hdx = held.X - hit.X, hdy = held.Y - hit.Y;
+            hit = held;
             // the found piece itself (hit is its centre): what a shape without coordinates frames
             if (fr.Size.Width > 0 && fr.Size.Height > 0)
                 geo.Found = new RectangleF(hit.X - fr.Size.Width / 2, hit.Y - fr.Size.Height / 2, fr.Size.Width, fr.Size.Height);
-            if (fr.Found && fr.Visible is RectangleF vis) geo.Visible = new RectangleF(frame.X + vis.X, frame.Y + vis.Y, vis.Width, vis.Height);
+            if (fr.Found && fr.Visible is RectangleF vis) geo.Visible = new RectangleF(frame.X + vis.X + hdx, frame.Y + vis.Y + hdy, vis.Width, vis.Height);
             else if (fr.Box is RectangleF bx) geo.Visible = new RectangleF(hit.X + bx.X, hit.Y + bx.Y, bx.Width, bx.Height);
             float px = a.Find.Axis == "y" ? o.X : hit.X, py = a.Find.Axis == "x" ? o.Y : hit.Y;
             geo.P = new PointF(px + a.Dx, py + a.Dy);
+            // an offset that leads off the found piece (a spot in the 3D view, counted from a caption): the target is
+            // that spot, not the caption — framing and hitting the caption made a click on the spot a miss
+            if (geo.Visible is RectangleF fv && !fv.Contains(geo.P)) geo.Visible = null;
             // the area searched is the area it can scroll out of
             geo.View = a.Find.Within is RectangleF fw ? new RectangleF(bounds.X + fw.X, bounds.Y + fw.Y, fw.Width, fw.Height) : bounds;
             geo.FromLastKnown = !fr.Found;
@@ -1479,7 +1519,7 @@ internal static partial class Engine
         }
         if (!m.Anchor.IsScreen)
         {
-            if (!OnAnyMonitor(geo.Center)) { m.Geo = null; m.Visibility = "offscreen"; return; }
+            if (!OnAnyMonitor(geo.Center)) { m.OffscreenAt = geo.Center; m.Geo = null; m.Visibility = "offscreen"; return; }
             if (!ShowsAnchorWindow(geo.Center, ag)) { m.Geo = null; m.Visibility = "occluded"; return; }
         }
         if (m.AutoColor == null && Settings.Current.AutoColor && !m.Anchor.IsScreen)
@@ -1546,6 +1586,80 @@ internal static partial class Engine
         if (c.X < view.Left + m) return "left";
         if (c.X > view.Right - m) return "right";
         return lastKnown ? "unknown" : null;     // anchor not seen right now but its last place is inside: just ask to scroll
+    }
+
+    /// <summary>
+    /// Targets of the step drawn as groups: those sharing a <c>group</c> name, two or more of them on screen and one at
+    /// least not done yet. One outline goes round each group instead of a frame on each member.
+    /// </summary>
+    private static HashSet<Mark> GroupedTargets(Step step)
+    {
+        var res = new HashSet<Mark>();
+        foreach (var gr in step.Targets.Where(m => m.Group != null && m.Geo != null).GroupBy(m => m.Group))
+            if (gr.Count() >= 2 && gr.Any(m => !m.Satisfied)) res.UnionWith(gr);
+        return res;
+    }
+
+    /// <summary>The shapes that outline a target (a ring, a frame, corners, a capsule) — a group's outline replaces them.</summary>
+    private static bool IsOutline(Prim p) => p.Kind is PrimKind.Circle or PrimKind.Rect or PrimKind.Brackets or PrimKind.Pill;
+
+    /// <summary>A dashed outline round each group's targets, the group's name on its top edge.</summary>
+    private static void AddGroupVisuals(HashSet<Mark> grouped, Scene sc, List<RectangleF> avoid)
+    {
+        foreach (var gr in grouped.GroupBy(m => m.Group))
+        {
+            var first = gr.First();
+            float s = first.Geo!.A.Scale;
+            var box = gr.Select(m => m.Geo!.TargetBounds).Aggregate(RectangleF.Union);
+            // more room on top, where the name sits across the line
+            box = RectangleF.FromLTRB(box.Left - 8 * s, box.Top - 16 * s, box.Right + 8 * s, box.Bottom + 8 * s);
+            var hull = new Prim
+            {
+                Kind = PrimKind.Hull, Rect = box, Radius = 12 * s, Width = 2 * s, Scale = s, Size = 12 * s,
+                Color = first.AutoColor ?? Palette.Accent, Text = gr.Key,
+            };
+            sc.Prims.Add((hull, 1f));
+            avoid.Add(hull.Extent());
+        }
+    }
+
+    /// <summary>
+    /// Targets off every monitor (a window dragged half off the screen): a tab on the nearest screen edge, on the line
+    /// toward the target, pointing out, with "off screen" beside it. The card says what to do.
+    /// </summary>
+    private static void AddOffscreenVisuals(Step step, Scene sc, List<RectangleF> avoid)
+    {
+        var shown = new HashSet<(int, int)>();
+        foreach (var m in step.Targets)
+        {
+            if (m.Satisfied || m.Visibility != "offscreen" || m.OffscreenAt is not PointF pt) continue;
+            var tab = EdgeTabFor(pt, Native.WorkAreaAt(pt), Native.ScaleAt(pt));
+            if (!shown.Add(((int)tab.Rect.X, (int)tab.Rect.Y))) continue;
+            tab.Text = Settings.Current.Text.OffscreenTag;
+            sc.Prims.Add((tab, 1f));
+            avoid.Add(tab.Extent());
+        }
+    }
+
+    /// <summary>The edge tab for a point <paramref name="pt"/> outside <paramref name="area"/>: on the edge it is furthest past.</summary>
+    internal static Prim EdgeTabFor(PointF pt, RectangleF area, float s)
+    {
+        float over(float v) => Math.Max(0, v);
+        float l = over(area.Left - pt.X), r = over(pt.X - area.Right), u = over(area.Top - pt.Y), d = over(pt.Y - area.Bottom);
+        float m = 4 * s, len = 40 * s, depth = 28 * s;
+        float cx = Math.Clamp(pt.X, area.Left + len, area.Right - len), cy = Math.Clamp(pt.Y, area.Top + len, area.Bottom - len);
+        RectangleF rect; PointF dir;
+        if (Math.Max(l, r) >= Math.Max(u, d))
+        {
+            dir = new PointF(r >= l ? 1 : -1, 0);
+            rect = new RectangleF(r >= l ? area.Right - depth - m : area.Left + m, cy - len / 2, depth, len);
+        }
+        else
+        {
+            dir = new PointF(0, d >= u ? 1 : -1);
+            rect = new RectangleF(cx - len / 2, d >= u ? area.Bottom - depth - m : area.Top + m, len, depth);
+        }
+        return new Prim { Kind = PrimKind.EdgeTab, Rect = rect, B = dir, Vertical = dir.X != 0, Color = Palette.Accent, Scale = s, Size = 12 * s };
     }
 
     /// <summary>An arrow at the pane's edge plus a caption, for targets that scrolled out of view.</summary>
@@ -1794,15 +1908,28 @@ internal static partial class Engine
         // 2) movable boxes
         var obstacles = new List<RectangleF>();
         var segments = new List<(PointF a, PointF b, float w)>();
+        var arrows = new List<(Prim p, float s)>();
         foreach (var m in visible)
         {
             if (m.Satisfied) continue;
             foreach (var p in m.Geo!.Prims)
             {
-                if (p.Kind == PrimKind.Arrow) segments.Add((p.A, p.B, p.Width * 2));
+                if (p.Kind == PrimKind.Arrow) arrows.Add((p, m.Geo.A.Scale));
                 else if (!(p.Auto && (p.Kind is PrimKind.Label or PrimKind.Info or PrimKind.Badge))) obstacles.Add(p.Tight());
             }
             foreach (var b in m.Geo.Buttons.Where(b => !b.Auto)) obstacles.Add(b.Rect);
+        }
+        foreach (var (p, s) in arrows)
+        {
+            // a curved arrow bows to the side where it crosses fewer targets of the screen
+            if (p.BendAuto)
+            {
+                float was = p.Bend;
+                p.Bend = Layout.ChooseBend(p.A, p.B, Math.Abs(p.Bend), Native.MonitorRectAt(new PointF((p.A.X + p.B.X) / 2, (p.A.Y + p.B.Y) / 2)), obstacles, s);
+                if (Math.Sign(was) != Math.Sign(p.Bend)) p.AimTip();
+            }
+            var line = p.ArrowLine();
+            for (int i = 1; i < line.Length; i++) segments.Add((line[i - 1], line[i], p.Width * 2));
         }
         foreach (var m in visible)
         {
@@ -2433,6 +2560,9 @@ internal static partial class Engine
             o["center"] = J.PtJson(m.Geo.Center);
             if (m.Geo.A.Bounds is RectangleF b) o["anchorBounds"] = J.RectJson(b);
             o["bounds"] = J.RectJson(m.Geo.Bounds);
+            // an arrow at the target is the way the hand goes (a G-move in Blender): its line, tail to tip, as drawn
+            if (m.Geo.Prims.FirstOrDefault(p => p.Kind == PrimKind.Arrow) is Prim arrow)
+                o["path"] = new JsonArray(arrow.ArrowLine().Select(q => (JsonNode)J.PtJson(q)).ToArray());
         }
         return o;
     }

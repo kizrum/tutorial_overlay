@@ -6,6 +6,39 @@ only fixes things.
 
 ## [Unreleased]
 
+- `validate` notes a shape used for what it is not for: a `marker` on a control (it is for a phrase in text,
+  anchored with `find.text`) and an arrow as a target's only mark (an arrow shows a direction or a path; the target
+  keeps its outline). The skill and the docs say which mark suits which thing.
+- Fixed: a mark on a found text or icon jumped from under the user's hand and back. Pointing changes what the
+  app shows there — Blender's hovered shading sphere lights up and no longer looks like its picture, a field's
+  tooltip — and the search found a neighbour. While the pointer rests on a mark of the anchor, the mark stays where
+  it was. A template's thing is no bigger than the template and centred on the match (a hovered sphere's measure
+  took its neighbours in).
+- A spot counted from a found caption or icon (a place in a 3D view) is ringed, not framed by a small square.
+- Autopilot: a step that waits for Done is looked at — the robot points at each target and reports a mark that
+  moves under the hand; an arrow at a target is followed along its curve before the click; a twitch names the boxes.
+- Fixed: a target anchored on a found caption with an offset that leads off it (a spot in Blender's 3D view counted
+  from "User Perspective") framed the caption and took clicks there; a click on the spot itself was a miss. The
+  spot is now the target, as with an offset into an element.
+- Fixed: a curved arrow's head pointed past a small target — its tip was placed for a straight arrow. The tip now
+  sits where the bow's last stretch points at the target's middle, and with no outline round the target it stops
+  2 px from the element, not 6.
+- Arrows for dense grids: `route: "elbow"` goes only across and down with a rounded corner, into the middle of the
+  target's side.
+- `band` marks a whole row (or `dir: "column"`, a column) across the visible part of its pane; `forbid` marks a
+  place not to click — warning-coloured stripes, a dashed outline and a "don't click" tag; it is never waited for.
+- Targets of a step that share `"group": "name"` are outlined together, with the name on the outline, instead of a
+  frame on each.
+- A target off every monitor gets a tab on the nearest screen edge pointing toward it, saying "off screen".
+- `dotnet run --project tests -- --shapes out.png [filter]` draws the overlay's shapes over plain stand-ins for an
+  app, through the real layout and renderer — to look at a shape without a live lesson.
+- New target shapes that take the target at its own size, like `auto`: `brackets` (four corners — a field or a
+  panel shows its bounds without being covered), `pill` (a capsule with a dot under it, for a segment among alike
+  ones) and `marker` (a highlighter band over a phrase). `validate` no longer calls `auto` an unknown shape.
+- Arrows can bow round what is in their way (`curve: 0.2`): the overlay picks the side that stays on screen and
+  crosses fewer of the other marks, else the one away from the screen's centre; a caption placed at the tail follows
+  the curve. `end` sets what the tip ends in — `arrow` (default), `dot`, `chevron`, `bar`, `ring`, `none` — and
+  `taper: tail | both` thins the shaft toward the tail or at both ends. Unknown values are named by `validate`.
 - Fixed: a text on screen that OCR misread ("Settinqs") got the "scroll here" wheel, sending the user scrolling
   away from it. A text not found where words that nearly spell it are read (a third of the letters off at most,
   the same digits) gets no wheel; a list of like items ("Track 2" for "Track 12") still does.

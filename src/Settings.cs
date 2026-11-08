@@ -179,11 +179,13 @@ internal sealed class Loc
         IssueNotAnswering = "Приложение сейчас не отвечает — закройте открытое меню (Esc), я найду нужное место.",
         IssueElevated = "Программа запущена от имени администратора — запустите TutorialOverlay так же, иначе я не вижу ваших кликов в ней.";
 
+    public string ForbidTag = "не нажимать", OffscreenTag = "за краем экрана";
     public static readonly Loc Ru = new();
 
     public static readonly Loc En = new()
     {
         Step = "STEP", Waiting = "WAITING", Tutorial = "Tutorial", Preparing = "Preparing the next step…",
+        ForbidTag = "don't click", OffscreenTag = "off screen",
         Back = "Back", Skip = "Skip", Done = "Done", Got = "Got it!", Undo = "Undo", Help = "Help",
         Marked = "{0} of {1} done", Target = "Target {0}",
         HintDone = "done", HintBack = "back", HintSkip = "skip", HintUndo = "undo", HintStop = "finish",
