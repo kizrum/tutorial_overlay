@@ -126,6 +126,9 @@ the tray menu and on another computer too.
 **Checking before the start** — `validate(spec)` resolves all the tutorial's anchors right now. Errors (the process
 is not running, a template was never captured, a step could not be parsed) must be fixed. Warnings on later steps
 often mean something an earlier step will open; `occluded` and `inactive` only mean another window is in front now.
+A target named with a number that changes as the user works (`Ln 36, Col 1`, `3 problems`) gets `volatile` with the
+steady part of the name: anchor by that part (`find.text`) or by the element's position, or the mark is lost the
+moment the number changes.
 
 ## Steps and conditions
 
@@ -270,8 +273,12 @@ its "forehead" is the tutorial's progress bar.
   the screen. Between steps and without a target it stays put.
 - The target's highlight appears together with it: when it has finished appearing or stopped (but no later than
   1.5 s).
-- A hit — it hops and flies to the next target; a miss — it shakes its head and points again; "?" — it thinks while
-  the agent prepares a hint; the end of the tutorial — it celebrates. It hides together with the marks when the app
+- It drops in from above and lands with a squash, and leans into a walk. A hit — a jump, a thumbs-up or a nod, in
+  turn; a miss — its face shakes "no", then it points again, harder, and the target flashes; "?" — it looks at the
+  target through a loupe while the agent prepares a hint; the agent away — it dozes; a step that waits for a shortcut
+  (`until: key`) — it holds up a plate with the keys and presses it; a drag or stroke — it carries a dot along a
+  dashed path; a scroll — it turns a wheel; 20 s with nothing happening — it looks round and stretches; the end of
+  the tutorial — it dances under confetti. It hides together with the marks when the app
   is not in front.
 - Its line is the step's `say` field (short, up to ~60 characters), otherwise the step's title.
 - The overlay works out all the motion itself from the target's coordinates and events: the agent does not drive the
@@ -353,5 +360,8 @@ belongs to its step: on the next step the card starts without one.
   `%LOCALAPPDATA%\TutorialOverlay\help\`.
 - The agent answers with the `hint(text, title?, highlight?)` tool: the text appears right in the current step's
   card (in a conversation, as the assistant's next message). Until the answer, the card says "Told the assistant — a hint is coming."
+- Pass the help event's `step` as `expectIndex`. If the user has moved on meanwhile, the answer is not dropped: it
+  waits in that step's conversation and the card's bottom line says so ("‹ Back" leads there). A hint nobody asked
+  for on that step, or for a question older than 15 minutes, is refused.
 - If a target is not visible, the card explains why by itself: the window is minimised, the spot is covered by
   another window, the element was not found.

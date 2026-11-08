@@ -77,13 +77,25 @@ internal static class StdioBridge
             if (again && running != null && _url == UrlOf(running.Port)) return;   // another request found it already
             if (running == null)
             {
-                Log.Info("--stdio: TutorialOverlay is not running, starting it");
-                StartServer();
-                for (int i = 0; i < 150 && running == null; i++)
+                // every open session has a bridge, and all of them find no server at once: one starts it, the others
+                // wait for that one instead of starting their own (a semaphore: released after an await, on any thread)
+                using var gate = new Semaphore(1, 1, @"Local\TutorialOverlay.Launch");
+                bool held = gate.WaitOne(TimeSpan.FromSeconds(40));
+                try
                 {
-                    await Task.Delay(200);
                     running = Instances.Running();
+                    if (running == null)
+                    {
+                        Log.Info("--stdio: TutorialOverlay is not running, starting it");
+                        StartServer();
+                        for (int i = 0; i < 150 && running == null; i++)
+                        {
+                            await Task.Delay(200);
+                            running = Instances.Running();
+                        }
+                    }
                 }
+                finally { if (held) gate.Release(); }
                 if (running == null) throw new InvalidOperationException("TutorialOverlay did not start within 30 s: see its log in %LOCALAPPDATA%\\TutorialOverlay");
             }
             _url = UrlOf(running.Port);

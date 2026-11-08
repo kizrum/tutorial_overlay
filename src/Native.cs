@@ -25,7 +25,7 @@ internal static class Native
 
     public const uint GA_ROOT = 2;
     public const int SW_HIDE = 0, SW_SHOWNOACTIVATE = 4;
-    public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40;
+    public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_NOCOPYBITS = 0x100;
     public static readonly IntPtr HWND_TOPMOST = new(-1);
 
     public const int SM_XVIRTUALSCREEN = 76, SM_YVIRTUALSCREEN = 77, SM_CXVIRTUALSCREEN = 78, SM_CYVIRTUALSCREEN = 79;
@@ -89,10 +89,38 @@ internal static class Native
     [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hwnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder sb, int max);
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vk);
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize,
         IntPtr hdcSrc, ref POINT pptSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
+    /// <summary>
+    /// Shows <paramref name="bmp"/> (32-bit, with alpha) as the layered window's content, at <paramref name="rect"/>:
+    /// the place, the size and the picture change together, so no frame ever shows one without the other.
+    /// </summary>
+    public static void PresentLayered(IntPtr hwnd, Bitmap bmp, Rectangle rect)
+    {
+        var screen = GetDC(IntPtr.Zero);
+        var mem = CreateCompatibleDC(screen);
+        var hbmp = bmp.GetHbitmap(Color.FromArgb(0));
+        var old = SelectObject(mem, hbmp);
+        try
+        {
+            var dst = new POINT(rect.X, rect.Y);
+            var size = new SIZE(rect.Width, rect.Height);
+            var src = new POINT(0, 0);
+            var blend = new BLENDFUNCTION { BlendOp = AC_SRC_OVER, SourceConstantAlpha = 255, AlphaFormat = AC_SRC_ALPHA };
+            UpdateLayeredWindow(hwnd, screen, ref dst, ref size, mem, ref src, 0, ref blend, ULW_ALPHA);
+        }
+        finally
+        {
+            SelectObject(mem, old);
+            DeleteObject(hbmp);
+            DeleteDC(mem);
+            ReleaseDC(IntPtr.Zero, screen);
+        }
+    }
+
     [DllImport("user32.dll")] private static extern IntPtr BeginDeferWindowPos(int n);
     [DllImport("user32.dll")] private static extern IntPtr DeferWindowPos(IntPtr hdwp, IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] private static extern bool EndDeferWindowPos(IntPtr hdwp);

@@ -42,6 +42,7 @@ internal static partial class Engine
             Waiting = t.State == TutorialState.Waiting,
             StepKey = MascotKey(t),
             Scale = Native.ScaleAt(card.Focus),
+            Away = card.Agent == "off",
         };
         // the end card, or waiting for the next steps: nothing on screen to point at but the card itself — it walks over
         // and points at the card (celebrating at the end) instead of staying where the last target was, over the app
@@ -58,7 +59,11 @@ internal static partial class Engine
         if (step == null) return m;
 
         m.Say = step.Say ?? step.Title;
-        m.Thinking = step.HelpPending && step.Hint == null;
+        // the agent is looking into the user's question: until its answer, whatever the card says meanwhile (its own
+        // hint for "can't find"), and only while an agent is there to answer
+        m.Thinking = step.HelpPending && card.Agent == "on";
+        m.KeyChord = step.Until.FirstOrDefault(c => c.Type == "key" && c.Keys.Count > 0)?.Keys[0];
+        m.Keys = m.KeyChord?.ToString();
         if (t.AdvanceAt != null) return m;     // done, the next step is a moment away: stay put
         // the app waits on a dialog: nothing else on the step can happen until it is answered, so go there and say so
         if (BlockingDialogWindow(step) is { } dlg)
@@ -99,6 +104,12 @@ internal static partial class Engine
         }
         if (target == null)
         {
+            // a drag, stroke or scroll to do: the mascot shows the gesture
+            if (step.Until.FirstOrDefault(c => !c.Met && c.Type is "drag" or "trace" or "scroll") is { } gest)
+            {
+                m.Gesture = gest.Type == "scroll" ? "scroll" : "drag";
+                m.ScrollUp = gest.Direction == "up";
+            }
             // a stroke or scroll step: point at where the path starts / where to scroll
             if (MotionFocus(step) is { } mf)
             {

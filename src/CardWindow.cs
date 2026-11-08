@@ -54,9 +54,14 @@ internal class NoActivateForm : Form
         Native.SetWindowPos(Handle, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
     }
 
-    public void MoveTo(Rectangle r)
+    /// <summary>Moves and sizes the window in one go; a new size drops the old pixels and paints at once.</summary>
+    public virtual void MoveTo(Rectangle r)
     {
-        if (Bounds != r) Native.SetWindowPos(Handle, Native.HWND_TOPMOST, r.X, r.Y, r.Width, r.Height, Native.SWP_NOACTIVATE);
+        if (Bounds == r) return;
+        bool resized = r.Size != Size;
+        Native.SetWindowPos(Handle, Native.HWND_TOPMOST, r.X, r.Y, r.Width, r.Height,
+            Native.SWP_NOACTIVATE | (resized ? Native.SWP_NOCOPYBITS : 0));
+        if (resized) { Invalidate(); Update(); }
     }
 
     protected static void Pill(Graphics g, RectangleF r, string style, bool hover, bool enabled, Color accent, float s)
@@ -122,7 +127,9 @@ internal sealed class CardWindow : NoActivateForm
     private const int FlashMs = 4000;
     // the step's conversation ("Something else"): the card shows it instead of the step until the user goes back
     private bool _chatOpen;
-    private int _chatSeen;                      // messages the user has seen (more: the folded row says so)
+    private readonly Dictionary<int, int> _seen = new();   // per step: messages the user has seen (more: a dot on its row)
+    private long _replyTick;                    // the last "answer waits on another step" the card has told about
+    private int ChatSeen => _seen.GetValueOrDefault(_model.Index);
     private RectangleF _backRect, _composeRect, _chatRowRect;
     private bool _hoverChat;
     private ComposeBox? _compose;               // the line the user types into, laid exactly over _composeRect
@@ -158,6 +165,60 @@ internal sealed class CardWindow : NoActivateForm
 
     public CardWindow() { Text = "TutorialOverlay step"; Size = new Size(10, 10); }
 
+    // ------------------------------------------------------------------ layered window
+    // The card is a layered window: each frame is drawn into a picture and handed over together with the window's
+    // place and size (UpdateLayeredWindow). A plain window shows its new size a frame before its new picture, the
+    // old one pinned to the top: a card growing upward ("why") had its buttons jump up and back every frame.
+
+    private bool _dirty = true, _flushQueued;
+
+    protected override CreateParams CreateParams
+    {
+        get { var cp = base.CreateParams; cp.ExStyle |= Native.WS_EX_LAYERED; return cp; }
+    }
+
+    protected override void OnInvalidated(InvalidateEventArgs e)
+    {
+        base.OnInvalidated(e);
+        _dirty = true;
+        if (_flushQueued || !IsHandleCreated) return;
+        _flushQueued = true;
+        BeginInvoke(() => { _flushQueued = false; if (_dirty) Present(Bounds); });
+    }
+
+    public override void MoveTo(Rectangle r)
+    {
+        if (r == Bounds && !_dirty) return;
+        if (r.Size == Size && !_dirty)
+        {
+            // only moved (dragged): the picture stays
+            Native.SetWindowPos(Handle, Native.HWND_TOPMOST, r.X, r.Y, 0, 0, Native.SWP_NOACTIVATE | Native.SWP_NOSIZE);
+            return;
+        }
+        Present(r);
+    }
+
+    private void Present(Rectangle r)
+    {
+        if (!IsHandleCreated || r.Width <= 0 || r.Height <= 0) return;
+        _dirty = false;
+        using var content = new Bitmap(r.Width, r.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(content)) PaintCard(g, r.Size);
+        using var frame = new Bitmap(r.Width, r.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(frame))
+        {
+            // rounded corners of our own, smoothed (the system rounds only plain windows)
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            float rad = 8 * _s;
+            using (var path = Theme.Rounded(new RectangleF(0, 0, r.Width, r.Height), rad))
+            using (var tb = new TextureBrush(content)) g.FillPath(tb, path);
+            using (var edge = Theme.Rounded(new RectangleF(0.5f, 0.5f, r.Width - 1, r.Height - 1), rad - 0.5f))
+            using (var pen = new Pen(Palette.Line, 1)) g.DrawPath(pen, edge);
+        }
+        Native.PresentLayered(Handle, frame, r);
+        UpdateBounds();     // the window moved without telling WinForms: Bounds would still say the old place and size
+    }
+
     public void UpdateModel(CardModel m)
     {
         if (!m.Visible)
@@ -171,13 +232,18 @@ internal sealed class CardWindow : NoActivateForm
         SetHotkeys(true);
         // a conversation belongs to its step: a new step (or lesson, or the end card) starts without one open
         if (_chatOpen && (m.Index != _model.Index || !ReferenceEquals(m.Lesson, _lesson) || m.State is "waiting" or "outro")) CloseChat(true);
-        if (_chatOpen) _chatSeen = m.Chat.Count;
-        if (!ReferenceEquals(m.Lesson, _lesson)) { _lesson = m.Lesson; _whyOpen = false; _whyFrac = 0; }
+        if (_chatOpen) _seen[m.Index] = m.Chat.Count;
+        if (!ReferenceEquals(m.Lesson, _lesson)) { _lesson = m.Lesson; _whyOpen = false; _whyFrac = 0; _seen.Clear(); }
+        if (m.ReplyTick != _replyTick)
+        {
+            _replyTick = m.ReplyTick;
+            if (m.ReplyOn >= 0 && m.ReplyOn != m.Index) Flash(string.Format(Settings.Current.Text.ReplyElsewhere, m.ReplyOn + 1), 8000);
+        }
         if (_helpOpen && _helpStepVersion != m.StepVersion && m.Index != _model.Index) _helpOpen = false;
         StepWhy();
         float s = Native.ScaleAt(m.Focus == default ? new PointF(Location.X, Location.Y) : m.Focus);
         var sig = Signature(m, s) + (_helpOpen ? "|help" : "") + "|why" + _whyOpen + ":" + _whyFrac.ToString("0.000")
-            + "|chat" + _chatOpen + ":" + m.Chat.Count + ":" + (m.Chat.Count > 0 ? m.Chat[^1].Text : "") + ":" + _chatSeen
+            + "|chat" + _chatOpen + ":" + m.Chat.Count + ":" + (m.Chat.Count > 0 ? m.Chat[^1].Text : "") + ":" + _seen.GetValueOrDefault(m.Index)
             + ":" + _draft + ":" + (_draftSketch?.Strokes.Count ?? 0);
         _model = m;
         if (sig != _sig || Math.Abs(s - _s) > 0.01f)
@@ -422,6 +488,11 @@ internal sealed class CardWindow : NoActivateForm
         return new Rectangle(x, y, size.Width, size.Height);
     }
 
+    /// <summary>Where a dragged card goes: where the hand puts it, stopped whole inside the monitor's work area.</summary>
+    internal static Point DragTo(Point wanted, Size size, Rectangle work) => new(
+        Math.Clamp(wanted.X, work.Left, Math.Max(work.Left, work.Right - size.Width)),
+        Math.Clamp(wanted.Y, work.Top, Math.Max(work.Top, work.Bottom - size.Height)));
+
     private void Place(CardModel m, Rectangle work)
     {
         float s = _s, margin = 16 * s;
@@ -486,14 +557,14 @@ internal sealed class CardWindow : NoActivateForm
 
     // ------------------------------------------------------------------ paint
 
-    protected override void OnPaint(PaintEventArgs e)
+    protected override void OnPaint(PaintEventArgs e) { }     // layered: see Present
+
+    private void PaintCard(Graphics g, Size size)
     {
-        var g = e.Graphics;
         Theme.Quality(g);
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;  // opaque surface: ClearType is fine
         var m = _model;
         g.Clear(Palette.Ink);
-        using (var pen = new Pen(Palette.Line, 1)) g.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
         _closeRect = RectangleF.Empty;
         _agentRect = RectangleF.Empty;
         var note = Note(m);
@@ -791,10 +862,8 @@ internal sealed class CardWindow : NoActivateForm
         {
             var cur = Cursor.Position;
             // the screen's edge and the taskbar stop the card itself: it slides along them, whole and still
-            var work = Native.WorkAreaAt(new PointF(cur.X, cur.Y));
-            int x = Math.Clamp(_dragOrigin.X + cur.X - from.X, work.Left, Math.Max(work.Left, work.Right - Width));
-            int y = Math.Clamp(_dragOrigin.Y + cur.Y - from.Y, work.Top, Math.Max(work.Top, work.Bottom - Height));
-            MoveTo(new Rectangle(x, y, Width, Height));
+            var at = DragTo(new Point(_dragOrigin.X + cur.X - from.X, _dragOrigin.Y + cur.Y - from.Y), Size, Native.WorkAreaAt(new PointF(cur.X, cur.Y)));
+            MoveTo(new Rectangle(at, Size));
             _pinned = true;
             _pinnedStepVersion = _model.StepVersion;
             return;
@@ -876,10 +945,10 @@ internal sealed class CardWindow : NoActivateForm
 
     // ------------------------------------------------------------------ the step's conversation
 
-    private void Flash(string text)
+    private void Flash(string text, int ms = FlashMs)
     {
         _flash = text;
-        _flashUntil = Environment.TickCount64 + FlashMs;
+        _flashUntil = Environment.TickCount64 + ms;
         Invalidate();
     }
 
@@ -888,7 +957,7 @@ internal sealed class CardWindow : NoActivateForm
     {
         _helpOpen = false;
         _chatOpen = true;
-        _chatSeen = _model.Chat.Count;
+        _seen[_model.Index] = _model.Chat.Count;
         Relayout();
         if (compose && _model.Agent != "off") OpenCompose();
     }
@@ -1156,7 +1225,7 @@ internal sealed class CardWindow : NoActivateForm
         var lf = Theme.Font(13 * s, true);
         float lw = Theme.Measure(loc.ChatRow, lf, 300 * s).Width;
         using (var lb = new SolidBrush(blue)) g.DrawString(loc.ChatRow, lf, lb, r.X + 28 * s, cy - lf.Height / 2f);
-        bool unseen = m.Chat.Count > _chatSeen;
+        bool unseen = m.Chat.Count > ChatSeen;
         float right = r.Right - 22 * s - (unseen ? 14 * s : 0);
         var last = m.Chat[^1];
         string preview = m.HelpPending && last.FromUser ? loc.ChatLooking : last.Title ?? last.Text;
@@ -1361,9 +1430,13 @@ internal sealed class ComposeBox : Form
     /// <summary>Closed by the card (its step changed, it hid): what was typed goes back to it.</summary>
     public void Dismiss() => Finish(false, false);
 
+    private long _shownAt;
+    private int _regrabs;
+
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        _shownAt = Environment.TickCount64;
         _box.Focus();
     }
 
@@ -1398,8 +1471,22 @@ internal sealed class ComposeBox : Form
     protected override void OnDeactivate(EventArgs e)
     {
         base.OnDeactivate(e);
+        if (!Visible || _sketching || _done) return;
+        var fg = GetForegroundWindow();
+        string who;
+        try { who = System.Diagnostics.Process.GetProcessById(Native.ProcessId(fg)).ProcessName; } catch { who = "?"; }
+        // just opened, and another window took the keyboard at once (the app the click came from, re-asserting its
+        // focus): that is not the user clicking away — take it back, a few times at most
+        if (Environment.TickCount64 - _shownAt < 600 && _regrabs < 3)
+        {
+            _regrabs++;
+            Log.Info($"question box: focus taken by {who} right after opening, taking it back");
+            BeginInvoke(new Action(Grab));
+            return;
+        }
+        Log.Info($"question box: closed, focus went to {who}");
         // clicking elsewhere: the box goes, the card keeps the draft
-        if (Visible && !_sketching && !_done) BeginInvoke(new Action(() => Finish(false, false)));
+        BeginInvoke(new Action(() => Finish(false, false)));
     }
 
     private void Submit()

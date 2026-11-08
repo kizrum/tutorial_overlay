@@ -123,7 +123,8 @@ internal sealed class Loc
     public string ChatHello = "Что не получается на этом шаге? Напишите или обведите на экране.", ChatAgent = "Ассистент",
         ChatHint = "Enter — отправить · Esc — вернуться к шагу", ChatAsk = "Опишите, что не получается…", ChatReply = "Уточнить…",
         ChatRow = "Разговор по шагу", ChatLooking = "Ассистент смотрит…", ChatSketchOnly = "Обвёл на снимке",
-        ChatShapes = "фигур на снимке: {0}", ChatBack = "Шаг {0}", ChatRemoveSketch = "Убрать снимок";
+        ChatShapes = "фигур на снимке: {0}", ChatBack = "Шаг {0}", ChatRemoveSketch = "Убрать снимок",
+        ReplyElsewhere = "Ответ ассистента ждёт на шаге {0} — вернитесь туда кнопкой «Назад»";
 
     public string OutroHead = "ГОТОВО", OutroTitle = "Туториал пройден!", OutroText = "Вы прошли «{0}» — шагов: {1}. Что дальше?",
         OutroSave = "Сохранить туториал", OutroRepeat = "Пройти ещё раз", OutroContinue = "Продолжить обучение", OutroClose = "Закрыть", WaitFinish = "Завершить",
@@ -210,6 +211,7 @@ internal sealed class Loc
         ChatHint = "Enter — send · Esc — back to the step", ChatAsk = "Describe what isn't working…", ChatReply = "Ask more…",
         ChatRow = "About this step", ChatLooking = "The assistant is looking…", ChatSketchOnly = "Marked on the picture",
         ChatShapes = "shapes on the picture: {0}", ChatBack = "Step {0}", ChatRemoveSketch = "Remove the picture",
+        ReplyElsewhere = "The assistant's answer waits on step {0} — go back there with Back",
         OutroHead = "DONE", OutroTitle = "Tutorial complete!", OutroText = "You finished \"{0}\" — {1} steps. What next?",
         OutroSave = "Save tutorial", OutroRepeat = "Go through again", OutroContinue = "Keep learning", OutroClose = "Close", WaitFinish = "Finish",
         OutroSavedTitle = "Saved", OutroSavedText = "It is in your library: replay it any time from the tray icon menu (Tutorials).",

@@ -54,6 +54,36 @@ internal static partial class Engine
         return null;
     }
 
+    // shortcuts in a name ("Split Terminal (Ctrl+Shift+5)", "Run (F5)") are stable: their digits do not count
+    private static readonly System.Text.RegularExpressions.Regex Shortcut =
+        new(@"\((?:[^()]*\b(?:Ctrl|Alt|Shift|Win|Cmd)\b[^()]*|F\d{1,2})\)|\b(?:Ctrl|Alt|Shift|Win)\+\S+|\bF\d{1,2}\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    private static readonly System.Text.RegularExpressions.Regex Digits = new(@"\d+");
+
+    /// <summary>
+    /// A name or text with numbers in it ("Ln 36, Col 1", "3 unread", "10:54 PM", "42%") usually shows a state that
+    /// changes — the cursor moves, a counter ticks — and then the anchor stops matching mid-lesson. Returns a note with
+    /// the steadiest part to anchor on instead (the longest run without digits), or null when the name has no such
+    /// numbers. Shortcut keys in a name do not count.
+    /// </summary>
+    internal static string? VolatileNote(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        var bare = Shortcut.Replace(name, " ");
+        if (!Digits.IsMatch(bare)) return null;
+        var steady = Digits.Split(bare).Select(p => p.Trim(' ', ',', ':', '.', '-', '/', '%', '(', ')'))
+            .OrderByDescending(p => p.Length).FirstOrDefault() ?? "";
+        string how = steady.Length >= 3 ? $"anchor on a part that stays, e.g. name: \"{steady}\" (names match by containing it)" : "anchor on something steadier (automationId, a neighbour, or the element's role and position)";
+        return $"\"{name}\" has numbers in it: if they change (a position, a counter, a time), the anchor stops matching — {how}";
+    }
+
+    private static string? VolatileNote(AnchorSpec a)
+    {
+        foreach (var p in a.Path) if (p.Name != null && VolatileNote(p.Name) is string n) return n;
+        if (a.Find != null) foreach (var t in a.Find.Texts) if (VolatileNote(t) is string n) return n;
+        return null;
+    }
+
     /// <summary>
     /// A text the author did not pin (no index / nth) that is on screen more than once: the mark goes to the first
     /// (Finder.Rank), which may not be the one the step means ("Save" in the menu and on a dialog button). Null when
@@ -159,6 +189,7 @@ internal static partial class Engine
         void Count(JsonObject r)
         {
             if (J.Has(r, "repeated")) warnings++;
+            if (J.Has(r, "volatile")) warnings++;
             if (J.Bool(r, "ok") == true) return;
             // a program a later step works in is usually started by an earlier one (Start menu, a link, "opens")
             if (J.Str(r, "reason") == "process not running" && curIndex != firstIndex)
@@ -180,7 +211,8 @@ internal static partial class Engine
             ["advice"] = "errors: fix before starting (unknown template, unreadable step, window/element missing on the first step). " +
                          "warnings on later steps are often things an earlier step opens; check them when you get there " +
                          "(validate again, or watch anchor_found events). 'occluded'/'inactive' only mean another window is in front now. " +
-                         "'repeated': the text is on screen more than once — make sure the mark is on the right one.",
+                         "'repeated': the text is on screen more than once — make sure the mark is on the right one. " +
+                         "'volatile': the name has numbers that may change (cursor position, counters, time) — anchor on the part that stays.",
         };
     }
 
@@ -188,6 +220,7 @@ internal static partial class Engine
     private static JsonObject CheckAnchor(AnchorSpec a)
     {
         var o = new JsonObject { ["anchor"] = a.Describe() };
+        if (VolatileNote(a) is string vol) o["volatile"] = vol;
         JsonObject Bad(string reason, string severity = "warning")
         {
             o["ok"] = false;

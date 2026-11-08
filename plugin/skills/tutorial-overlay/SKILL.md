@@ -68,6 +68,8 @@ restart Claude Code. Do not try to install or download it yourself.
    target with `repeated` is on screen several times and the mark goes to the first: check which one the step means
    and pin it with `find.within` or `find.index` (or use the element / numbered anchor) — "Save" in the menu bar is
    not the "Save" button of a dialog.
+   A target with `volatile` has numbers in its name that change ("Ln 36, Col 1", "3 unread", a time): anchor on the
+   part that stays, or the mark is lost as soon as the number changes.
 8. **Start and follow:** `start_tutorial(spec)`, then `events(since, timeoutMs)` to see hits, misses, `no_effect`
    and `help`. For a long lesson use `keepOpen: true` and `append_steps`. While the lesson runs, keep an `events`
    long-poll going all the time (`timeoutMs: 100000`: it returns at once when something happens, so a long one only
@@ -81,7 +83,9 @@ restart Claude Code. Do not try to install or download it yourself.
 9. **Help:** on a `help` event, answer with `hint(text)` right in the card; explain the cause, not only the click.
    "Something else" (`reason: other`) is a conversation about the step: the user may ask again in it, and each
    `hint` becomes your next message there. If it has `sketch.image`, Read it: the shapes on it are numbered, refer
-   to them by number ("№2 is the tab you need").
+   to them by number ("№2 is the tab you need"). Pass the help event's `step` as `expectIndex`: if the user has moved
+   on meanwhile, the answer waits in that step's conversation and the card tells them where (an older
+   TutorialOverlay refuses it instead).
 10. **Finish:** with `keepOpen`, when no more steps will come, call `stop_tutorial` after the last step: the user
    gets the end card (done, save, repeat) instead of a card that waits. Never stop a lesson without telling the user
    why. (An older TutorialOverlay only hides the card on `stop_tutorial`: say "that's all" with `hint` first.) Offer

@@ -33,6 +33,8 @@ internal sealed class CardModel
     public object? Lesson;               // the tutorial shown: what the card remembers (an open "why") lasts for one lesson
     public string Agent = "";            // the agent that runs the lesson: "on" (follows events), "off" (does not), "" (none: a replay)
     public DateTime AgentSeen;           // UTC: the agent's last poll or call (how long it has been away)
+    public int ReplyOn = -1;             // an answer came for another step (its index) …
+    public long ReplyTick;               // … at this moment: the card says where it waits
     public List<ChatLine> Chat = new();  // the step's conversation with the agent
 }
 
@@ -545,6 +547,7 @@ internal static partial class Engine
                     }
                 }
                 Events.Emit("miss", ev);
+                step.MissPulseAt = DateTime.UtcNow.AddMilliseconds(830);
                 step.Misses.Add((JsonObject)ev.DeepClone());
                 if (step.Misses.Count > 8) step.Misses.RemoveAt(0);
             }
@@ -859,6 +862,12 @@ internal static partial class Engine
             if (step?.Sketch is { } sketch && (now - step.SketchAt).TotalSeconds < SketchShownSeconds) AddSketchVisuals(sketch, sc, f.Card.Avoid);
             // a dialog the app waits on comes first: scrolling the pane behind it does nothing until it is answered
             if (step == null || BlockingDialogWindow(step) == null) AddScrollVisuals(marks, sc, f.Card.Avoid, fgPid);
+            // after a miss, as the mascot points again, the target flashes once
+            if (step?.MissPulseAt is DateTime mpa && now >= mpa)
+            {
+                step.MissPulseAt = null;
+                PingTargets(step, now, 1.6f);
+            }
             if (step?.HighlightUntil is DateTime hu)
             {
                 if (now < hu)
@@ -867,13 +876,7 @@ internal static partial class Engine
                     if (now >= step.NextPing)
                     {
                         step.NextPing = now.AddMilliseconds(700);
-                        foreach (var m in step.Targets.Where(m => m.Geo != null && !m.Satisfied))
-                        {
-                            var h0 = m.Geo!.Hits.FirstOrDefault();
-                            var c0 = h0 == null ? m.Geo.Center : h0.Circle ? h0.C : new PointF(h0.Rect.X + h0.Rect.Width / 2, h0.Rect.Y + h0.Rect.Height / 2);
-                            float r0 = h0 == null ? 20 * m.Geo.A.Scale : h0.Circle ? h0.R : Math.Max(h0.Rect.Width, h0.Rect.Height) / 2;
-                            Ripples.Add(new Ripple { C = c0, R0 = r0, Color = Palette.Accent, T0 = now, Scale = m.Geo.A.Scale * 2.2f });
-                        }
+                        PingTargets(step, now, 2.2f);
                     }
                 }
                 else step.HighlightUntil = null;
@@ -1098,6 +1101,9 @@ internal static partial class Engine
         var fg = GetForegroundWindow();
         int pid = fg == IntPtr.Zero ? 0 : Native.ProcessId(fg);
         if (pid != 0 && CaptureTools.Contains(ProcName(pid))) return _lastAppFgPid;
+        // the card's own line to type in (or the screen being marked) has the keyboard: the user is still in the
+        // lesson's app — hiding the card for it closed the line the moment it opened
+        if (pid == OwnPid && Native.WindowTitle(fg) is "TutorialOverlay question" or "TutorialOverlay sketch") return _lastAppFgPid;
         _lastAppFgPid = pid;
         return pid;
     }
@@ -1885,6 +1891,8 @@ internal static partial class Engine
                 for (int i = 0; i < req.Count; i++) card.Checklist.Add((req[i].Label ?? string.Format(Settings.Current.Text.Target, i + 1), req[i].Satisfied));
             card.Extra = s.Buttons;
             card.Chat = s.Chat.ToList();
+            card.ReplyOn = _replyOn;
+            card.ReplyTick = _replyTick;
             card.Hint = s.Hint;
             card.HintTitle = s.HintTitle;
             card.HelpPending = s.HelpPending;
@@ -2044,6 +2052,18 @@ internal static partial class Engine
     /// "idle": it is connected but polls nothing (its turn is over: only the user's chat message wakes it);
     /// "gone": no agent holds the server for this lesson (a replay from the library, a client that left).
     /// </summary>
+    /// <summary>A ring going out from each unfinished target on screen.</summary>
+    private static void PingTargets(Step step, DateTime now, float spread)
+    {
+        foreach (var m in step.Targets.Where(m => m.Geo != null && !m.Satisfied))
+        {
+            var h0 = m.Geo!.Hits.FirstOrDefault();
+            var c0 = h0 == null ? m.Geo.Center : h0.Circle ? h0.C : new PointF(h0.Rect.X + h0.Rect.Width / 2, h0.Rect.Y + h0.Rect.Height / 2);
+            float r0 = h0 == null ? 20 * m.Geo.A.Scale : h0.Circle ? h0.R : Math.Max(h0.Rect.Width, h0.Rect.Height) / 2;
+            Ripples.Add(new Ripple { C = c0, R0 = r0, Color = Palette.Accent, T0 = now, Scale = m.Geo.A.Scale * spread });
+        }
+    }
+
     private static string AgentState(Tutorial t) =>
         t.Owner == null || McpServer.Lease.Holder != t.Owner ? "gone" : AgentListening() ? "listening" : "idle";
 
@@ -2092,15 +2112,10 @@ internal static partial class Engine
             var t = _tut;
             var s = t is { State: TutorialState.Running } ? t.Current : null;
             if (s == null) return;
-            s.HelpPending = true;
             var agent = AgentState(t!);
-            if (reason == "other")
-            {
-                // the user's own words start (or go on with) the step's conversation; the answer comes into it
-                s.Chat.Add(new ChatLine("user", text ?? "", Image: J.Str(drawn, "image"), Shapes: J.Arr(drawn, "strokes")?.Count ?? 0));
-                if (agent != "listening") s.Chat.Add(new ChatLine("note", Settings.Current.Text.HelpAgentIdle));
-            }
-            else
+            // the user's own words start (or go on with) the step's conversation; the answer comes into it
+            if (!s.Ask(reason, text, J.Str(drawn, "image"), J.Arr(drawn, "strokes")?.Count ?? 0, agent == "listening",
+                       Settings.Current.Text.HelpAgentIdle, DateTime.UtcNow))
             {
                 // the card answers at once with what the overlay knows itself: the user is never left waiting on an
                 // agent that is thinking, gone, or was never there; a hint from the agent replaces it
@@ -2188,25 +2203,35 @@ internal static partial class Engine
     private const double SketchShownSeconds = 6;
 
     /// <summary>The agent's answer on the card (cleared when the step changes).</summary>
+    private static int _replyOn = -1;
+    private static long _replyTick;
+
     public static JsonObject SetHint(JsonNode args)
     {
         lock (Sync)
         {
             var t = RequireOwned();
-            if (J.Int(args, "expectIndex") is int e && e != t.Index) throw new InvalidOperationException($"current step is {t.Index}, not {e}");
+            if (J.Int(args, "expectIndex") is int e && e != t.Index)
+            {
+                // the user moved on before the answer came: an answer to their question still reaches them, in the
+                // conversation of the step it is about (the card says where; going back there shows it). A hint
+                // nobody asked for is stale on another step: refused, as before
+                var past = e >= 0 && e < t.Steps.Count ? t.Steps[e] : null;
+                var loc = Settings.Current.Text;
+                if (past == null || !past.AnswerLate(J.Str(args, "text"), J.Str(args, "title"), DateTime.UtcNow, loc.CantFind, loc.DontGet))
+                    throw new InvalidOperationException($"current step is {t.Index}, not {e}");
+                past.Sketch = null;
+                _replyOn = e;
+                _replyTick = Environment.TickCount64;
+                _stepVersion++;
+                var r = TutorialJson();
+                r["deliveredTo"] = e;
+                r["note"] = $"the user is on step {t.Index} now: your answer waits in step {e}'s conversation, and the card tells them so";
+                return r;
+            }
             var s = t.Current ?? throw new InvalidOperationException("no current step");
-            if (s.Chat.Count > 0)
-            {
-                // the step has a conversation: the answer goes into it (the card's own hint, if any, is done with)
-                s.Chat.Add(new ChatLine("agent", J.Str(args, "text") ?? "", J.Str(args, "title")));
-                s.Hint = s.HintTitle = null;
-            }
-            else
-            {
-                s.Hint = J.Str(args, "text");
-                s.HintTitle = J.Str(args, "title");
-            }
-            s.HelpPending = false;
+            // the step has a conversation: the answer goes into it (the card's own hint, if any, is done with)
+            s.Answer(J.Str(args, "text"), J.Str(args, "title"));
             s.Sketch = null;
             if (J.Bool(args, "highlight") == true) { s.HighlightUntil = DateTime.UtcNow.AddSeconds(J.Int(args, "seconds") ?? 6); s.NextPing = default; }
             _stepVersion++;

@@ -18,6 +18,11 @@ internal sealed class MascotInput
     public string? Say;                    // speech bubble
     public float Progress;                 // 0..1, the bar on its forehead
     public bool Thinking, Outro, Waiting;
+    public bool Away;                      // the agent is not listening: it dozes
+    public string? Keys;                   // the step waits for a shortcut: it holds up a plate with it
+    public Chord? KeyChord;                // the same, as keys: one key cap each on the plate
+    public string? Gesture;                // "drag" | "scroll": nothing to point at, the step is a motion — it shows it
+    public bool ScrollUp;
     public string StepKey = "";            // a new step re-shows the bubble and may move it
     public List<RectangleF> Avoid = new(); // marks, captions, popups
     public float Scale = 1;
@@ -43,7 +48,11 @@ internal sealed class MascotWindow : Form
     private const float Unit = 0.44f;            // design unit → px at 100 %: the body (136 u) is ~60 px
     private const float WalkSpeed = 240;         // px/s at 100 %: slow enough to see the steps, a short hop still takes 0.4 s
     private const float WalkFigures = 3.2f;      // walk only up to this many figure widths; farther: vanish + appear
-    private const float VanishTime = 0.2f, AppearTime = 0.3f;
+    private const float VanishTime = 0.2f, AppearTime = 1.0f;
+    private const float HitTime = 0.9f, MissTime = 1.5f;
+    private const float WalkStart = 0.12f, WalkStop = 0.8f;   // of a walk: lean in, steps, stop with a sway
+    private const float IdleAfter = 20;          // s without anything happening: it looks round, stretches
+    private const float Wide = 156;              // design units from the centre its widest props reach (the loupe)
 
     private enum Mood { Normal, Happy, Miss }
     private enum Motion { None, Walk, Vanish, Appear }
@@ -83,6 +92,10 @@ internal sealed class MascotWindow : Form
     private DateTime _cardChangedAt;
     private float _raisedAt;
     private MascotInput? _lastInput;
+    private bool _showKeys;                      // it holds up the plate with the step's keys this frame
+    private int _hitN;                           // hits so far: the reactions take turns
+    private DateTime _idleSince = DateTime.UtcNow;
+    private Point _lastCursor;
 
     public MascotWindow()
     {
@@ -131,8 +144,9 @@ internal sealed class MascotWindow : Form
 
         while (_events.TryDequeue(out var kind))
         {
-            if (kind == "hit") { _mood = Mood.Happy; _moodLeft = 0.9f; }
-            else if (kind == "miss" && _mood != Mood.Happy) { _mood = Mood.Miss; _moodLeft = 1.1f; }
+            _idleSince = now;
+            if (kind == "hit") { _mood = Mood.Happy; _moodLeft = HitTime; _hitN++; }
+            else if (kind == "miss" && _mood != Mood.Happy) { _mood = Mood.Miss; _moodLeft = MissTime; }
             else if (kind is "tutorial_started" or "tutorial_stopped") { _placed = false; _spotKey = ""; }
         }
         if (_mood != Mood.Normal && (_moodLeft -= dt) <= 0) _mood = Mood.Normal;
@@ -156,9 +170,16 @@ internal sealed class MascotWindow : Form
         if ((_nextBlink -= dt) <= 0) { _blink = 0.14f; _nextBlink = 2.5f + (float)Random.Shared.NextDouble() * 3; }
         if (_blink > 0) _blink -= dt;
 
-        if (inp.StepKey != _stepKey) { _stepKey = inp.StepKey; _bubble = 0; }
+        if (inp.StepKey != _stepKey) { _stepKey = inp.StepKey; _bubble = 0; _idleSince = now; }
+        if (Native.GetCursorPos(out var cur) && (Math.Abs(cur.X - _lastCursor.X) > 3 || Math.Abs(cur.Y - _lastCursor.Y) > 3))
+        {
+            _lastCursor = new Point(cur.X, cur.Y);
+            _idleSince = now;
+        }
+        if (_move != Motion.None) _idleSince = now;
         bool settled = _move == Motion.None && _alpha > 0.98f;
-        bool wantBubble = inp.Say is { Length: > 0 } && settled && !inp.Thinking && _mood != Mood.Miss && !inp.Outro;
+        bool wantBubble = inp.Say is { Length: > 0 } && settled && !inp.Thinking && _mood != Mood.Miss && !inp.Outro
+                          && !SaysKeys(inp.Say, inp.Keys);
         _bubble = Approach(_bubble, wantBubble ? 1 : 0, dt * 5);
 
         // tell the engine the highlight can come in: standing still, fully shown, at this step's spot
@@ -166,9 +187,22 @@ internal sealed class MascotWindow : Form
         Render(inp, dt);
     }
 
+    /// <summary>
+    /// The line only repeats the shortcut on the plate it holds ("Press Ctrl+Shift+P"): the plate says it, no bubble.
+    /// A line that adds something ("Save the file" with Ctrl+S) keeps its bubble.
+    /// </summary>
+    internal static bool SaysKeys(string? say, string? keys)
+    {
+        if (string.IsNullOrEmpty(say) || string.IsNullOrEmpty(keys)) return false;
+        static string Norm(string x) => new(x.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        string sn = Norm(say), kn = Norm(keys);
+        return kn.Length > 0 && sn.Contains(kn) && sn.Length - kn.Length <= 12;
+    }
+
     private static float Approach(float v, float target, float step) => v < target ? Math.Min(target, v + step) : Math.Max(target, v - step);
     private static float Dist(PointF a, PointF b) => MathF.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
     private static float SmoothStep(float t) => t * t * (3 - 2 * t);
+    private static float EaseInOut(float x) => x < 0.5f ? 2 * x * x : 1 - (-2 * x + 2) * (-2 * x + 2) / 2;
 
     // =========================================================== moving
 
@@ -294,7 +328,8 @@ internal sealed class MascotWindow : Form
         _to = to;
         _move = Motion.Walk;
         _moveT = 0;
-        _moveDur = Math.Max(0.4f, Dist(_from, _to) / (WalkSpeed * s));
+        // the steps take the middle of the walk; before them it leans in, after them it stops with a sway
+        _moveDur = Math.Max(0.4f, Dist(_from, _to) / (WalkSpeed * s)) / (WalkStop - WalkStart);
         _faceLeft = _to.X < _from.X;
     }
 
@@ -322,10 +357,11 @@ internal sealed class MascotWindow : Form
         switch (_move)
         {
             case Motion.Walk:
-                float e = SmoothStep(_moveT);
+                float q = Math.Clamp((_moveT - WalkStart) / (WalkStop - WalkStart), 0, 1);
+                float e = EaseInOut(q);
                 _pos = new PointF(_from.X + (_to.X - _from.X) * e, _from.Y + (_to.Y - _from.Y) * e);
                 // two steps per stride, about 2.6 strides per second
-                _walkPhase += dt * 2.6f * MathF.PI * 2;
+                if (q > 0 && q < 1) _walkPhase += dt * 2.6f * MathF.PI * 2;
                 if (_moveT >= 1) { _move = Motion.None; _walkPhase = 0; }
                 break;
             case Motion.Vanish:
@@ -345,28 +381,31 @@ internal sealed class MascotWindow : Form
     /// Everything the figure may draw when centred at <paramref name="c"/>: hands out and up, feet and shadow, the
     /// sparkles and thinking dots over its head, and the pointing arm to the fingertip (it faces the target).
     /// </summary>
-    private static RectangleF[] Reach(PointF c, PointF? target, float s)
+    internal static RectangleF[] Reach(PointF c, PointF? target, float s)
     {
         float u = Unit * s;
         bool flip = target is PointF t0 && t0.X < c.X;
         float m = flip ? -1 : 1;
         // design units around the centre (130,140): hands 30..230, sparkles to 256, dots up to y 9, shadow to 240
-        var all = RectangleF.FromLTRB(c.X - 126 * u, c.Y - 132 * u, c.X + 126 * u, c.Y + 102 * u);
+        var all = RectangleF.FromLTRB(c.X - Wide * u, c.Y - 148 * u, c.X + Wide * u, c.Y + 102 * u);
         if (target is not PointF t) return new[] { all };
         var sh = new PointF(c.X + m * 66 * u, c.Y - 6 * u);
         float dx = t.X - sh.X, dy = t.Y - sh.Y, len = MathF.Max(1, MathF.Sqrt(dx * dx + dy * dy));
-        float reach = (ArmLength + FingerTip + 6) * u;
+        float reach = (ArmLength + FingerTip + 12) * u;
         var tip = new PointF(sh.X + dx / len * reach, sh.Y + dy / len * reach);
         var arm = RectangleF.FromLTRB(Math.Min(sh.X, tip.X), Math.Min(sh.Y, tip.Y), Math.Max(sh.X, tip.X), Math.Max(sh.Y, tip.Y));
         return new[] { all, RectangleF.Inflate(arm, 14 * u, 14 * u) };
     }
 
     /// <summary>Would any part of the figure at <paramref name="c"/> touch the card (with a small gap)?</summary>
-    private static bool TouchesCard(PointF c, PointF? target, float s)
+    private static bool TouchesCard(PointF c, PointF? target, float s) =>
+        Engine.CardRect is Rectangle cr && cr.Width > 0 && Touches(c, target, s, cr);
+
+    /// <summary>Would any part of the figure at <paramref name="c"/> touch <paramref name="card"/> (with a small gap)?</summary>
+    internal static bool Touches(PointF c, PointF? target, float s, Rectangle card)
     {
-        if (Engine.CardRect is not Rectangle cr || cr.Width <= 0) return false;
-        var card = RectangleF.Inflate(cr, 4 * s, 4 * s);
-        foreach (var r in Reach(c, target, s)) if (r.IntersectsWith(card)) return true;
+        var box = RectangleF.Inflate(card, 4 * s, 4 * s);
+        foreach (var r in Reach(c, target, s)) if (r.IntersectsWith(box)) return true;
         return false;
     }
 
@@ -519,18 +558,21 @@ internal sealed class MascotWindow : Form
         if (inp == null) return;
         float s = inp.Scale;
         var size = FigureSize(s);
+        float u = Unit * s;
 
-        // appear / vanish: a pop with a little overshoot, a shrink with a spin
+        // vanish: a shrink with a spin; appear: a fall from above, from lower down when the card is right above
         float grow = 1, spin = 0;
-        if (_move == Motion.Appear)
-        {
-            float p = _moveT;
-            grow = p < 0.7f ? SmoothStep(p / 0.7f) * 1.12f : 1.12f - 0.12f * SmoothStep((p - 0.7f) / 0.3f);
-        }
-        else if (_move == Motion.Vanish) { grow = 1 - SmoothStep(_moveT); spin = 160 * _moveT; }
-        float k = Unit * s * Math.Max(0.01f, grow);
+        if (_move == Motion.Vanish) { grow = 1 - SmoothStep(_moveT); spin = 160 * _moveT; }
+        float dropMax = 140;
+        if (_move == Motion.Appear && Engine.CardRect is Rectangle cr0 && cr0.Width > 0
+            && RectangleF.FromLTRB(_pos.X - 70 * u, _pos.Y - 220 * u, _pos.X + 70 * u, _pos.Y - 78 * u).IntersectsWith(cr0))
+            dropMax = 50;
+        var pose = PoseFor(inp, dropMax);
+        _showKeys = pose.ArmsHold;
+        float k = u * Math.Max(0.01f, grow);
 
-        var fig = new RectangleF(_pos.X - size.Width * 0.85f, _pos.Y - size.Height * 1.0f, size.Width * 1.7f, size.Height * 1.75f);
+        var fig = RectangleF.FromLTRB(_pos.X - (Wide + 6) * u, _pos.Y - (152 + (_move == Motion.Appear ? dropMax : 0)) * u,
+                                      _pos.X + (Wide + 6) * u, _pos.Y + 108 * u);
         RectangleF bubble = RectangleF.Empty;
         string? say = inp.Say;
         var font = Theme.Font(13 * s);
@@ -552,14 +594,26 @@ internal sealed class MascotWindow : Form
             Theme.Quality(g);
             g.Clear(Color.Transparent);
             g.TranslateTransform(-rect.X, -rect.Y);
-            if (_move == Motion.Appear || _move == Motion.Vanish) DrawPoof(g, s);
-            if (grow > 0.02f) DrawFigure(g, inp, k, spin);
+            if (_move == Motion.Vanish) DrawPoof(g, s);
+            if (grow > 0.02f)
+            {
+                // nothing it draws (confetti, a loupe, the drag's dot) leaves the box that is kept off the card
+                var st = g.Save();
+                if (_move != Motion.Appear)
+                {
+                    using var clip = new Region(RectangleF.Empty);
+                    foreach (var r in Reach(_pos, inp.Target, s)) clip.Union(r);
+                    g.Clip = clip;
+                }
+                DrawFigure(g, inp, k, spin, pose);
+                g.Restore(st);
+            }
             if (!bubble.IsEmpty) DrawBubble(g, bubble, say!, font, s);
         }
         Present(bmp, rect);
     }
 
-    /// <summary>A ring of sparks where it vanishes / appears.</summary>
+    /// <summary>A ring of sparks where it vanishes.</summary>
     private void DrawPoof(Graphics g, float s)
     {
         float p = _moveT, rad = (14 + 40 * p) * s;
@@ -590,7 +644,7 @@ internal sealed class MascotWindow : Form
         float away = _flip ? 1 : -1, gap = 10 * s;
         RectangleF At(Side side) => side switch
         {
-            Side.Above => new RectangleF(_pos.X - w / 2, _pos.Y - fig.Height * 0.62f - h - gap, w, h),
+            Side.Above => new RectangleF(_pos.X - w / 2, _pos.Y - fig.Height * 0.62f - (_showKeys ? 46 * Unit * s : 0) - h - gap, w, h),
             Side.Below => new RectangleF(_pos.X - w / 2, _pos.Y + fig.Height * 0.62f + gap, w, h),
             Side.Away => new RectangleF(away < 0 ? _pos.X - fig.Width * 0.6f - w - gap : _pos.X + fig.Width * 0.6f + gap, _pos.Y - h / 2, w, h),
             _ => new RectangleF(away < 0 ? _pos.X + fig.Width * 0.6f + gap : _pos.X - fig.Width * 0.6f - w - gap, _pos.Y - h / 2, w, h),
@@ -644,60 +698,242 @@ internal sealed class MascotWindow : Form
                      new StringFormat(Theme.Wrap) { Trimming = StringTrimming.EllipsisWord });
     }
 
+    internal enum Eyes { Open, Wide, Happy }
+    internal enum Mouth { Smile, Grin, O, Flat, Sleep }
+
+    /// <summary>
+    /// One frame of the figure, in design units — the same pose model as the design sheet: where the body is and how it
+    /// is squashed, what the face and each arm do, which props and effects are out.
+    /// </summary>
+    internal sealed class Pose
+    {
+        public float Bob, Hop, Rot, Sx = 1, Sy = 1, FaceX, FaceY, Lid, TapK = 1, Reach, Breath = 2.6f, Prog, KeyPhase;
+        public Eyes Eyes;
+        public Mouth Mouth;
+        public PointF? Look, ArmR;
+        public bool Point = true, Happy, Wink, Brow, Sparkle, Dots, Zz, BarOk, ArmsUp, ArmsHold, KeyDown, Lean, Loupe, ScrollUp;
+        public float? Glint, Confetti, DanceArm, Stretch, Thumb, Drag, Scroll, Walk, Dust;
+    }
+
+    /// <summary>
+    /// What it does now, one thing at a time: moving (appear, walk) first, then the end, a hit, a miss, the agent
+    /// looking into a question, the step's shortcut or gesture, the agent away, a long quiet spell, and pointing.
+    /// </summary>
+    private Pose PoseFor(MascotInput inp, float dropMax)
+    {
+        var P = new Pose { Prog = inp.Progress, Point = inp.Target != null };
+        float t = _time;
+        if (_move == Motion.Appear) Appear(P, _moveT, dropMax);
+        else if (_move == Motion.Walk) WalkPose(P, _moveT, _walkPhase);
+        else if (_move == Motion.Vanish) P.Point = false;
+        else if (inp.Outro)
+        {
+            float b = t * MathF.PI * 2 / 1.1f;
+            P.Happy = true; P.Point = false; P.BarOk = true; P.Prog = 1;
+            P.Rot = 9 * MathF.Sin(b); P.Hop = -14 * MathF.Abs(MathF.Sin(b)); P.Sy = 1 - 0.05f * MathF.Abs(MathF.Cos(b));
+            P.DanceArm = MathF.Sin(b); P.Confetti = t;
+        }
+        else if (_mood == Mood.Happy) Hit(P, 1 - _moodLeft / HitTime, _hitN);
+        else if (_mood == Mood.Miss) Miss(P, 1 - _moodLeft / MissTime);
+        else if (inp.Thinking)
+        {
+            // the agent is looking into the user's question: it looks at the target through a loupe
+            P.Point = false; P.Loupe = true; P.Dots = true; P.Rot = 2 * MathF.Sin(t * 1.4f); P.Mouth = Mouth.Flat;
+        }
+        else if (inp.KeyChord != null)
+        {
+            P.Point = false; P.ArmsHold = true; P.Look = new PointF(0, -4);
+            P.KeyPhase = t % KeyCycle;
+            P.KeyDown = P.KeyPhase >= CapDownAt(CapLabels(inp.KeyChord.Value).Length) && P.KeyPhase < AllUpAt(CapLabels(inp.KeyChord.Value).Length);
+        }
+        else if (inp.Gesture == "drag") { P.Point = false; P.Drag = t % 1.8f / 1.8f; }
+        else if (inp.Gesture == "scroll") { P.Point = false; P.Scroll = t; P.ScrollUp = inp.ScrollUp; }
+        else if (inp.Away)
+        {
+            P.Point = false; P.Lid = 0.82f + 0.08f * MathF.Sin(t * 1.2f); P.Sy = 0.97f + 0.015f * MathF.Sin(t * 1.6f);
+            P.Mouth = Mouth.Sleep; P.Zz = true; P.Rot = -4;
+        }
+        else if (inp.Target != null && (DateTime.UtcNow - _idleSince).TotalSeconds > IdleAfter)
+            Idle(P, (float)((DateTime.UtcNow - _idleSince).TotalSeconds - IdleAfter));
+        return P;
+    }
+
+    /// <summary>Drops in: falls stretched, wide-eyed; squashes on landing with dust; bounces back to its shape.</summary>
+    internal static void Appear(Pose P, float p, float dropMax)
+    {
+        if (p < 0.35f)
+        {
+            float q = p / 0.35f;
+            P.Hop = -dropMax * (1 - q * q); P.Sx = 0.9f; P.Sy = 1.14f; P.Eyes = Eyes.Wide; P.Point = false;
+            P.ArmR = new PointF(212, 100);
+        }
+        else if (p < 0.5f)
+        {
+            float q = (p - 0.35f) / 0.15f, w = MathF.Sin(q * MathF.PI);
+            P.Sx = 1 + 0.2f * w; P.Sy = 1 - 0.2f * w; P.Dust = q;
+        }
+        else if (p < 0.75f)
+        {
+            float q = (p - 0.5f) / 0.25f, w = MathF.Sin(q * MathF.PI);
+            P.Sx = 1 - 0.05f * w; P.Sy = 1 + 0.07f * w; P.Hop = -6 * w; P.Dust = 1 + q;
+        }
+    }
+
+    /// <summary>A walk: it leans in before the first step, steps with a push and a squash, stops with a sway.</summary>
+    private static void WalkPose(Pose P, float p, float phase)
+    {
+        P.Point = false;
+        if (p < WalkStart)
+        {
+            float q = p / WalkStart;
+            P.Rot = -6 * MathF.Sin(q * MathF.PI / 2); P.Sy = 1 - 0.04f * q;
+        }
+        else if (p < WalkStop)
+        {
+            float c = MathF.Abs(MathF.Cos(phase));
+            P.Walk = phase; P.Bob = -MathF.Abs(MathF.Sin(phase)) * 8;
+            P.Sy = 0.95f + 0.05f * (1 - c); P.Sx = 1.04f - 0.04f * (1 - c); P.Rot = 6; P.Lean = true;
+        }
+        else
+        {
+            float q = (p - WalkStop) / (1 - WalkStop), w = MathF.Sin(q * MathF.PI);
+            P.Rot = -5 * w * (1 - q); P.Sx = 1 + 0.04f * w; P.Sy = 1 - 0.04f * w;
+        }
+    }
+
+    /// <summary>A hit: three reactions in turn — a wind-up and a jump, a thumbs-up with a wink, a nod.</summary>
+    internal static void Hit(Pose P, float p, int n)
+    {
+        P.Glint = p; P.BarOk = true;
+        switch (n % 3)
+        {
+            case 1:
+                P.Happy = true; P.Point = false; P.ArmsUp = p > 0.15f;
+                if (p < 0.15f) { float q = p / 0.15f; P.Sy = 1 - 0.12f * q; P.Sx = 1 + 0.1f * q; }
+                else if (p < 0.5f) { float q = (p - 0.15f) / 0.35f; P.Hop = -34 * MathF.Sin(q * MathF.PI); P.Sy = 1.08f; P.Sx = 0.94f; }
+                else if (p < 0.65f) { float q = (p - 0.5f) / 0.15f, w = MathF.Sin(q * MathF.PI); P.Sy = 1 - 0.14f * w; P.Sx = 1 + 0.14f * w; }
+                P.Sparkle = p > 0.2f && p < 0.85f;
+                break;
+            case 2:
+                P.Point = false;
+                P.Thumb = Math.Min(1, p / 0.25f) * (p > 0.85f ? (1 - p) / 0.15f : 1);
+                P.Wink = p > 0.15f && p < 0.8f; P.Mouth = Mouth.Grin; P.Bob = -3 * MathF.Sin(p * MathF.PI * 2);
+                break;
+            default:
+                P.Mouth = Mouth.Grin; P.FaceY = 5 * Math.Max(0, MathF.Sin(p * MathF.PI * 4));
+                P.Eyes = p < 0.8f ? Eyes.Happy : Eyes.Open;
+                break;
+        }
+    }
+
+    /// <summary>A miss: the face shakes "no" (the body stays), then it points again, insisting — the target flashes.</summary>
+    internal static void Miss(Pose P, float p)
+    {
+        if (p < 0.55f)
+        {
+            float q = p / 0.55f;
+            P.FaceX = 8 * MathF.Sin(q * MathF.PI * 5) * (1 - q * 0.6f); P.Mouth = Mouth.Flat; P.Lid = 0.3f;
+            P.Point = false; P.ArmR = new PointF(214, 176);
+        }
+        else
+        {
+            float q = (p - 0.55f) / 0.45f;
+            P.TapK = 3.2f * (1 - q * 0.5f); P.Reach = 6 * MathF.Sin(q * MathF.PI * 3) * (1 - q); P.Brow = true;
+        }
+    }
+
+    /// <summary>Nothing for a while: it looks one way, the other, stretches, and points again (a 7 s round).</summary>
+    private static void Idle(Pose P, float t)
+    {
+        float c = t % 7;
+        if (c < 1.4f) { P.Look = new PointF(-5, 0); P.Point = false; }
+        else if (c < 2.8f) { P.Look = new PointF(5, 1); P.Point = false; }
+        else if (c < 4.2f)
+        {
+            float st = MathF.Sin((c - 2.8f) / 1.4f * MathF.PI);
+            P.Point = false; P.Stretch = st; P.Sy = 1 + 0.06f * st; P.Sx = 1 - 0.04f * st;
+            P.Eyes = st > 0.5f ? Eyes.Happy : Eyes.Open;
+        }
+    }
+
     /// <summary>
     /// The figure in design units ("Шажок+"): body 62..198 with a light rim and a soft top light, arms from the
-    /// shoulders (64,150) / (196,134) with mitten hands, capsule feet at x 108 / 152. Limbs carry a thin dark outline
-    /// so they read on light apps as well as dark ones. Everything it draws stays inside <see cref="Reach"/>.
+    /// shoulders with mitten hands, capsule feet at x 108 / 152. Limbs carry a thin dark outline so they read on light
+    /// apps as well as dark ones. Everything it draws stays inside <see cref="Reach"/> (the caller clips to it).
     /// </summary>
-    private void DrawFigure(Graphics g, MascotInput inp, float k, float spin)
+    private void DrawFigure(Graphics g, MascotInput inp, float k, float spin, Pose P)
     {
         var state = g.Save();
         float t = _time;
         bool walking = _move == Motion.Walk;
-        bool moving = _move != Motion.None;
-        bool pointing = inp.Target is PointF && !moving && !inp.Thinking;
 
         // facing: while walking, the way it goes; standing, the hand faces the target (mirrored when right of it)
         if (inp.Target is PointF tp0 && !walking) _flip = tp0.X < _pos.X;
         bool flip = walking ? _faceLeft : _flip;
+        float fx = flip ? -1 : 1;
 
-        float bob = walking ? -MathF.Abs(MathF.Sin(_walkPhase)) * 7 : moving ? 0 : MathF.Sin(t * MathF.PI * 2 / 2.6f) * 3;
-        float rot = spin, hop = 0;
-        if (!moving && (_mood == Mood.Happy || inp.Outro))
-        {
-            float p = inp.Outro ? (t % 1.4f) / 1.4f : 1 - _moodLeft / 0.9f;
-            hop = p < 0.35f ? -28 * MathF.Sin(p / 0.35f * MathF.PI / 2) : p < 0.6f ? -28 * MathF.Cos((p - 0.35f) / 0.25f * MathF.PI / 2) : -6 * MathF.Sin((p - 0.6f) / 0.4f * MathF.PI);
-        }
-        if (!moving && _mood == Mood.Miss) rot = 9 * MathF.Sin(t * 22) * (_moodLeft / 1.1f);
-        if (!moving && inp.Thinking) rot = -6 * MathF.Sin(t * MathF.PI * 2 / 3f);
-        if (walking) rot = 3 * MathF.Sin(_walkPhase);
+        float bob = P.Bob + MathF.Sin(t * MathF.PI * 2 / P.Breath) * (P.Point ? 3 : 2);
+        float rot = P.Rot + spin;
 
+        // shadow and dust on the ground, outside the body's squash
         g.TranslateTransform(_pos.X, _pos.Y);
-        g.ScaleTransform(flip ? -k : k, k);
+        g.ScaleTransform(fx * k, k);
         g.TranslateTransform(-130, -140);
-        // rotate around the feet so a head shake looks like one
-        g.TranslateTransform(130, 214);
-        g.RotateTransform(rot);
-        g.TranslateTransform(-130, -214 + bob + hop);
-
         int A(int v) => (int)(v * _alpha);
         Color C(Color c) => Color.FromArgb(A(c.A), c);
+        using (var sh = new SolidBrush(Color.FromArgb(A(70), 0, 0, 0)))
+        {
+            float sw0 = 52 * (1 - Math.Min(0.4f, -P.Hop / 200));
+            g.FillEllipse(sh, 130 - sw0, 228, 2 * sw0, 12);
+        }
+        if (P.Dust is float dust && dust < 2)
+        {
+            float q = dust / 2;
+            using var db = new SolidBrush(Color.FromArgb(A(130), Rim));
+            for (int i = 0; i < 5; i++)
+            {
+                int side = i < 3 ? -1 : 1;
+                float r = 5 * (1 - q) + 1, x = 130 + side * (40 + q * 50 + i * 6), y = 230 - q * 14 - (i % 3) * 4;
+                g.FillEllipse(db, x - r, y - r, 2 * r, 2 * r);
+            }
+        }
+        // squash and turn around the feet
+        g.TranslateTransform(130, 214);
+        g.RotateTransform(rot);
+        g.ScaleTransform(P.Sx, P.Sy);
+        g.TranslateTransform(-130, -214 + bob + P.Hop);
+
         using var limb = new Pen(C(Limb), 8) { StartCap = LineCap.Round, EndCap = LineCap.Round };
         using var under = new Pen(Color.FromArgb(A(150), Pupil), 11.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
         using var whiteB = new SolidBrush(C(White));
         using var rimP = new Pen(Color.FromArgb(A(150), Pupil), 2.5f);
 
         void Line(float x1, float y1, float x2, float y2) { g.DrawLine(under, x1, y1, x2, y2); g.DrawLine(limb, x1, y1, x2, y2); }
-        void Curve(PointF a, PointF b, PointF c, PointF d) { g.DrawBezier(under, a, b, c, d); g.DrawBezier(limb, a, b, c, d); }
         void Hand(float x, float y, float r = 9.5f) { g.FillEllipse(whiteB, x - r, y - r, 2 * r, 2 * r); g.DrawEllipse(rimP, x - r, y - r, 2 * r, 2 * r); }
-
-        // shadow on the ground (stays down while it hops)
-        using (var sh = new SolidBrush(Color.FromArgb(A(70), 0, 0, 0))) g.FillEllipse(sh, 78, 228 - hop - bob, 104, 12);
+        // an arm from the shoulder S to the hand H, bowed sideways by "bend"; returns its direction at the hand
+        PointF Arm(PointF S, PointF H, float bend, bool hand = true)
+        {
+            float dx = H.X - S.X, dy = H.Y - S.Y, L = MathF.Max(1, MathF.Sqrt(dx * dx + dy * dy)), ux = dx / L, uy = dy / L;
+            var c = new PointF(S.X + dx * 0.5f - uy * bend, S.Y + dy * 0.5f + ux * bend);
+            var c1 = new PointF(S.X + (c.X - S.X) * 2 / 3, S.Y + (c.Y - S.Y) * 2 / 3);
+            var c2 = new PointF(H.X + (c.X - H.X) * 2 / 3, H.Y + (c.Y - H.Y) * 2 / 3);
+            g.DrawBezier(under, S, c1, c2, H);
+            g.DrawBezier(limb, S, c1, c2, H);
+            if (hand) Hand(H.X, H.Y);
+            return new PointF(ux, uy);
+        }
+        void Finger(PointF H, PointF d, float from, float to, float w = 6)
+        {
+            using (var fu = new Pen(Color.FromArgb(A(150), Pupil), w + 2.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                g.DrawLine(fu, H.X + d.X * from, H.Y + d.Y * from, H.X + d.X * to, H.Y + d.Y * to);
+            using var fp = new Pen(C(White), w) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            g.DrawLine(fp, H.X + d.X * from, H.Y + d.Y * from, H.X + d.X * to, H.Y + d.Y * to);
+        }
 
         // legs: walking swings them in turn and lifts the foot that steps
-        float swing = walking ? MathF.Sin(_walkPhase) : 0;
+        float swing = P.Walk is float wph ? MathF.Sin(wph) : 0;
         float lx = 108 + swing * 9, rx = 152 - swing * 9;
-        float ly = 214 - (walking ? Math.Max(0, swing) * 11 : 0), ry = 214 - (walking ? Math.Max(0, -swing) * 11 : 0);
+        float ly = 214 - Math.Max(0, swing) * 12, ry = 214 - Math.Max(0, -swing) * 12;
         Line(108, 198, lx, ly);
         Line(152, 198, rx, ry);
         using (var lb = new SolidBrush(C(Limb)))
@@ -731,52 +967,65 @@ internal sealed class MascotWindow : Form
         using (var gp = new Pen(Color.FromArgb(A(80), Palette.Accent), 1.5f))
             g.DrawPath(gp, glow);
 
-        // progress bar on the forehead
+        // progress bar on the forehead; a glint runs along it on a hit
         using (var tb = new SolidBrush(C(Track))) using (var p = Theme.Rounded(new RectangleF(84, 82, 92, 9), 4.5f)) g.FillPath(tb, p);
-        float prog = Math.Clamp(inp.Outro ? 1 : inp.Progress, 0.06f, 1);
-        var barColor = _mood == Mood.Happy || inp.Outro ? Palette.Success : Palette.Accent;
+        float prog = Math.Clamp(P.Prog, 0.06f, 1);
+        var barColor = P.BarOk ? Palette.Success : Palette.Accent;
         using (var fb = new SolidBrush(C(barColor))) using (var p = Theme.Rounded(new RectangleF(84, 82, 92 * prog, 9), 4.5f)) g.FillPath(fb, p);
+        if (P.Glint is float gl && gl < 1)
+        {
+            float gx = 84 + 92 * prog * gl;
+            using var gb = new SolidBrush(Color.FromArgb(A(215), 255, 255, 255));
+            using var gpth = Theme.Rounded(new RectangleF(gx - 5, 82, 10, 9), 4.5f);
+            g.FillPath(gb, gpth);
+        }
 
-        // where the eyes look: at the target, or ahead while walking
-        var look = new PointF(0, 0);
-        if (walking) look = new PointF(4, 0);
-        else if (inp.Target is PointF tp)
+        // where the eyes look: the pose's own look; the cursor when it comes close while it points; the target; ahead
+        PointF ToTarget(float m)
         {
-            float dx = (tp.X - _pos.X) * (flip ? -1 : 1), dy = tp.Y - _pos.Y, len = MathF.Max(1, MathF.Sqrt(dx * dx + dy * dy));
-            look = new PointF(dx / len * 4, dy / len * 4);
+            if (inp.Target is not PointF tp) return PointF.Empty;
+            float dx = (tp.X - _pos.X) * fx, dy = tp.Y - _pos.Y, len = MathF.Max(1, MathF.Sqrt(dx * dx + dy * dy));
+            return new PointF(dx / len * m, dy / len * m);
         }
-        if (inp.Thinking && !moving) look = new PointF(3, -5);
+        var look = PointF.Empty;
+        if (P.Look is PointF pl) look = pl;
+        else if (P.Point && Native.GetCursorPos(out var cp) && Dist(new PointF(cp.X, cp.Y), _pos) < 240 * inp.Scale
+                 && Dist(new PointF(cp.X, cp.Y), _pos) > 10)
+        {
+            float dx = (cp.X - _pos.X) * fx, dy = cp.Y - _pos.Y, len = MathF.Max(1, MathF.Sqrt(dx * dx + dy * dy));
+            look = new PointF(dx / len * 5, dy / len * 4);
+        }
+        else if (P.Point) look = ToTarget(4);
+        else if (P.Lean) look = new PointF(4, 0);
+        if (P.Loupe) look = ToTarget(5);
 
-        bool happy = !moving && (_mood == Mood.Happy || inp.Outro);
-        if (happy)
+        // the face (it moves on its own: a head shake, a nod)
+        g.TranslateTransform(P.FaceX, P.FaceY);
+        var eyes = P.Happy ? Eyes.Happy : P.Eyes;
+        float lid = _blink > 0 && eyes == Eyes.Open ? 0.9f : P.Lid;
+        using (var pb = new SolidBrush(C(Pupil)))
+        using (var arcP = new Pen(C(White), 5) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+        using (var lidP = new Pen(C(Rim), 2.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+        using (var browP = new Pen(C(White), 3.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
         {
-            using var ep = new Pen(C(White), 5) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-            g.DrawBezier(ep, 100, 130, 105, 118, 115, 118, 120, 130);
-            g.DrawBezier(ep, 140, 130, 145, 118, 155, 118, 160, 130);
-        }
-        else if (_mood == Mood.Miss && !moving)
-        {
-            g.FillEllipse(whiteB, 97, 113, 26, 26);
-            g.FillEllipse(whiteB, 137, 113, 26, 26);
-            using var pb = new SolidBrush(C(Pupil));
-            g.FillEllipse(pb, 112, 117, 8, 8);
-            g.FillEllipse(pb, 152, 117, 8, 8);
-        }
-        else
-        {
-            // a blink is a lid coming down, not the eye squashed flat
-            float lid = _blink > 0 ? 0.9f : 0;
-            using var pb = new SolidBrush(C(Pupil));
-            using var lidP = new Pen(C(Rim), 2.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-            foreach (float ex in new[] { 110f, 150f })
+            foreach (var (ex, left) in new[] { (110f, true), (150f, false) })
             {
+                if (eyes == Eyes.Happy || (P.Wink && left))
+                {
+                    g.DrawBezier(arcP, ex - 10, 130, ex - 5, 118, ex + 5, 118, ex + 10, 130);
+                    continue;
+                }
+                bool wide = eyes == Eyes.Wide;
+                float rw = wide ? 13 : 11, rh = wide ? 13 : 14, cy = 126;
                 var st = g.Save();
-                if (lid > 0) g.SetClip(new RectangleF(ex - 20, 112 + 28 * lid, 40, 40));
-                g.FillEllipse(whiteB, ex - 11, 112, 22, 28);
-                g.FillEllipse(pb, ex - 5.5f + look.X, 120.5f + look.Y, 11, 11);
-                g.FillEllipse(whiteB, ex - 2 + look.X, 120 + look.Y, 3.6f, 3.6f);
+                if (lid > 0) g.SetClip(new RectangleF(ex - 20, cy - rh + 2 * rh * lid, 40, 40), CombineMode.Intersect);
+                g.FillEllipse(whiteB, ex - rw, cy - rh, 2 * rw, 2 * rh);
+                float pr = wide ? 4 : 5.5f;
+                g.FillEllipse(pb, ex + look.X - pr, cy - 0.5f + look.Y - pr, 2 * pr, 2 * pr);
+                g.FillEllipse(whiteB, ex + look.X + 1.6f - 1.8f, cy - 3 + look.Y - 1.8f, 3.6f, 3.6f);
                 g.Restore(st);
-                if (lid > 0) g.DrawLine(lidP, ex - 10, 112 + 28 * lid, ex + 10, 112 + 28 * lid);
+                if (lid > 0.05f) { float ly2 = cy - rh + 2 * rh * lid; g.DrawLine(lidP, ex - rw + 1, ly2, ex + rw - 1, ly2); }
+                if (P.Brow) g.DrawLine(browP, ex - 9, 106 + (left ? 4 : 0), ex + 9, 106 + (left ? 0 : 4));
             }
         }
         // cheeks
@@ -788,74 +1037,216 @@ internal sealed class MascotWindow : Form
         // mouth
         using (var mp = new Pen(C(White), 4) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
         {
-            if (happy)
+            switch (P.Happy ? Mouth.Grin : P.Mouth)
             {
-                using var path = new GraphicsPath();
-                path.AddBezier(116, 148, 122, 166, 138, 166, 144, 148);
-                path.CloseFigure();
-                using (var pb = new SolidBrush(C(Pupil))) g.FillPath(pb, path);
-                g.DrawPath(mp, path);
+                case Mouth.Grin:
+                    using (var path = new GraphicsPath())
+                    {
+                        path.AddBezier(116, 148, 122, 166, 138, 166, 144, 148);
+                        path.CloseFigure();
+                        using (var mb = new SolidBrush(C(Pupil))) g.FillPath(mb, path);
+                        g.DrawPath(mp, path);
+                    }
+                    break;
+                case Mouth.O: g.DrawEllipse(mp, 124, 150, 12, 12); break;
+                case Mouth.Flat: g.DrawLine(mp, 122, 156, 140, 154); break;
+                case Mouth.Sleep: { float ry2 = 3 + MathF.Sin(t * 1.2f); g.DrawEllipse(mp, 127, 157 - ry2, 8, 2 * ry2); break; }
+                default: g.DrawBezier(mp, 120, 152, 125, 159, 135, 159, 140, 152); break;
             }
-            else if (_mood == Mood.Miss && !moving) g.DrawEllipse(mp, 124, 150, 12, 12);
-            else if (inp.Thinking && !moving) g.DrawLine(mp, 122, 156, 140, 154);
-            else g.DrawBezier(mp, 120, 152, 125, 159, 135, 159, 140, 152);
         }
+        g.TranslateTransform(-P.FaceX, -P.FaceY);
 
         // arms
-        if (happy)
+        var SL = new PointF(64, 150); var SR = new PointF(196, 134);
+        if (P.ArmsUp) { Arm(new(64, 130), new(40, 86), -8); Arm(new(196, 130), new(220, 86), 8); }
+        else if (P.DanceArm is float da) { Arm(new(64, 130), new(44, 96 - da * 16), -8); Arm(new(196, 130), new(216, 96 + da * 16), 8); }
+        else if (P.ArmsHold)
         {
-            Curve(new(64, 130), new(52, 120), new(44, 106), new(40, 88));
-            Curve(new(196, 130), new(208, 120), new(216, 106), new(220, 88));
-            Hand(40, 84);
-            Hand(220, 84);
-            DrawSparkles(g, t, A);
-        }
-        else if (walking)
-        {
-            // arms swing against the legs
-            float sw = swing * 10;
-            Curve(new(64, 150), new(52, 156), new(46 - sw, 166), new(44 - sw, 178));
-            Hand(44 - sw, 181);
-            Curve(new(196, 150), new(208, 156), new(214 + sw, 166), new(216 + sw, 178));
-            Hand(216 + sw, 181);
+            // both hands up, holding the plate with the step's keys over its head; it presses them one after another
+            // (as the chord is pressed), the keys the user holds down light up
+            float press = P.KeyDown ? 3 : 0;
+            Arm(new(64, 140), new(96, 62 + press), -10, hand: false);
+            Arm(new(196, 140), new(164, 62 + press), 10, hand: false);
+            DrawKeyPlate(g, inp.KeyChord!.Value, 4 + press, flip, P.KeyPhase, A);
+            Hand(96, 62 + press);
+            Hand(164, 62 + press);
         }
         else
         {
-            if (inp.Thinking && !moving)
+            // left arm: relaxed, swinging while it walks, or stretched up
+            if (P.Stretch is float str) Arm(new(64, 140), new(60 - 20 * str, 150 - 90 * str), -8);
+            else Arm(SL, P.Lean ? new PointF(40 + 12 * swing, 178) : new PointF(42, 178), -6);
+            // right arm
+            if (P.Thumb is float th)
             {
-                Curve(new(64, 160), new(74, 176), new(98, 184), new(116, 168));
-                Hand(118, 166);
-                DrawThinkDots(g, t, A);
+                var H = new PointF(214 - 4 * th, 150 - 56 * th);
+                Arm(SR, H, 8);
+                Finger(H, new PointF(0, -1), 4, 17);
             }
-            else
+            else if (P.Loupe)
             {
-                Curve(new(64, 150), new(52, 154), new(44, 164), new(42, 178));
-                Hand(42, 181);
+                var H = new PointF(236, 112);
+                Arm(SR, H, 6, hand: false);
+                var blue = Palette.Named["blue"];
+                using (var hp = new Pen(C(blue), 5) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLine(hp, H.X + 4, H.Y - 4, H.X + 16, H.Y - 18);
+                using (var lf = new SolidBrush(Color.FromArgb(A(46), blue))) g.FillEllipse(lf, H.X + 11, H.Y - 49, 34, 34);
+                using (var lp = new Pen(C(blue), 4.5f)) g.DrawEllipse(lp, H.X + 11, H.Y - 49, 34, 34);
+                Hand(H.X, H.Y);
             }
-            // right arm: towards the target, tapping; relaxed with nothing to point at
-            if (pointing && inp.Target is PointF tp2)
+            else if (P.Drag is float dq)
             {
-                float dx = (tp2.X - _pos.X) * (flip ? -1 : 1), dy = tp2.Y - (_pos.Y - 6 * k);
-                float ang = MathF.Atan2(dy, dx) + 0.14f * MathF.Sin(t * MathF.PI * 2 / 1.1f) * (_mood == Mood.Miss ? 2 : 1);
-                ang -= rot * MathF.PI / 180;
-                var dir = new PointF(MathF.Cos(ang), MathF.Sin(ang));
-                var sh = new PointF(196, 134);
-                var end = new PointF(sh.X + dir.X * ArmLength, sh.Y + dir.Y * ArmLength);
-                var ctrl = new PointF(sh.X + dir.X * 28 - dir.Y * 8, sh.Y + dir.Y * 28 + dir.X * 8);
-                Curve(sh, ctrl, ctrl, end);
-                using (var fu = new Pen(Color.FromArgb(A(150), Pupil), 8.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-                    g.DrawLine(fu, end.X + dir.X * 6, end.Y + dir.Y * 6, end.X + dir.X * FingerTip, end.Y + dir.Y * FingerTip);
-                using var finger = new Pen(C(White), 6) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-                g.DrawLine(finger, end.X + dir.X * 6, end.Y + dir.Y * 6, end.X + dir.X * FingerTip, end.Y + dir.Y * FingerTip);
-                Hand(end.X, end.Y);
+                // it carries a glowing dot along the dashed path: the gesture, not only the place
+                var A2 = new PointF(206, 186); var B2 = new PointF(262, 112);
+                using (var dp = new Pen(Color.FromArgb(A(170), Rim), 2) { DashPattern = new[] { 2.5f, 3f } })
+                    g.DrawBezier(dp, A2, new PointF(A2.X + 10, A2.Y - 50), new PointF(B2.X - 30, B2.Y - 10), B2);
+                using (var ep2 = new Pen(C(Palette.Accent), 2)) g.DrawEllipse(ep2, B2.X - 10, B2.Y - 10, 20, 20);
+                float e = EaseInOut(Math.Min(1, dq / 0.75f)), mt = 1 - e;
+                // on the same curve as the path
+                float x = mt * mt * mt * A2.X + 3 * mt * mt * e * (A2.X + 10) + 3 * mt * e * e * (B2.X - 30) + e * e * e * B2.X;
+                float y = mt * mt * mt * A2.Y + 3 * mt * mt * e * (A2.Y - 50) + 3 * mt * e * e * (B2.Y - 10) + e * e * e * B2.Y;
+                var H = new PointF(Math.Min(236, x - 16), Math.Max(120, y + 10));
+                Arm(SR, H, 8);
+                float fade = dq > 0.85f ? (1 - dq) / 0.15f : 1;
+                using (var halo = new SolidBrush(Color.FromArgb((int)(A(90) * fade), Palette.Accent))) g.FillEllipse(halo, x - 13, y - 13, 26, 26);
+                using (var dotB = new SolidBrush(Color.FromArgb((int)(A(255) * fade), Palette.Accent))) g.FillEllipse(dotB, x - 8, y - 8, 16, 16);
             }
-            else
+            else if (P.Scroll is float sc)
             {
-                Curve(new(196, 150), new(208, 154), new(216, 164), new(218, 178));
-                Hand(218, 181);
+                // a finger turning an unseen wheel, arrows running the way to scroll
+                float ph = sc * 2.2f % 1;
+                var H = new PointF(228, 150 + 10 * MathF.Sin(ph * MathF.PI * 2));
+                Arm(SR, H, 8);
+                Finger(H, new PointF(1, -0.16f), 3, 15, 5.5f);
+                for (int i = 0; i < 3; i++)
+                {
+                    float q = (sc * 1.4f + i / 3f) % 1;
+                    using var ap = new Pen(Color.FromArgb((int)(A(255) * MathF.Sin(q * MathF.PI)), Palette.Accent), 3.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+                    float cx = 262, cy = P.ScrollUp ? 190 - q * 60 : 130 + q * 60, d = P.ScrollUp ? -1 : 1;
+                    g.DrawLines(ap, new[] { new PointF(cx - 8, cy - 4 * d), new PointF(cx, cy + 4 * d), new PointF(cx + 8, cy - 4 * d) });
+                }
+            }
+            else if (P.Point && inp.Target is PointF tp2)
+            {
+                float dx = (tp2.X - _pos.X) * fx, dy = tp2.Y - (_pos.Y - 6 * k);
+                float tap = 0.14f * MathF.Sin(t * MathF.PI * 2 / 1.1f) * P.TapK;
+                float ang = MathF.Atan2(dy, dx) + tap - rot * MathF.PI / 180;
+                float len = ArmLength + P.Reach;
+                var H = new PointF(SR.X + MathF.Cos(ang) * len, SR.Y + MathF.Sin(ang) * len);
+                var d = Arm(SR, H, 8, hand: false);
+                Finger(H, d, 5, FingerTip);
+                Hand(H.X, H.Y);
+            }
+            else if (P.ArmR is PointF ar) Arm(SR, ar, 8);
+            else if (P.Lean) Arm(SR, new PointF(220 - 12 * swing, 178), 6);
+            else Arm(SR, new PointF(218, 178), 6);
+        }
+
+        // effects around it
+        if (P.Sparkle) DrawSparkles(g, t, A);
+        if (P.Dots) DrawThinkDots(g, t, A);
+        if (P.Zz)
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                float q = (t * 0.45f + i / 3f) % 1;
+                var font = Theme.Font(14 + q * 12, bold: true);
+                using var zb = new SolidBrush(Color.FromArgb((int)(A(230) * MathF.Sin(q * MathF.PI)), Rim));
+                var st = g.Save();
+                g.TranslateTransform(196 + q * 34 + i * 2, 70 - q * 60);
+                if (flip) g.ScaleTransform(-1, 1);     // letters read the right way round when the figure is mirrored
+                g.DrawString("z", font, zb, 0, -font.GetHeight());
+                g.Restore(st);
+            }
+        }
+        if (P.Confetti is float cf)
+        {
+            var cols = new[] { Palette.Accent, Palette.Success, Palette.Warn, Palette.Named["blue"], Palette.Named["purple"] };
+            for (int i = 0; i < 22; i++)
+            {
+                float q = (cf * 0.35f + i * 0.137f) % 1;
+                float x = 10 + (i * 53 % 260) + MathF.Sin(q * 6 + i) * 10, y = -40 + q * 240;
+                using var b = new SolidBrush(Color.FromArgb((int)(A(255) * (q < 0.85f ? 1 : (1 - q) / 0.15f)), cols[i % 5]));
+                var st = g.Save();
+                g.TranslateTransform(x, y);
+                g.RotateTransform((q * 8 + i) * 180 / MathF.PI);
+                g.FillRectangle(b, -4, -2, 8, 4);
+                g.Restore(st);
             }
         }
         g.Restore(state);
+    }
+
+    private static readonly Font KeyFont = new("Consolas", 25, FontStyle.Bold, GraphicsUnit.Pixel);
+    private const float KeyCycle = 2.2f;          // s: press the keys one by one, hold the chord, let go, rest
+
+    /// <summary>The chord's keys in pressing order: modifiers first, then the key.</summary>
+    internal static string[] CapLabels(Chord c) =>
+        TutorialOverlay.Keys.FormatMods(c.Mods).Split('+', StringSplitOptions.RemoveEmptyEntries)
+            .Append(TutorialOverlay.Keys.KeyName(c.Vk)).ToArray();
+
+    private static float CapDownAt(int i) => 0.25f + i * 0.22f;     // when key i goes down in the cycle
+    private static float AllUpAt(int n) => CapDownAt(n - 1) + 0.45f;
+
+    /// <summary>Is the user holding this key of the chord down right now?</summary>
+    private static bool Held(Chord c, int i, int n)
+    {
+        if (i == n - 1) return (Native.GetAsyncKeyState((int)c.Vk) & 0x8000) != 0;
+        var mods = new List<int>();
+        if ((c.Mods & Native.MOD_CONTROL) != 0) mods.Add(0x11);
+        if ((c.Mods & Native.MOD_ALT) != 0) mods.Add(0x12);
+        if ((c.Mods & Native.MOD_SHIFT) != 0) mods.Add(0x10);
+        if ((c.Mods & Native.MOD_WIN) != 0) mods.Add(0x5B);
+        if (i >= mods.Count) return false;
+        bool down = (Native.GetAsyncKeyState(mods[i]) & 0x8000) != 0;
+        if (mods[i] == 0x5B) down |= (Native.GetAsyncKeyState(0x5C) & 0x8000) != 0;
+        return down;
+    }
+
+    /// <summary>
+    /// The plate over its head, in design units from <paramref name="top"/>: one key cap per key of the chord
+    /// (Ctrl, Shift, P), pressed one after another the way the chord is pressed. A key the user holds down lights up,
+    /// so what is still missing shows. Never wider than the hands' reach (240); drawn the right way round when the
+    /// figure is mirrored.
+    /// </summary>
+    private static void DrawKeyPlate(Graphics g, Chord chord, float top, bool flip, float phase, Func<int, int> a)
+    {
+        var labels = CapLabels(chord);
+        int n = labels.Length;
+        const float capH = 38, side = 5, gap = 6, pad = 7;
+        var widths = labels.Select(l => Math.Max(capH, g.MeasureString(l, KeyFont).Width + 10)).ToArray();
+        float inner = widths.Sum() + gap * (n - 1), plateW = inner + 2 * pad, plateH = capH + side + 2 * pad;
+        float fit = Math.Min(1, 240 / plateW);
+
+        var st = g.Save();
+        if (flip) { g.TranslateTransform(260, 0); g.ScaleTransform(-1, 1); }
+        g.TranslateTransform(130, top);
+        g.ScaleTransform(fit, fit);
+        var plate = new RectangleF(-plateW / 2, 0, plateW, plateH);
+        using (var path = Theme.Rounded(plate, 9))
+        {
+            using (var b = new SolidBrush(Color.FromArgb(a(255), Track))) g.FillPath(b, path);
+            using var pen = new Pen(Color.FromArgb(a(255), Palette.Accent), 2.5f);
+            g.DrawPath(pen, path);
+        }
+        using var sideB = new SolidBrush(Color.FromArgb(a(255), Rim));
+        using var faceB = new SolidBrush(Color.FromArgb(a(255), 240, 242, 247));
+        using var litB = new SolidBrush(Color.FromArgb(a(255), Palette.Accent));
+        using var inkB = new SolidBrush(Color.FromArgb(a(255), 32, 35, 44));
+        using var litInk = new SolidBrush(Color.FromArgb(a(255), 255, 255, 255));
+        using var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap };
+        float x = -inner / 2;
+        for (int i = 0; i < n; i++)
+        {
+            bool held = Held(chord, i, n);
+            bool down = held || (phase >= CapDownAt(i) && phase < AllUpAt(n));
+            float dy = down ? side - 1 : 0;
+            var face = new RectangleF(x, pad + dy, widths[i], capH);
+            using (var sp = Theme.Rounded(new RectangleF(x, pad + side, widths[i], capH), 7)) g.FillPath(sideB, sp);
+            using (var fp = Theme.Rounded(face, 7)) g.FillPath(held ? litB : faceB, fp);
+            g.DrawString(labels[i], KeyFont, held ? litInk : inkB, face, sf);
+            x += widths[i] + gap;
+        }
+        g.Restore(st);
     }
 
     private static void DrawSparkles(Graphics g, float t, Func<int, int> a)
@@ -891,25 +1282,7 @@ internal sealed class MascotWindow : Form
 
     private void Present(Bitmap bmp, Rectangle rect)
     {
-        var screen = Native.GetDC(IntPtr.Zero);
-        var mem = Native.CreateCompatibleDC(screen);
-        var hbmp = bmp.GetHbitmap(Color.FromArgb(0));
-        var old = Native.SelectObject(mem, hbmp);
-        try
-        {
-            var dst = new Native.POINT(rect.X, rect.Y);
-            var size = new Native.SIZE(rect.Width, rect.Height);
-            var src = new Native.POINT(0, 0);
-            var blend = new Native.BLENDFUNCTION { BlendOp = Native.AC_SRC_OVER, SourceConstantAlpha = 255, AlphaFormat = Native.AC_SRC_ALPHA };
-            Native.UpdateLayeredWindow(Handle, screen, ref dst, ref size, mem, ref src, 0, ref blend, Native.ULW_ALPHA);
-        }
-        finally
-        {
-            Native.SelectObject(mem, old);
-            Native.DeleteObject(hbmp);
-            Native.DeleteDC(mem);
-            Native.ReleaseDC(IntPtr.Zero, screen);
-        }
+        Native.PresentLayered(Handle, bmp, rect);
         if (!_visible) { Native.ShowWindow(Handle, Native.SW_SHOWNOACTIVATE); _visible = true; _raisedAt = 0; }
         // Re-asserting "topmost" every frame made it swap places with the marks' canvas 30 times a second, which
         // flickered wherever the two overlap: raise it when it appears, then once a second (other apps' topmost

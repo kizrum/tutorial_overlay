@@ -6,6 +6,42 @@ only fixes things.
 
 ## [Unreleased]
 
+- An answer is not lost when the user has moved on: `hint` with `expectIndex` set to the help event's `step` puts
+  it into that step's conversation (a "can't find" / "don't get it" question becomes its first message), and the
+  card says in its bottom line that the answer waits there — "‹ Back" brings the user to it. A hint nobody asked
+  for, or for a question older than 15 minutes, is still refused.
+- `validate` marks names that carry a number which changes as the user works (`Ln 36, Col 1`, `3 problems`,
+  `12:04`) as `volatile`, with the steady part to anchor by instead; shortcut digits (`Ctrl+1`) do not count.
+- Only one `--stdio` bridge starts the server: when several sessions find none at once, the others wait for it
+  (a system-wide lock) instead of each launching its own.
+- The mascot moves the way the design sheet shows:
+  - appearing, it drops in stretched and lands with a squash and a puff of dust (it used to pop up with a spin);
+  - walking, it leans in, steps with a push and a squash, and stops with a sway;
+  - on a hit it takes turns between a jump with the arms up, a thumbs-up with a wink and a nod, and a glint runs
+    along its progress bar;
+  - on a miss its face shakes "no" while the body stays, then it points again, harder, and the target flashes;
+  - while the agent prepares a hint it looks at the target through a loupe;
+  - while the agent is away it dozes (heavy lids, slow breaths, floating "z"s);
+  - on a step that waits for a shortcut it holds up a plate with one key cap per key (Ctrl, Shift, P) and presses
+    them one after another; a key the user holds down lights up, and a line that only repeats the keys gets no
+    bubble (the plate says it); on a drag
+    or stroke it carries a glowing dot along a dashed path; on a scroll it turns a wheel with arrows running the
+    way to scroll;
+  - after 20 s with nothing happening it looks round and stretches, then points again;
+  - at the end it dances under confetti;
+  - pointing, it follows the cursor with its eyes when the cursor comes close.
+
+  Nothing it draws leaves the box that is kept off the card.
+
+- Fixed: typing a question into the card ("Help" → "Something else") was impossible — clicking the line hid the
+  card for a moment (the overlay's own question line taking the keyboard counted as leaving the app), and the line
+  closed with it. The card now stays while its line or the sketch toolbar has the keyboard.
+- Fixed: the loupe never showed while the agent prepared an answer to "can't find it" (the card's own quick tip
+  counted as the answer).
+- Fixed: the card shook while "Why this way" grew upward — Windows showed each new size a frame before the new
+  picture, so the buttons jumped up and back. The card is now a layered window: its place, size and picture change
+  in one step, with corners rounded by the card itself.
+
 - Fixed: the card shook when dragged against the screen's edge or the taskbar (the placement pulled it back while
   the hand pushed it out). While held, only the hand moves it, and the edge stops the drag itself; dropped, it
   keeps to the monitor it was dropped on instead of the app's.

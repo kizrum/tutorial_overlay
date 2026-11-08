@@ -1416,3 +1416,178 @@ public static class AutoShapeTests
         A.Eq("Browser", J.Str(Inspect.ContainerSegment(nodes, 1), "name"), "a plain name stays");
     }
 }
+
+public static class ChatTests
+{
+    private static readonly DateTime Now = new(2026, 11, 8, 12, 0, 0, DateTimeKind.Utc);
+    private static Step NewStep() => Step.Parse(A.Json("""{"title":"T","targets":[{"anchor":{"process":"x"}}]}"""), null, 0);
+
+    public static void TestSomethingElseStartsAConversation()
+    {
+        var s = NewStep();
+        A.Check(s.Ask("other", "Где кнопка?", "pic.png", 2, true, "away", Now), "own words go into the conversation");
+        A.Eq(1, s.Chat.Count, "one message, no note while the agent listens");
+        A.Check(s.Chat[0].FromUser && s.Chat[0].Image == "pic.png" && s.Chat[0].Shapes == 2, "the question with its picture");
+        A.Check(s.HelpPending, "waiting for the answer");
+        s.Answer("Вот она", "Кнопка №1");
+        A.Eq("agent", s.Chat[1].Who, "the answer is the next message");
+        A.Eq("Кнопка №1", s.Chat[1].Title, "with its title");
+        A.Check(s.Hint == null && !s.HelpPending, "not a card hint, nothing pending");
+    }
+
+    public static void TestAwayAgentGetsANoteInTheConversation()
+    {
+        var s = NewStep();
+        s.Ask("other", "Не работает", null, 0, false, "away note", Now);
+        A.Eq("note", s.Chat[^1].Who, "the card says nobody is listening");
+        A.Eq("away note", s.Chat[^1].Text, "its words");
+    }
+
+    public static void TestMenuHelpStaysACardHint()
+    {
+        var s = NewStep();
+        A.Check(!s.Ask("cant_find", null, null, 0, true, "away", Now), "not a conversation");
+        A.Eq(0, s.Chat.Count, "no messages");
+        s.Answer("Слева вверху", null);
+        A.Eq("Слева вверху", s.Hint, "the answer is the card's hint");
+    }
+
+    public static void TestLateAnswerWaitsInItsStep()
+    {
+        var s = NewStep();
+        s.Ask("cant_find", null, null, 0, true, "away", Now);
+        s.ResetRuntime();                         // the user moved on (and maybe back)
+        A.Check(s.AnswerLate("Слева вверху", null, Now.AddMinutes(2), "не вижу", "не понимаю"), "accepted");
+        A.Eq(2, s.Chat.Count, "the question, then the answer");
+        A.Eq("не вижу", s.Chat[0].Text, "the menu choice stands for the question");
+        A.Eq("agent", s.Chat[1].Who, "answer");
+    }
+
+    public static void TestUnaskedOrOldLateHintIsRefused()
+    {
+        var s = NewStep();
+        A.Check(!s.AnswerLate("x", null, Now, "a", "b"), "nobody asked");
+        s.Ask("dont_understand", null, null, 0, true, "away", Now);
+        A.Check(!s.AnswerLate("x", null, Now + Step.LateAnswer + TimeSpan.FromMinutes(1), "a", "b"), "asked too long ago");
+    }
+
+    public static void TestConversationOutlivesTheVisit()
+    {
+        var s = NewStep();
+        s.Ask("other", "Вопрос", null, 0, true, "away", Now);
+        s.ResetRuntime();
+        A.Eq(1, s.Chat.Count, "the conversation stays with its step");
+        A.Check(s.AnswerLate("Ответ", null, Now.AddHours(2), "a", "b"), "a conversation takes an answer at any time");
+    }
+}
+
+public static class MascotReachTests
+{
+    public static void TestAppearFallsSquashesSettles()
+    {
+        var P = new MascotWindow.Pose();
+        MascotWindow.Appear(P, 0, 140);
+        A.Check(P.Hop == -140 && P.Sy > 1 && P.Eyes == MascotWindow.Eyes.Wide, "up in the air, stretched, wide-eyed");
+        P = new MascotWindow.Pose();
+        MascotWindow.Appear(P, 0.425f, 140);
+        A.Check(P.Hop == 0 && P.Sy < 0.85f && P.Sx > 1.15f && P.Dust != null, "squashed on the ground, dust");
+        P = new MascotWindow.Pose();
+        MascotWindow.Appear(P, 1, 140);
+        A.Check(P.Hop == 0 && P.Sx == 1 && P.Sy == 1 && P.Point, "settled, pointing");
+    }
+
+    public static void TestNoBubbleThatRepeatsThePlate()
+    {
+        A.Check(MascotWindow.SaysKeys("Нажмите Ctrl+Shift+P", "Ctrl+Shift+P"), "the line is the plate");
+        A.Check(MascotWindow.SaysKeys("Press ctrl + s", "Ctrl+S"), "spaces and case do not matter");
+        A.Check(!MascotWindow.SaysKeys("Сохраните файл, чтобы изменения не пропали", "Ctrl+S"), "a line that adds something stays");
+        A.Check(!MascotWindow.SaysKeys("Нажмите Ctrl+Shift+P", null), "no plate: the bubble stays");
+    }
+
+    public static void TestHitsTakeTurns()
+    {
+        var a = new MascotWindow.Pose(); MascotWindow.Hit(a, 0.3f, 1);
+        var b = new MascotWindow.Pose(); MascotWindow.Hit(b, 0.3f, 2);
+        var c = new MascotWindow.Pose(); MascotWindow.Hit(c, 0.125f, 3);
+        A.Check(a.ArmsUp && a.Hop < 0 && a.Sparkle, "first: a jump with the arms up");
+        A.Check(b.Thumb > 0 && b.Wink && !b.Point, "second: a thumbs-up with a wink");
+        A.Check(c.FaceY > 4 && c.Eyes == MascotWindow.Eyes.Happy, "third: a nod");
+    }
+
+    public static void TestMissShakesThenInsists()
+    {
+        var a = new MascotWindow.Pose(); MascotWindow.Miss(a, 0.1f);
+        A.Check(!a.Point && a.FaceX != 0 && a.Sx == 1, "the face shakes, the body stays");
+        var b = new MascotWindow.Pose(); MascotWindow.Miss(b, 0.7f);
+        A.Check(b.Point && b.TapK > 2 && b.Brow, "then points again, harder");
+    }
+
+    public static void TestFarFromTheCardIsFree()
+    {
+        A.Check(!MascotWindow.Touches(new PointF(200, 200), new PointF(260, 120), 1, new Rectangle(800, 500, 400, 300)), "far away");
+    }
+
+    public static void TestHandsCountNotOnlyTheBody()
+    {
+        // the body (±33 px at 100 %) would clear a card 40 px to the right; its hands and props (±69 px) do not
+        var c = new PointF(500, 500);
+        var card = new Rectangle(540, 400, 300, 300);
+        A.Check(MascotWindow.Touches(c, null, 1, card), "a hand on the card");
+        A.Check(!MascotWindow.Touches(c, null, 1, new Rectangle(600, 400, 300, 300)), "clear with a gap");
+    }
+
+    public static void TestPointingArmCounts()
+    {
+        // a small card just past the figure's box at shoulder height: only the arm pointing straight at it reaches it
+        var c = new PointF(300, 500);
+        var card = new Rectangle(375, 490, 20, 14);
+        A.Check(MascotWindow.Touches(c, new PointF(900, 497), 1, card), "the arm crosses the card");
+        A.Check(!MascotWindow.Touches(c, new PointF(0, 497), 1, card), "pointing the other way: clear");
+    }
+
+    public static void TestReachGrowsWithScale()
+    {
+        var card = new Rectangle(580, 400, 300, 300);
+        A.Check(!MascotWindow.Touches(new PointF(500, 500), null, 1, card), "clear at 100 %");
+        A.Check(MascotWindow.Touches(new PointF(500, 500), null, 1.5f, card), "touches at 150 %");
+    }
+}
+
+public static class CardDragTests
+{
+    private static readonly Rectangle Work = new(0, 0, 1920, 1040);   // 40 px taskbar below
+    private static readonly Size Card = new(420, 300);
+
+    public static void TestFollowsTheHandInside() =>
+        A.Eq(new Point(700, 300), CardWindow.DragTo(new Point(700, 300), Card, Work), "unchanged");
+
+    public static void TestStopsAtTheTaskbar() =>
+        A.Eq(new Point(700, 740), CardWindow.DragTo(new Point(700, 900), Card, Work), "bottom edge on the work area");
+
+    public static void TestStopsAtEveryEdge()
+    {
+        A.Eq(new Point(0, 0), CardWindow.DragTo(new Point(-300, -50), Card, Work), "top left");
+        A.Eq(new Point(1500, 0), CardWindow.DragTo(new Point(1800, -1), Card, Work), "top right");
+    }
+
+    public static void TestSecondMonitor() =>
+        A.Eq(new Point(1920, 100), CardWindow.DragTo(new Point(1900, 100), Card, new Rectangle(1920, 0, 1280, 1024)), "kept on the monitor under the hand");
+}
+
+public static class VolatileNameTests
+{
+    public static void TestNumbersThatChangeAreFlagged()
+    {
+        A.Check(Engine.VolatileNote("Ln 36, Col 1") != null, "cursor position");
+        A.Check(Engine.VolatileNote("10:54 PM") != null, "time");
+        A.Check(Engine.VolatileNote("3 unread messages")?.Contains("unread messages") == true, "suggests the steady part");
+    }
+
+    public static void TestShortcutsAndPlainNamesAreNot()
+    {
+        A.Check(Engine.VolatileNote("Split Terminal (Ctrl+Shift+5)") == null, "shortcut digits");
+        A.Check(Engine.VolatileNote("Run (F5)") == null, "function key");
+        A.Check(Engine.VolatileNote("Explorer (Ctrl+Shift+E)") == null, "no digits");
+        A.Check(Engine.VolatileNote(null) == null, "no name");
+    }
+}

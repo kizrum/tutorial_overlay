@@ -711,12 +711,63 @@ internal sealed class Step
     public readonly List<JsonObject> Misses = new();   // recent misses, for help requests
     public string? Hint, HintTitle;                    // agent's answer shown on the card
     public readonly List<ChatLine> Chat = new();       // the conversation about this step ("Something else" and the answers)
+    public DateTime AskedAt;                           // UTC: the user's last "help" on this step (kept when they move on)
+    public string? AskedReason;                        // and its reason (cant_find | dont_understand | other)
+
+    /// <summary>How long after a question an answer still reaches a step the user has left.</summary>
+    public static readonly TimeSpan LateAnswer = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// The user asked for help. "Something else" (their own words) starts or goes on with the step's conversation,
+    /// with a note from the card when no agent would hear it; the other reasons stay a card hint (the caller's).
+    /// Returns whether it went into the conversation.
+    /// </summary>
+    public bool Ask(string reason, string? text, string? image, int shapes, bool heard, string awayNote, DateTime now)
+    {
+        HelpPending = true;
+        AskedAt = now;
+        AskedReason = reason;
+        if (reason != "other") return false;
+        Chat.Add(new ChatLine("user", text ?? "", Image: image, Shapes: shapes));
+        if (!heard) Chat.Add(new ChatLine("note", awayNote));
+        return true;
+    }
+
+    /// <summary>The agent's answer on the current step: its next message in a conversation, else the card's hint.</summary>
+    public void Answer(string? text, string? title)
+    {
+        if (Chat.Count > 0)
+        {
+            Chat.Add(new ChatLine("agent", text ?? "", title));
+            Hint = HintTitle = null;
+        }
+        else
+        {
+            Hint = text;
+            HintTitle = title;
+        }
+        HelpPending = false;
+    }
+
+    /// <summary>
+    /// The agent's answer for this step after the user has moved on: it waits in the step's conversation (a question
+    /// asked from the help menu becomes its first message). A hint nobody asked for, or asked long ago, is refused.
+    /// </summary>
+    public bool AnswerLate(string? text, string? title, DateTime now, string cantFind, string dontGet)
+    {
+        if (Chat.Count == 0 && now - AskedAt > LateAnswer) return false;
+        if (Chat.Count == 0 && AskedReason is "cant_find" or "dont_understand")
+            Chat.Add(new ChatLine("user", AskedReason == "cant_find" ? cantFind : dontGet));
+        Chat.Add(new ChatLine("agent", text ?? "", title));
+        return true;
+    }
     public bool HelpPending;
     public bool Checking;                              // target_not_found sent: the agent is looking for the right item
     public List<PointF[]>? Sketch;                     // what the user circled with the help request (until the answer)
     public DateTime SketchAt;                          // when: the circling fades on its own after a few seconds
     public DateTime? HighlightUntil;
     public DateTime NextPing;
+    public DateTime? MissPulseAt;        // a miss: the targets flash once the mascot points again
     public DateTime? SeqMissingSince;            // current sequence target's anchor gone (menu closed?)
     public bool Review;                          // entered with "Back": already-true conditions don't auto-complete it
     public Color? AutoColor;                     // one contrast colour for all targets of the step

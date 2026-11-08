@@ -124,7 +124,8 @@ claude mcp add --scope user tutorial-overlay -- "C:\path\to\TutorialOverlay.exe"
 It is a thin bridge to the one server of this user, not a second overlay:
 
 - the server is not running → it starts it on its own (two hops, as for the tray guard), so the overlay stays in the
-  tray after the agent exits and a client that kills its server's process tree does not take it along;
+  tray after the agent exits and a client that kills its server's process tree does not take it along; when several
+  bridges find none at once, one starts it and the others wait for it (a named lock), so there is never a second;
 - the port comes from `%LOCALAPPDATA%\TutorialOverlay\server.json`, the key from `TUTORIAL_OVERLAY_KEY` or `key.txt`;
 - every stdin line goes to the server as a POST, answers and server-sent events come back as stdout lines, and the
   bridge keeps the event stream (GET) open, which is how the server knows the agent is still there;
