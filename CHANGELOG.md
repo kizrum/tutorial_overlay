@@ -6,6 +6,8 @@ only fixes things.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-08
+
 - An answer is not lost when the user has moved on: `hint` with `expectIndex` set to the help event's `step` puts
   it into that step's conversation (a "can't find" / "don't get it" question becomes its first message), and the
   card says in its bottom line that the answer waits there — "‹ Back" brings the user to it. A hint nobody asked
@@ -252,7 +254,8 @@ The first public release.
 - The tutorial library: saved tutorials run again from the tray menu, without the agent.
 - A self-contained single-file exe: no .NET install needed to run it.
 
-[Unreleased]: https://github.com/kizrum/tutorial_overlay/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/kizrum/tutorial_overlay/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/kizrum/tutorial_overlay/releases/tag/v0.5.0
 [0.4.0]: https://github.com/kizrum/tutorial_overlay/releases/tag/v0.4.0
 [0.3.0]: https://github.com/kizrum/tutorial_overlay/releases/tag/v0.3.0
 [0.2.0]: https://github.com/kizrum/tutorial_overlay/releases/tag/v0.2.0
