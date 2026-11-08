@@ -43,6 +43,14 @@ dotnet run --project tests -- Lint    # only those with "Lint" in their name
 
 The exit code is the number of failed tests.
 
+`PluginContract` tests keep the plugin and the program in step. Every `tool(args)` call in the skill
+(`plugin/skills/tutorial-overlay/SKILL.md`) must be a tool the server lists, with arguments it takes. Every name in a
+code span of the skill (spec fields, events, answer fields) must be a word the program uses; `find.X` and
+`type: 'x'` are checked against the spec parser's own field lists. The Stop hook (`plugin/hooks/stop-guard.ps1`)
+must read only the `lesson.json` fields and states the program writes. When the program renames something, these
+tests name the line of the plugin to fix. A fallback the skill keeps for an older TutorialOverlay goes into
+`PluginContractTests.Legacy` with its reason.
+
 ## OCR bench
 
 Saved screenshots of real apps with the text to look for and where it truly is, read through the same path as a

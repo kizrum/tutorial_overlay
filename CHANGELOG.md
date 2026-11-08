@@ -6,6 +6,10 @@ only fixes things.
 
 ## [Unreleased]
 
+- Tests check that the plugin and the program speak the same language: the skill calls only tools and arguments the
+  server has and names only fields, events and answers the program uses, and the Stop hook reads only what
+  lesson.json holds. A rename in the program that the plugin missed now fails `dotnet run --project tests`.
+
 ## [0.5.0] - 2026-11-08
 
 - An answer is not lost when the user has moved on: `hint` with `expectIndex` set to the help event's `step` puts
