@@ -18,6 +18,7 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--ocr-bench") return OcrBench.Run(args.Skip(1).ToArray());
         if (args.Length > 0 && args[0] == "--ocr-read") return OcrBench.ReadOut(args.Skip(1).ToArray());
         if (args.Length > 0 && args[0] == "--ocr-capture") return OcrBench.Capture(args.Skip(1).ToArray());
+        if (args.Length > 0 && args[0] == "--autopilot") return Autopilot.Run(args.Skip(1).ToArray());
         var filter = args.Length > 0 ? args[0] : null;
         var tests = typeof(Program).Assembly.GetTypes()
             .SelectMany(t => t.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))

@@ -94,6 +94,29 @@ For every problem note: the app, the step, what happened, how much it got in the
 time / cosmetic), whether it repeats, and whether it is general or this app only. Fix in that order: what breaks the
 lesson, marks on the wrong place or lost, steps that complete wrongly or never, Help, then navigation.
 
+## Autopilot: lessons played by a robot
+
+`tests/Autopilot.cs` plays tutorials in real apps the way a person would, through the running server: it reads where
+the current step's target is (`status`), clicks it, presses the step's keys or turns the wheel, and waits for the step
+to complete. It moves the real mouse, so nobody may use the computer while it runs.
+
+```powershell
+dotnet run --project tests -- --autopilot examples/autopilot             # every case in the folder
+dotnet run --project tests -- --autopilot examples/autopilot --case calc # only cases whose file name has "calc"
+```
+
+A case file is `{name, launch: {exe, args, process, readyTimeoutMs}, spec}`. `process` is what the robot checks
+before it starts the app and what it closes afterwards: a case whose app is already open is skipped (the robot never
+touches a window it did not open). The app counts as ready when `validate` resolves the first step's target.
+
+A step fails on `target_not_found`, on a target that stays not visible (the server's reason is in the report), or when
+it does not complete within 20 s. A step that waits for a drag, a trace, a count or Done is completed on the robot's
+behalf and marked as skipped. Warnings: the card covering the target, a target partly off screen, misses and
+`no_effect`. The report (`results/<time>/report.html` next to the cases) has every step with a screenshot of the
+screen as the user saw it; failed cases are open. The exit code is the number of failed cases.
+
+Cases are tutorial specs, so they stay local like `examples/`.
+
 ## Example tutorials
 
 Ready tutorials (specs in JSON) are not part of the repository: the `examples/` folder and the tutorial library
