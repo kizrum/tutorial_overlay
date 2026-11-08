@@ -257,7 +257,9 @@ internal static class Autopilot
     {
         var mine = Process.GetProcessesByName(process).Where(p => { try { return p.StartTime >= since; } catch { return false; } }).ToList();
         foreach (var p in mine) { try { p.CloseMainWindow(); } catch { } }
-        foreach (var p in mine) { try { if (!p.WaitForExit(3000)) p.Kill(true); } catch { } }
+        // an app that asks "Save changes?" is killed: nothing the robot did is worth keeping. The next case must not
+        // find it still exiting ("already open")
+        foreach (var p in mine) { try { if (!p.WaitForExit(3000)) { p.Kill(true); p.WaitForExit(10000); } } catch { } }
     }
 
     // ================================================================ one step
@@ -410,7 +412,7 @@ internal static class Autopilot
                     Input.ClickHere(x, y, TargetButton(spec, visible));
                     break;
             }
-            WaitPast(mcp, index, AfterActionMs);
+            WaitPast(mcp, index, AfterActionMs, kind == "click" ? J.Items(J.Get(step, "targets")).Count() - targets.Count : int.MaxValue);
         }
 
         status = mcp.Call("status", new JsonObject()).Json?.AsObject();
@@ -523,15 +525,21 @@ internal static class Autopilot
         return null;
     }
 
-    private static void WaitPast(Mcp mcp, int index, int ms)
+    private static void WaitPast(Mcp mcp, int index, int ms, int satisfiedBefore = int.MaxValue)
     {
         var sw = Stopwatch.StartNew();
         while (sw.ElapsedMilliseconds < ms)
         {
-            if (Past(J.Get(mcp.Call("status", new JsonObject()).Json, "tutorial"), index)) return;
+            var tut = J.Get(mcp.Call("status", new JsonObject()).Json, "tutorial");
+            if (Past(tut, index)) return;
+            // a checklist completes on its last target: the click did its part when one more target is satisfied
+            if (Satisfied(tut) > satisfiedBefore) return;
             Thread.Sleep(200);
         }
     }
+
+    private static int Satisfied(JsonNode? tut) =>
+        J.Items(J.Get(J.Get(tut, "step"), "targets")).Count(t => J.Get(t, "satisfied")?.GetValue<bool>() == true);
 
     private static List<JsonNode?> Events(Mcp mcp, ref long seq)
     {
