@@ -326,6 +326,13 @@ The card has a **"Help"** button (hotkey **Ctrl+Alt+H**). It opens the choices *
 **"I don't get what to do"** and **"Something else"** (the user describes it in their own words). While the agent
 is away, "Something else" is dimmed: a press says to write to the assistant in the chat.
 
+"Something else" turns the card into **a conversation about the step**: the user's messages on the right, the
+assistant's answers on the left, three dots while it is looking. The input line is at the bottom (Enter — send,
+Esc — back to the step). "‹ Step 3 · title" in the header goes back to the step; the conversation folds into an
+"About this step" row under the step's text, with the newest message and a dot for an answer not seen yet. A click
+on the row opens it again. What was typed and not sent stays when the user clicks elsewhere. The conversation
+belongs to its step: on the next step the card starts without one.
+
 - The agent gets the `help` event: the reason; for each target whether it is visible and why not (`visible`,
   `occluded`, `minimized`, `inactive`, `element not found`…) and where it is on screen; the step's latest misses; the
   active window and the cursor.
@@ -333,15 +340,18 @@ is away, "Something else" is dimmed: a press says to write to the assistant in t
   them.
 - Sketch pictures are kept in `%LOCALAPPDATA%\TutorialOverlay\help\`: on start the last 50 stay, none older than
   14 days.
-- The "Something else" panel has a **pencil** ("Circle it"). It freezes the picture of the screen, and the user
-  circles the place they write about. Enter or a right click — done, Ctrl+Z or Backspace — remove the last stroke,
-  Delete — erase all, Esc — leave without changes. Pressing the pencil again adds to what was drawn. The circling
+- The input line has a **pencil**. It freezes the picture of the screen and puts a toolbar above the card:
+  **pencil**, **circle** and **frame** (keys 1, 2, 3; Shift makes a round circle or a square frame), **undo shape**
+  (Ctrl+Z or Backspace), **Cancel** (Esc — no picture) and **Done** with the number of shapes (Enter or a right
+  click). Delete erases all; the toolbar can be dragged by its grip. Every shape gets a number, on the screen and in
+  the picture the agent gets, so both can say "№2". The line then shows a small picture with a cross to drop it;
+  pressing the pencil again adds to what was drawn. The circling
   stays on screen until the agent answers. The `help` event then has a `sketch` field: `bounds` and `center` in
   screen pixels, `strokes` (each stroke has a `shape`: `loop` | `line` | `dot`, `from`, `to` and up to 48 points),
   `atCenter` (the window, colour and UIA element at the centre of the circling, `rel` from the anchor of the step's
   first target, `suggestedAnchor`) and `image`, the path to a PNG of the place with the circling in
   `%LOCALAPPDATA%\TutorialOverlay\help\`.
 - The agent answers with the `hint(text, title?, highlight?)` tool: the text appears right in the current step's
-  card. Until the answer, the card says "Told the assistant — a hint is coming."
+  card (in a conversation, as the assistant's next message). Until the answer, the card says "Told the assistant — a hint is coming."
 - If a target is not visible, the card explains why by itself: the window is minimised, the spot is covered by
   another window, the element was not found.

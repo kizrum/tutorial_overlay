@@ -79,6 +79,9 @@ restart Claude Code. Do not try to install or download it yourself.
    dimmed — and told the user to write to you). A miss right beside the target that did what the step wanted (the list opened, the page
    changed): check it and `complete_step` instead of leaving the user stuck.
 9. **Help:** on a `help` event, answer with `hint(text)` right in the card; explain the cause, not only the click.
+   "Something else" (`reason: other`) is a conversation about the step: the user may ask again in it, and each
+   `hint` becomes your next message there. If it has `sketch.image`, Read it: the shapes on it are numbered, refer
+   to them by number ("№2 is the tab you need").
 10. **Finish:** with `keepOpen`, when no more steps will come, call `stop_tutorial` after the last step: the user
    gets the end card (done, save, repeat) instead of a card that waits. Never stop a lesson without telling the user
    why. (An older TutorialOverlay only hides the card on `stop_tutorial`: say "that's all" with `hint` first.) Offer

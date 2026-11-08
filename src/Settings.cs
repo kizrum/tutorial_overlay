@@ -117,7 +117,13 @@ internal sealed class Loc
     public string Other = "Другое — опишу сам", OtherTitle = "Опишите, что не получается", Send = "Отправить",
         OtherHint = "Enter — отправить · Shift+Enter — новая строка · Esc — отмена";
     public string Sketch = "Обвести", Sketched = "Обведено: {0}", SketchTitle = "Обведите на экране, о чём речь",
-        SketchText = "Рисуйте мышью · Enter или правый клик — готово · Ctrl+Z — убрать штрих · Esc — отмена", SketchClear = "Стереть";
+        SketchFrozen = "Экран остановлен", SketchPen = "Карандаш", SketchCircle = "Круг", SketchRect = "Рамка",
+        SketchUndo = "Отменить фигуру", SketchCancel = "Отмена", SketchCancelTip = "Не отправлять снимок",
+        SketchDoneTip = "Готово: снимок уйдёт с вопросом", SketchMove = "Перетащите панель";
+    public string ChatHello = "Что не получается на этом шаге? Напишите или обведите на экране.", ChatAgent = "Ассистент",
+        ChatHint = "Enter — отправить · Esc — вернуться к шагу", ChatAsk = "Опишите, что не получается…", ChatReply = "Уточнить…",
+        ChatRow = "Разговор по шагу", ChatLooking = "Ассистент смотрит…", ChatSketchOnly = "Обвёл на снимке",
+        ChatShapes = "фигур на снимке: {0}", ChatBack = "Шаг {0}", ChatRemoveSketch = "Убрать снимок";
 
     public string OutroHead = "ГОТОВО", OutroTitle = "Туториал пройден!", OutroText = "Вы прошли «{0}» — шагов: {1}. Что дальше?",
         OutroSave = "Сохранить туториал", OutroRepeat = "Пройти ещё раз", OutroContinue = "Продолжить обучение", OutroClose = "Закрыть", WaitFinish = "Завершить",
@@ -197,7 +203,13 @@ internal sealed class Loc
         Other = "Something else — I'll describe it", OtherTitle = "Describe what isn't working", Send = "Send",
         OtherHint = "Enter — send · Shift+Enter — new line · Esc — cancel",
         Sketch = "Circle it", Sketched = "Circled: {0}", SketchTitle = "Circle the part of the screen you mean",
-        SketchText = "Draw with the mouse · Enter or right click — done · Ctrl+Z — undo stroke · Esc — cancel", SketchClear = "Clear",
+        SketchFrozen = "Screen paused", SketchPen = "Pencil", SketchCircle = "Circle", SketchRect = "Frame",
+        SketchUndo = "Undo shape", SketchCancel = "Cancel", SketchCancelTip = "Don't send a picture",
+        SketchDoneTip = "Done: the picture goes with the question", SketchMove = "Drag the toolbar",
+        ChatHello = "What isn't working on this step? Write, or mark it on the screen.", ChatAgent = "Assistant",
+        ChatHint = "Enter — send · Esc — back to the step", ChatAsk = "Describe what isn't working…", ChatReply = "Ask more…",
+        ChatRow = "About this step", ChatLooking = "The assistant is looking…", ChatSketchOnly = "Marked on the picture",
+        ChatShapes = "shapes on the picture: {0}", ChatBack = "Step {0}", ChatRemoveSketch = "Remove the picture",
         OutroHead = "DONE", OutroTitle = "Tutorial complete!", OutroText = "You finished \"{0}\" — {1} steps. What next?",
         OutroSave = "Save tutorial", OutroRepeat = "Go through again", OutroContinue = "Keep learning", OutroClose = "Close", WaitFinish = "Finish",
         OutroSavedTitle = "Saved", OutroSavedText = "It is in your library: replay it any time from the tray icon menu (Tutorials).",

@@ -710,6 +710,7 @@ internal sealed class Step
     public readonly Stack<(Mark mark, bool prevDismissed)> History = new();
     public readonly List<JsonObject> Misses = new();   // recent misses, for help requests
     public string? Hint, HintTitle;                    // agent's answer shown on the card
+    public readonly List<ChatLine> Chat = new();       // the conversation about this step ("Something else" and the answers)
     public bool HelpPending;
     public bool Checking;                              // target_not_found sent: the agent is looking for the right item
     public List<PointF[]>? Sketch;                     // what the user circled with the help request (until the answer)
@@ -790,6 +791,15 @@ internal sealed class Step
     }
 
     public IEnumerable<Mark> Required => Targets.Where(t => !t.Optional && (t.HasHitArea || t.Check != null || t.HasButtons));
+}
+
+/// <summary>
+/// One message of a step's conversation: the user's question (with the picture they marked, if any), the agent's
+/// answer, or a note from the card itself (the agent is away).
+/// </summary>
+internal sealed record ChatLine(string Who, string Text, string? Title = null, string? Image = null, int Shapes = 0)
+{
+    public bool FromUser => Who == "user";
 }
 
 /// <summary>running: on a step · waiting: after the last step for append_steps · finished · stopped.</summary>

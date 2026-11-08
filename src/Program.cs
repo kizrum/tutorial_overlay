@@ -146,7 +146,7 @@ internal static class Program
                          "If a tool answers 'busy', another agent is using it: call wait_for_turn.",
         });
         // started by hand (no one reads stdout): tell the person
-        if (!Console.IsOutputRedirected && !Background)
+        if (!Piped && !Background)
             MessageBox.Show(string.Format(Settings.Global.Text.AlreadyRunning, port?.ToString() ?? "?", pid?.ToString() ?? "?"),
                             "TutorialOverlay", MessageBoxButtons.OK, MessageBoxIcon.Information);
         return 2;
@@ -167,9 +167,25 @@ internal static class Program
         });
     }
 
+    /// <summary>Stdout goes to a pipe or a file (an MCP client, a script): someone reads the event lines.</summary>
+    internal static bool Piped;
+
+    /// <summary>
+    /// The exe is a window app, so it has no console. Started from a terminal (nothing piped), it writes into that
+    /// terminal: --version, --help, the log. Started from a shortcut there is none, and nothing is shown.
+    /// </summary>
+    private static void UseParentConsole()
+    {
+        var h = Native.GetStdHandle(-11);
+        uint type = h == IntPtr.Zero || h == new IntPtr(-1) ? 0 : Native.GetFileType(h);
+        Piped = type is 1 or 3;                         // FILE_TYPE_DISK, FILE_TYPE_PIPE
+        if (!Piped) Native.AttachConsole(-1);           // ATTACH_PARENT_PROCESS; fails quietly without one
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
+        UseParentConsole();
         // the tray guard (started by the server itself): no windows, no settings, no server — see Instances.Guard
         if (args.Length == 2 && int.TryParse(args[1], out int guarded))
         {

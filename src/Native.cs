@@ -70,6 +70,9 @@ internal static class Native
     [DllImport("user32.dll")] public static extern int GetMessage(out MSG msg, IntPtr hwnd, uint min, uint max);
     [DllImport("user32.dll")] public static extern bool PostThreadMessage(uint threadId, uint msg, IntPtr w, IntPtr l);
     [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+    [DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int which);
+    [DllImport("kernel32.dll")] public static extern uint GetFileType(IntPtr h);
+    [DllImport("kernel32.dll")] public static extern bool AttachConsole(int pid);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr GetModuleHandle(string? name);
 
     [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT pt);

@@ -1,7 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <!-- a window app: no console of its own when started from a shortcut or by the plugin. Started from a terminal it
+         writes into that terminal (Program.UseParentConsole); piped (the MCP stdio bridge, a script) the pipes work as usual -->
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <!-- UseWPF only to get System.Windows.Automation (UIAutomationClient/Types) -->

@@ -105,7 +105,7 @@ internal sealed class CardWindow : NoActivateForm
         public bool Offline;       // needs the agent, which is away: dimmed, a click only says to write to it in the chat
     }
 
-    private enum Part { Head, Banner, Title, Text, WhyRow, WhyBody, Check, Marked, Note, Hint }
+    private enum Part { Head, Banner, Title, Text, WhyRow, WhyBody, Check, Marked, Note, Hint, Thread, Compose, ChatRow }
 
     private CardModel _model = new();
     private string _sig = "";
@@ -120,6 +120,24 @@ internal sealed class CardWindow : NoActivateForm
     private string? _flash;
     private long _flashUntil;
     private const int FlashMs = 4000;
+    // the step's conversation ("Something else"): the card shows it instead of the step until the user goes back
+    private bool _chatOpen;
+    private int _chatSeen;                      // messages the user has seen (more: the folded row says so)
+    private RectangleF _backRect, _composeRect, _chatRowRect;
+    private bool _hoverChat;
+    private ComposeBox? _compose;               // the line the user types into, laid exactly over _composeRect
+    private string _draft = "";                 // what was typed and not sent (kept when the user clicks away)
+    private Sketch? _draftSketch;               // and what was marked with it
+    private readonly List<Bubble> _bubbles = new();
+    private readonly Dictionary<string, Bitmap?> _thumbs = new();
+
+    private sealed class Bubble
+    {
+        public ChatLine? Line;
+        public bool Typing;
+        public RectangleF R;                    // relative to the thread's top left
+        public float LabelH, TitleH, TextH, ImgH;
+    }
     private Point? _dragFrom;
     private Point _dragOrigin;
     private bool _pinned;
@@ -145,16 +163,22 @@ internal sealed class CardWindow : NoActivateForm
         if (!m.Visible)
         {
             Engine.CardRect = null;
+            CloseCompose();
             if (Visible) Hide();
             SetHotkeys(false);
             return;
         }
         SetHotkeys(true);
+        // a conversation belongs to its step: a new step (or lesson, or the end card) starts without one open
+        if (_chatOpen && (m.Index != _model.Index || !ReferenceEquals(m.Lesson, _lesson) || m.State is "waiting" or "outro")) CloseChat(true);
+        if (_chatOpen) _chatSeen = m.Chat.Count;
         if (!ReferenceEquals(m.Lesson, _lesson)) { _lesson = m.Lesson; _whyOpen = false; _whyFrac = 0; }
         if (_helpOpen && _helpStepVersion != m.StepVersion && m.Index != _model.Index) _helpOpen = false;
         StepWhy();
         float s = Native.ScaleAt(m.Focus == default ? new PointF(Location.X, Location.Y) : m.Focus);
-        var sig = Signature(m, s) + (_helpOpen ? "|help" : "") + "|why" + _whyOpen + ":" + _whyFrac.ToString("0.000");
+        var sig = Signature(m, s) + (_helpOpen ? "|help" : "") + "|why" + _whyOpen + ":" + _whyFrac.ToString("0.000")
+            + "|chat" + _chatOpen + ":" + m.Chat.Count + ":" + (m.Chat.Count > 0 ? m.Chat[^1].Text : "") + ":" + _chatSeen
+            + ":" + _draft + ":" + (_draftSketch?.Strokes.Count ?? 0);
         _model = m;
         if (sig != _sig || Math.Abs(s - _s) > 0.01f)
         {
@@ -171,6 +195,7 @@ internal sealed class CardWindow : NoActivateForm
         else MoveTo(Anchored(Bounds, _size, work));
         ShowQuiet();
         Engine.CardRect = Bounds;
+        _compose?.Follow(ComposeScreenRect());
     }
 
     private static string Signature(CardModel m, float s) =>
@@ -239,6 +264,7 @@ internal sealed class CardWindow : NoActivateForm
         float s = _s, y = Pad, x = Pad, w = ContentWidth;
         _parts.Clear();
         _whyRect = RectangleF.Empty;
+        _backRect = _composeRect = _chatRowRect = RectangleF.Empty;
         void Block(Part p, float h, float before, int index = 0)
         {
             y += before;
@@ -247,6 +273,16 @@ internal sealed class CardWindow : NoActivateForm
         }
 
         Block(Part.Head, 28 * s, 0);
+        if (_chatOpen)
+        {
+            // the conversation, the line to type into, the keys
+            Block(Part.Thread, LayoutThread(w), 10 * s);
+            Block(Part.Compose, 42 * s, 12 * s);
+            _composeRect = _parts[^1].r;
+            _buttons.Clear();
+            Block(Part.Hint, HintFont.Height, 10 * s);
+            return new Size((int)Math.Ceiling(ContentWidth + Pad * 2), (int)Math.Ceiling(y + Pad * 0.7f));
+        }
         var note = Note(m);
         if (note is { top: true } banner) Block(Part.Banner, NoteHeight(banner), 10 * s);
         bool help = _helpOpen && m.State is not ("waiting" or "outro");
@@ -261,6 +297,12 @@ internal sealed class CardWindow : NoActivateForm
                 _whyFull = Theme.Measure(m.Why, SmallFont, w - 16 * s).Height + 8 * s;
                 float open = _whyFull * WhyEase;
                 if (open >= 1) Block(Part.WhyBody, open, 0);
+            }
+            if (m.Chat.Count > 0)
+            {
+                // the conversation folded into one line, like "why"
+                Block(Part.ChatRow, 32 * s, 10 * s);
+                _chatRowRect = _parts[^1].r;
             }
             if (m.Checklist.Count > 0)
             {
@@ -425,7 +467,7 @@ internal sealed class CardWindow : NoActivateForm
         if (m.State == "waiting") return (m.HintTitle, m.Hint ?? loc.Preparing, Palette.Named["blue"], false);
         if (m.Hint != null) return (m.HintTitle, m.Hint, Palette.Named["blue"], false);
         if (m.Checking) return (null, loc.Checking, Palette.Named["blue"], false);
-        if (m.HelpPending) return (null, m.Highlighting ? loc.Highlighting + " " + loc.HelpSent : loc.HelpSent, Palette.Named["blue"], false);
+        if (m.HelpPending && m.Chat.Count == 0) return (null, m.Highlighting ? loc.Highlighting + " " + loc.HelpSent : loc.HelpSent, Palette.Named["blue"], false);
         if (m.Issue != null) return (null, m.Issue, Palette.Warn, true);
         if (m.Review) return (null, loc.Review, Palette.Named["blue"], false);
         return null;
@@ -472,6 +514,9 @@ internal sealed class CardWindow : NoActivateForm
                     using (var b = new SolidBrush(Palette.TextDim)) g.DrawString(string.Format(Settings.Current.Text.Marked, m.Done, m.Required), Theme.Font(13 * _s), b, r.X, r.Y + 2 * _s);
                     break;
                 case Part.Hint: DrawHint(g, r); break;
+                case Part.Thread: DrawThread(g, r); break;
+                case Part.Compose: DrawCompose(g, r); break;
+                case Part.ChatRow: DrawChatRow(g, r); break;
             }
         }
         foreach (var bt in _buttons) DrawButton(g, bt);
@@ -484,8 +529,8 @@ internal sealed class CardWindow : NoActivateForm
         var loc = Settings.Current.Text;
         float s = _s, cy = r.Y + r.Height / 2;
         bool waiting = m.State == "waiting", outro = m.State == "outro";
-        string a = waiting ? loc.HeadWaiting : outro ? loc.HeadOutro : string.Format(loc.HeadStep, m.Prep ? 0 : m.Index + 1);
-        string b = waiting || outro || m.Total == 0 ? "" : string.Format(loc.HeadOf, m.Total);
+        string a = _chatOpen ? "" : waiting ? loc.HeadWaiting : outro ? loc.HeadOutro : string.Format(loc.HeadStep, m.Prep ? 0 : m.Index + 1);
+        string b = _chatOpen || waiting || outro || m.Total == 0 ? "" : string.Format(loc.HeadOf, m.Total);
         var fa = HeadFont(true);
         var fb = HeadFont(false);
         float aw = Theme.Measure(a, fa, 300 * s).Width;
@@ -497,7 +542,7 @@ internal sealed class CardWindow : NoActivateForm
             g.DrawString(b, fb, br, tx + 3 * s, cy - fb.Height / 2f);
             tx += 3 * s + Theme.Measure(b, fb, 300 * s).Width;
         }
-        if (m.Completed)
+        if (m.Completed && !_chatOpen)
         {
             var c = new PointF(tx + 15 * s, cy);
             using (var br = new SolidBrush(Palette.Success)) g.FillEllipse(br, c.X - 8 * s, c.Y - 8 * s, 16 * s, 16 * s);
@@ -522,6 +567,8 @@ internal sealed class CardWindow : NoActivateForm
             Theme.IconAgent(g, new PointF(_agentRect.X + 12 * s, cy + 1 * s), 16 * s, color, 1.6f * s, !on);
             edge = _agentRect.X;
         }
+
+        if (_chatOpen) { DrawBack(g, r, edge); return; }
 
         // the mini progress strip
         if (m.Total <= 0) return;
@@ -659,7 +706,7 @@ internal sealed class CardWindow : NoActivateForm
             var key = hb.Id == "help" ? "help" : hb.Action ?? "";
             line = Settings.Current.Hotkeys.TryGetValue(key, out var ch) ? $"{hb.Text} · {ch}" : hb.Text;
         }
-        else line = Settings.Current.HintLine(_model.State is "waiting" or "outro");
+        else line = _chatOpen ? loc.ChatHint : Settings.Current.HintLine(_model.State is "waiting" or "outro");
         if (line.Length == 0) return;
         if (dot)
         {
@@ -747,10 +794,11 @@ internal sealed class CardWindow : NoActivateForm
         }
         var hover = _buttons.FirstOrDefault(b => b.Rect.Contains(e.Location));
         bool hc = _closeRect.Contains(e.Location), hw = _whyRect.Contains(e.Location), ha = _agentRect.Contains(e.Location);
-        if (hover != _hover || hc != _hoverClose || hw != _hoverWhy || ha != _hoverAgent)
+        bool hx = _backRect.Contains(e.Location) || _chatRowRect.Contains(e.Location) || (_composeRect.Contains(e.Location) && _model.Agent != "off");
+        if (hover != _hover || hc != _hoverClose || hw != _hoverWhy || ha != _hoverAgent || hx != _hoverChat)
         {
-            _hover = hover; _hoverClose = hc; _hoverWhy = hw; _hoverAgent = ha;
-            Cursor = hover is { Enabled: true, Offline: false } || hc || hw ? Cursors.Hand : Cursors.Default;
+            _hover = hover; _hoverClose = hc; _hoverWhy = hw; _hoverAgent = ha; _hoverChat = hx;
+            Cursor = hover is { Enabled: true, Offline: false } || hc || hw || hx ? Cursors.Hand : Cursors.Default;
             Invalidate();
         }
     }
@@ -766,7 +814,8 @@ internal sealed class CardWindow : NoActivateForm
         base.OnMouseDown(e);
         if (e.Button != MouseButtons.Left) return;
         _pressed = _buttons.FirstOrDefault(b => b.Rect.Contains(e.Location) && b.Enabled);
-        if (_pressed == null && !_closeRect.Contains(e.Location) && !_whyRect.Contains(e.Location))
+        if (_pressed == null && !_closeRect.Contains(e.Location) && !_whyRect.Contains(e.Location)
+            && !_backRect.Contains(e.Location) && !_chatRowRect.Contains(e.Location) && !_composeRect.Contains(e.Location))
         {
             _dragFrom = Cursor.Position;
             _dragOrigin = Location;
@@ -780,6 +829,16 @@ internal sealed class CardWindow : NoActivateForm
         _dragFrom = null;
         if (e.Button != MouseButtons.Left || dragged) return;
         if (_closeRect.Contains(e.Location)) { Engine.UserAction("stop", "card"); return; }
+        if (_backRect.Contains(e.Location)) { BackToStep(); return; }
+        if (_chatRowRect.Contains(e.Location)) { OpenChat(false); return; }
+        if (_composeRect.Contains(e.Location))
+        {
+            // the pencil drawn in the line goes straight to marking the screen
+            bool pencil = e.X >= _composeRect.Right - 6 * _s - 28 * _s - 4 * _s - 28 * _s && e.X < _composeRect.Right - 6 * _s - 28 * _s;
+            if (_model.Agent == "off") Flash(Settings.Current.Text.AgentOff);
+            else OpenCompose(pencil);
+            return;
+        }
         if (_whyRect.Contains(e.Location))
         {
             _whyOpen = !_whyOpen;
@@ -794,30 +853,338 @@ internal sealed class CardWindow : NoActivateForm
         {
             // nobody would answer: say where the answer comes from instead of sending the press into the void
             var loc = Settings.Current.Text;
-            _flash = b.Id == "outro_continue" ? loc.AgentOffContinue : loc.AgentOff;
-            _flashUntil = Environment.TickCount64 + FlashMs;
-            Invalidate();
+            Flash(b.Id == "outro_continue" ? loc.AgentOffContinue : loc.AgentOff);
             return;
         }
         if (b.Custom) Engine.ButtonPressed("card", b.Id, b.Action, "card");
         else if (b.Action == "help_open") { _helpOpen = true; _helpStepVersion = _model.StepVersion; Relayout(); }
         else if (b.Action == "help_cancel") { _helpOpen = false; Relayout(); }
-        else if (b.Action == "help_other")
-        {
-            _helpOpen = false;
-            Relayout();
-            // the circled area is described via UI Automation — keep that off the UI thread
-            HelpInput.Ask(this, _s, (text, sketch) =>
-            {
-                if (sketch == null) Engine.RequestHelp("other", "card", text);
-                else System.Threading.Tasks.Task.Run(() => Engine.RequestHelp("other", "card", text, sketch));
-            });
-        }
+        else if (b.Action == "help_other") OpenChat(true);
         else
         {
             if (b.Action is "cant_find" or "dont_understand") _helpOpen = false;
             Engine.UserAction(b.Action!, "card");
         }
+    }
+
+    // ------------------------------------------------------------------ the step's conversation
+
+    private void Flash(string text)
+    {
+        _flash = text;
+        _flashUntil = Environment.TickCount64 + FlashMs;
+        Invalidate();
+    }
+
+    /// <summary>Shows the conversation instead of the step; with <paramref name="compose"/>, the line to type in too.</summary>
+    private void OpenChat(bool compose)
+    {
+        _helpOpen = false;
+        _chatOpen = true;
+        _chatSeen = _model.Chat.Count;
+        Relayout();
+        if (compose && _model.Agent != "off") OpenCompose();
+    }
+
+    /// <summary>Back to the step: the conversation folds into its row; what was typed stays for later.</summary>
+    private void BackToStep()
+    {
+        _chatOpen = false;
+        CloseCompose();
+        Relayout();
+    }
+
+    private void CloseChat(bool discard)
+    {
+        _chatOpen = false;
+        CloseCompose();
+        if (!discard) return;
+        _draft = "";
+        _draftSketch?.Dispose();
+        _draftSketch = null;
+    }
+
+    private void CloseCompose()
+    {
+        if (_compose == null) return;
+        var c = _compose;
+        _compose = null;
+        c.Dismiss();
+    }
+
+    private Rectangle ComposeScreenRect() => new(
+        Left + (int)Math.Round(_composeRect.X), Top + (int)Math.Round(_composeRect.Y),
+        (int)Math.Round(_composeRect.Width), (int)Math.Round(_composeRect.Height));
+
+    /// <summary>
+    /// The card never takes the keyboard (the app keeps it), so typing happens in a small window laid exactly over
+    /// the card's input line; it follows the card and hands what was typed back when the user clicks away.
+    /// </summary>
+    private void OpenCompose(bool mark = false)
+    {
+        if (_compose != null) { _compose.Grab(); if (mark) _compose.StartSketch(); return; }
+        if (!_chatOpen) { _chatOpen = true; Relayout(); }
+        if (_composeRect.IsEmpty) return;
+        var loc = Settings.Current.Text;
+        var sketch = _draftSketch;
+        _draftSketch = null;                                   // the box owns it now
+        _compose = new ComposeBox(ComposeScreenRect(), _s, _draft, sketch, _model.Chat.Count > 0 ? loc.ChatReply : loc.ChatAsk,
+            (text, sk) =>
+            {
+                _draft = "";
+                // the marked area is described via UI Automation: keep that off the UI thread
+                if (sk == null) Engine.RequestHelp("other", "card", text);
+                else System.Threading.Tasks.Task.Run(() => Engine.RequestHelp("other", "card", text, sk));
+            },
+            (box, text, sk, back) =>
+            {
+                if (_compose == box) _compose = null;
+                _draft = text;
+                _draftSketch?.Dispose();
+                _draftSketch = sk;
+                if (back) _chatOpen = false;
+                if (!IsDisposed) Relayout();
+            });
+        // owned by the card: it stays above it however often the card puts itself on top again
+        _compose.Show(this);
+        _compose.Grab();
+        if (mark) _compose.StartSketch();
+    }
+
+    private Bitmap? Thumb(string? path)
+    {
+        if (path == null) return null;
+        if (_thumbs.TryGetValue(path, out var b)) return b;
+        Bitmap? t = null;
+        try
+        {
+            using var fs = System.IO.File.OpenRead(path);
+            using var img = Image.FromStream(fs);
+            float k = Math.Min(1f, Math.Min(264f / img.Width, 160f / img.Height));
+            t = new Bitmap(img, Math.Max(1, (int)(img.Width * k)), Math.Max(1, (int)(img.Height * k)));
+        }
+        catch (Exception e) { Log.Debug("chat picture: " + e.Message); }
+        _thumbs[path] = t;
+        return t;
+    }
+
+    /// <summary>
+    /// Lays the conversation out as bubbles (the user's on the right, the agent's on the left) and keeps the newest
+    /// that fit; returns the height. An empty one starts with the card's own question.
+    /// </summary>
+    private float LayoutThread(float w)
+    {
+        var m = _model;
+        var loc = Settings.Current.Text;
+        float s = _s, maxW = w * 0.86f, padX = 11 * s, padY = 8 * s, gap = 8 * s, inner = maxW - 2 * padX;
+        var all = new List<Bubble>();
+        if (m.Chat.Count == 0) all.Add(new Bubble { Line = new ChatLine("agent", loc.ChatHello) });
+        all.AddRange(m.Chat.Select(l => new Bubble { Line = l }));
+        if (m.HelpPending && (m.Chat.Count == 0 || m.Chat[^1].Who != "agent")) all.Add(new Bubble { Typing = true });
+        var tf = Theme.Font(13.5f * s, true);
+        foreach (var b in all)
+        {
+            if (b.Typing) { b.LabelH = 18 * s; b.R = new RectangleF(0, 0, 96 * s, 2 * padY + b.LabelH + 14 * s); continue; }
+            var l = b.Line!;
+            float cw = 0;
+            if (l.Who == "agent")
+            {
+                b.LabelH = 18 * s;
+                cw = Math.Max(cw, 20 * s + Theme.Measure(loc.ChatAgent, Theme.Font(11.5f * s, true), inner).Width);
+            }
+            if (l.Title != null)
+            {
+                var sz = Theme.Measure(l.Title, tf, inner);
+                b.TitleH = sz.Height + 2 * s;
+                cw = Math.Max(cw, sz.Width);
+            }
+            if (l.Text.Length > 0)
+            {
+                var sz = Theme.Measure(l.Text, SmallFont, inner);
+                b.TextH = sz.Height;
+                cw = Math.Max(cw, sz.Width);
+            }
+            if (Thumb(l.Image) is Bitmap img)
+            {
+                float k = Math.Min(inner / img.Width, 80 * s / img.Height);
+                b.ImgH = img.Height * k + (b.TextH > 0 ? 6 * s : 0);
+                cw = Math.Max(cw, img.Width * k);
+            }
+            b.R = new RectangleF(0, 0, Math.Min(maxW, cw + 2 * padX + 2 * s), 2 * padY + b.LabelH + b.TitleH + b.TextH + b.ImgH);
+        }
+        // the newest that fit; older ones scroll away (the agent has them all)
+        float limit = 330 * s, total = 0;
+        int first = all.Count;
+        while (first > 0)
+        {
+            float h = all[first - 1].R.Height + (first < all.Count ? gap : 0);
+            if (total + h > limit && first < all.Count) break;
+            total += h;
+            first--;
+        }
+        _bubbles.Clear();
+        float y = 0;
+        for (int i = first; i < all.Count; i++)
+        {
+            var b = all[i];
+            bool right = b.Line?.FromUser == true;
+            b.R = new RectangleF(right ? w - b.R.Width : 0, y, b.R.Width, b.R.Height);
+            y += b.R.Height + gap;
+            _bubbles.Add(b);
+        }
+        return Math.Max(0, y - gap);
+    }
+
+    private void DrawThread(Graphics g, RectangleF r)
+    {
+        var loc = Settings.Current.Text;
+        float s = _s, padX = 11 * s, padY = 8 * s;
+        var blue = Palette.Named["blue"];
+        foreach (var b in _bubbles)
+        {
+            var rr = new RectangleF(r.X + b.R.X, r.Y + b.R.Y, b.R.Width, b.R.Height);
+            bool user = b.Line?.FromUser == true, note = b.Line?.Who == "note";
+            using (var path = Theme.Rounded(rr, 9 * s))
+            {
+                if (user) using (var f = new SolidBrush(Palette.InkRaised)) g.FillPath(f, path);
+                using var pen = new Pen(user || note ? Palette.Line : Palette.WithAlpha(blue, 0.55f), 1 * s);
+                if (note) pen.DashStyle = DashStyle.Dash;
+                g.DrawPath(pen, path);
+            }
+            float x = rr.X + padX, y = rr.Y + padY, iw = rr.Width - 2 * padX;
+            if (b.LabelH > 0)
+            {
+                Theme.IconAgent(g, new PointF(x + 7 * s, y + 9 * s), 13 * s, blue, 1.4f * s, false);
+                using var lb = new SolidBrush(blue);
+                g.DrawString(loc.ChatAgent, Theme.Font(11.5f * s, true), lb, x + 18 * s, y + 1 * s);
+                y += b.LabelH;
+            }
+            if (b.Typing)
+            {
+                // three dots that take turns, while the agent works on the answer
+                int phase = (int)(Environment.TickCount64 / 300 % 3);
+                for (int i = 0; i < 3; i++)
+                    using (var db = new SolidBrush(Palette.WithAlpha(blue, i == phase ? 1f : 0.35f)))
+                        g.FillEllipse(db, x + 2 * s + i * 11 * s, y + 4 * s, 6 * s, 6 * s);
+                continue;
+            }
+            var l = b.Line!;
+            if (l.Title != null)
+            {
+                using var tb = new SolidBrush(Palette.Text);
+                g.DrawString(l.Title, Theme.Font(13.5f * s, true), tb, new RectangleF(x, y, iw + 2 * s, b.TitleH + 2), Theme.Wrap);
+                y += b.TitleH;
+            }
+            if (l.Text.Length > 0)
+            {
+                using var tb = new SolidBrush(note ? Palette.TextDim : Palette.Text);
+                g.DrawString(l.Text, SmallFont, tb, new RectangleF(x, y, iw + 2 * s, b.TextH + 2), Theme.Wrap);
+                y += b.TextH;
+            }
+            if (b.ImgH > 0 && Thumb(l.Image) is Bitmap img)
+            {
+                if (b.TextH > 0) y += 6 * s;
+                float k = Math.Min(iw / img.Width, 80 * s / img.Height);
+                var ir = new RectangleF(x, y, img.Width * k, img.Height * k);
+                var state = g.Save();
+                using (var clip = Theme.Rounded(ir, 5 * s)) g.SetClip(clip);
+                g.DrawImage(img, ir);
+                g.Restore(state);
+                using var path = Theme.Rounded(ir, 5 * s);
+                using var pen = new Pen(Palette.Line, 1 * s);
+                g.DrawPath(pen, path);
+            }
+        }
+    }
+
+    /// <summary>The input line as the card draws it; while typing, the compose window covers it exactly.</summary>
+    private void DrawCompose(Graphics g, RectangleF r)
+    {
+        var m = _model;
+        var loc = Settings.Current.Text;
+        float s = _s;
+        bool off = m.Agent == "off";
+        using (var path = Theme.Rounded(r, 7 * s))
+        using (var pen = new Pen(_hoverChat && !off ? Palette.TextDim : Palette.Line, 1 * s))
+            g.DrawPath(pen, path);
+        float bx = r.Right - 6 * s - 28 * s, by = r.Y + (r.Height - 28 * s) / 2;
+        var send = new RectangleF(bx, by, 28 * s, 28 * s);
+        Theme.OutlineButton(g, send, "primary", false, !off, s);
+        DrawSendArrow(g, new PointF(send.X + 14 * s, send.Y + 14 * s), Palette.WithAlpha(Palette.Accent, off ? 0.45f : 1f), s);
+        Theme.IconPencil(g, new PointF(bx - 4 * s - 14 * s, r.Y + r.Height / 2), 16 * s, Palette.WithAlpha(Palette.TextDim, off ? 0.45f : 1f), 1.6f * s);
+        float tx = r.X + 12 * s;
+        if (_draftSketch is { Empty: false } d)
+        {
+            // what was marked and not sent yet: the pencil and the number of shapes
+            Theme.IconPencil(g, new PointF(tx + 7 * s, r.Y + r.Height / 2), 14 * s, Palette.Accent, 1.6f * s);
+            using var nb = new SolidBrush(Palette.Accent);
+            g.DrawString(d.Strokes.Count.ToString(), Theme.Font(12 * s, true), nb, tx + 16 * s, r.Y + r.Height / 2 - 8 * s);
+            tx += 34 * s;
+        }
+        string text = off ? loc.AgentOff : _draft.Length > 0 ? _draft : m.Chat.Count > 0 ? loc.ChatReply : loc.ChatAsk;
+        var color = off ? Palette.WithAlpha(Palette.TextDim, 0.7f) : _draft.Length > 0 ? Palette.Text : Palette.WithAlpha(Palette.TextDim, 0.8f);
+        using var tb = new SolidBrush(color);
+        using var fmt = new StringFormat(Theme.Center) { Alignment = StringAlignment.Near, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+        g.DrawString(text, Theme.Font(13.5f * s), tb, new RectangleF(tx, r.Y, bx - 30 * s - tx, r.Height), fmt);
+    }
+
+    internal static void DrawSendArrow(Graphics g, PointF c, Color color, float s)
+    {
+        using var pen = new Pen(color, 1.9f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+        g.DrawLine(pen, c.X, c.Y + 6 * s, c.X, c.Y - 6 * s);
+        g.DrawLines(pen, new[] { new PointF(c.X - 5 * s, c.Y - 1 * s), new PointF(c.X, c.Y - 6 * s), new PointF(c.X + 5 * s, c.Y - 1 * s) });
+    }
+
+    /// <summary>The folded conversation under the step's text: its name, the newest message, a dot for one unseen.</summary>
+    private void DrawChatRow(Graphics g, RectangleF r)
+    {
+        var m = _model;
+        var loc = Settings.Current.Text;
+        float s = _s, cy = r.Y + r.Height / 2;
+        var blue = Palette.Named["blue"];
+        using (var path = Theme.Rounded(r, 6 * s))
+        using (var pen = new Pen(_hoverChat ? Palette.TextDim : Palette.Line, 1 * s))
+            g.DrawPath(pen, path);
+        Theme.IconMessage(g, new PointF(r.X + 15 * s, cy + 1 * s), 15 * s, blue, 1.6f * s);
+        var lf = Theme.Font(13 * s, true);
+        float lw = Theme.Measure(loc.ChatRow, lf, 300 * s).Width;
+        using (var lb = new SolidBrush(blue)) g.DrawString(loc.ChatRow, lf, lb, r.X + 28 * s, cy - lf.Height / 2f);
+        bool unseen = m.Chat.Count > _chatSeen;
+        float right = r.Right - 22 * s - (unseen ? 14 * s : 0);
+        var last = m.Chat[^1];
+        string preview = m.HelpPending && last.FromUser ? loc.ChatLooking : last.Title ?? last.Text;
+        float px = r.X + 28 * s + lw + 8 * s;
+        if (right - px > 30 * s)
+        {
+            using var fmt = new StringFormat(StringFormat.GenericTypographic) { FormatFlags = StringFormatFlags.NoWrap, Trimming = StringTrimming.EllipsisCharacter, LineAlignment = StringAlignment.Center };
+            using var pb = new SolidBrush(Palette.WithAlpha(Palette.TextDim, 0.85f));
+            g.DrawString(preview.Replace('\n', ' '), SmallFont, pb, new RectangleF(px, r.Y, right - px, r.Height), fmt);
+        }
+        if (unseen) using (var db = new SolidBrush(Palette.Accent)) g.FillEllipse(db, r.Right - 32 * s, cy - 4 * s, 8 * s, 8 * s);
+        Theme.IconChevron(g, new PointF(r.Right - 11 * s, cy), 10 * s, false, _hoverChat ? Palette.Text : Palette.TextDim, 1.8f * s);
+    }
+
+    /// <summary>In the conversation the header's left side leads back to the step: "‹ Step 3 · its title".</summary>
+    private void DrawBack(Graphics g, RectangleF r, float edge)
+    {
+        var m = _model;
+        var loc = Settings.Current.Text;
+        float s = _s, cy = r.Y + r.Height / 2;
+        var c = _hoverChat && _backRect.Contains(PointToClient(Cursor.Position)) ? Palette.Text : Palette.TextDim;
+        Theme.IconChevron(g, new PointF(r.X + 5 * s, cy), 11 * s, true, c, 2 * s);
+        var step = string.Format(loc.ChatBack, m.Index + 1);
+        var fa = HeadFont(true);
+        float x = r.X + 16 * s, aw = Theme.Measure(step, fa, 300 * s).Width;
+        using (var b = new SolidBrush(Palette.Text)) g.DrawString(step, fa, b, x, cy - fa.Height / 2f);
+        float tx = x + aw + 2 * s, tw = edge - 8 * s - tx;
+        if (tw > 20 * s && m.Title.Length > 0)
+        {
+            using var fmt = new StringFormat(StringFormat.GenericTypographic) { FormatFlags = StringFormatFlags.NoWrap, Trimming = StringTrimming.EllipsisCharacter, LineAlignment = StringAlignment.Center };
+            using var b = new SolidBrush(Palette.TextDim);
+            g.DrawString("· " + m.Title, HeadFont(false), b, new RectangleF(tx, r.Y, tw, r.Height), fmt);
+            tx += Math.Min(tw, Theme.Measure("· " + m.Title, HeadFont(false), 600 * s).Width);
+        }
+        _backRect = new RectangleF(r.X, r.Y, tx - r.X, r.Height);
     }
 }
 
@@ -909,40 +1276,35 @@ internal sealed class ButtonHost
 }
 
 /// <summary>
-/// "Something else": a small focused window where the user types the problem in their own words.
-/// The card can't take keyboard input (it never activates, so the app keeps focus) — this window does,
-/// briefly, and hands focus back to whatever was in front before.
+/// The line the user types a question into, laid exactly over the card's input line. The card can't take keyboard
+/// input (it never activates, so the app keeps focus) — this window does, briefly. Enter sends and the line stays for
+/// the next question; Esc goes back to the step; clicking elsewhere closes it and the card keeps what was typed.
 /// </summary>
-internal sealed class HelpInput : Form
+internal sealed class ComposeBox : Form
 {
-    private static HelpInput? _open;
     private readonly TextBox _box;
     private readonly IntPtr _returnTo;
-    private readonly Action<string, Sketch?> _send;
     private readonly float _s;
-    private readonly Sketch _sketch = new();
-    private bool _sketching;                   // hidden while the user draws — not a "click elsewhere"
-    private bool _disposeSketch = true;        // false once the sketch was handed to the engine
-    private RectangleF _sendRect, _cancelRect, _pencilRect;
+    private Sketch _sketch;
+    private readonly Action<string, Sketch?> _send;
+    private readonly Action<ComposeBox, string, Sketch?, bool> _closed;
+    private bool _sketching, _done;
+    private RectangleF _thumbRect, _thumbX, _pencilRect, _sendRect;
     private string _hover = "";
+    private Bitmap? _thumb;
 
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr h);
 
-    public static void Ask(Form near, float scale, Action<string, Sketch?> send)
-    {
-        if (_open != null) { _open.Activate(); return; }
-        _open = new HelpInput(near, scale, send);
-        _open.FormClosed += (_, _) => _open = null;
-        _open.Show();
-        _open.Activate();
-        _open._box.Focus();
-    }
-
-    private HelpInput(Form near, float s, Action<string, Sketch?> send)
+    /// <param name="send">a question to send (the sketch, if any, now belongs to the receiver)</param>
+    /// <param name="closed">the box closed: what was typed and marked and not sent, and whether to go back to the step</param>
+    public ComposeBox(Rectangle at, float s, string draft, Sketch? sketch, string placeholder,
+        Action<string, Sketch?> send, Action<ComposeBox, string, Sketch?, bool> closed)
     {
         _s = s;
         _send = send;
+        _closed = closed;
+        _sketch = sketch ?? new Sketch();
         _returnTo = GetForegroundWindow();
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -952,53 +1314,117 @@ internal sealed class HelpInput : Form
         DoubleBuffered = true;
         BackColor = Palette.Ink;
         KeyPreview = true;
-        Text = "TutorialOverlay help";
-        int w = (int)(near.Width), h = (int)(222 * s);
-        var work = Native.WorkAreaAt(new PointF(near.Left + near.Width / 2f, near.Top));
-        int y = near.Top - h - (int)(10 * s);
-        if (y < work.Top) y = Math.Min(near.Bottom + (int)(10 * s), work.Bottom - h);
-        Bounds = new Rectangle(near.Left, y, w, h);
+        Text = "TutorialOverlay question";
+        Bounds = at;
         _box = new TextBox
         {
-            Multiline = true, BorderStyle = BorderStyle.None, BackColor = Palette.Ink, ForeColor = Palette.Text,
-            Font = Theme.Font(14.5f * s), AcceptsReturn = false, ScrollBars = ScrollBars.None,
-            Bounds = Rectangle.Round(new RectangleF(30 * s, 52 * s, w - 60 * s, 70 * s)),
+            BorderStyle = BorderStyle.None, BackColor = Palette.Ink, ForeColor = Palette.Text,
+            Font = Theme.Font(13.5f * s), PlaceholderText = placeholder, Text = draft,
         };
         Controls.Add(_box);
         _box.KeyDown += (_, e) =>
         {
-            if (e.KeyCode == System.Windows.Forms.Keys.Enter && !e.Shift) { e.SuppressKeyPress = true; Submit(); }
-            else if (e.KeyCode == System.Windows.Forms.Keys.Enter && e.Shift) { e.SuppressKeyPress = true; _box.SelectedText = Environment.NewLine; }
-            else if (e.KeyCode == System.Windows.Forms.Keys.Escape) { e.SuppressKeyPress = true; CloseAndReturn(); }
+            if (e.KeyCode == System.Windows.Forms.Keys.Enter) { e.SuppressKeyPress = true; Submit(); }
+            else if (e.KeyCode == System.Windows.Forms.Keys.Escape) { e.SuppressKeyPress = true; Finish(true); }
         };
+        Relayout();
+        _box.SelectionStart = _box.TextLength;
+    }
+
+    /// <summary>The card moved or grew: stay over its input line.</summary>
+    public void Follow(Rectangle r)
+    {
+        if (_done) return;
+        Native.SetWindowPos(Handle, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
+        if (Bounds == r) return;
+        Bounds = r;
+        Relayout();
+        Invalidate();
+    }
+
+    /// <summary>Takes the keyboard (the card was clicked, so this process may).</summary>
+    public void Grab()
+    {
+        if (_sketching || _done) return;
+        Activate();
+        SetForegroundWindow(Handle);
+        _box.Focus();
+    }
+
+    /// <summary>Closed by the card (its step changed, it hid): what was typed goes back to it.</summary>
+    public void Dismiss() => Finish(false, false);
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        _box.Focus();
+    }
+
+    private void Relayout()
+    {
+        float s = _s, w = ClientSize.Width, h = ClientSize.Height, b = 28 * s;
+        _sendRect = new RectangleF(w - 6 * s - b, (h - b) / 2, b, b);
+        _pencilRect = new RectangleF(_sendRect.X - 4 * s - b, (h - b) / 2, b, b);
+        float x = 12 * s;
+        _thumb?.Dispose();
+        _thumb = null;
+        _thumbRect = _thumbX = RectangleF.Empty;
+        if (!_sketch.Empty)
+        {
+            // what was marked, as a small picture with a cross to drop it (a click on it draws again)
+            _thumbRect = new RectangleF(6 * s, 5 * s, 50 * s, h - 10 * s);
+            _thumbX = new RectangleF(_thumbRect.Right - 13 * s, _thumbRect.Y - 1 * s, 14 * s, 14 * s);
+            _thumb = _sketch.Render();
+            x = _thumbRect.Right + 8 * s;
+        }
+        int th = _box.PreferredHeight;
+        _box.Bounds = Rectangle.Round(new RectangleF(x, (h - th) / 2f, Math.Max(10, _pencilRect.X - 6 * s - x), th));
     }
 
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        int round = 2;
+        int round = 3;      // small rounding, like the card's input line under it
         Native.DwmSetWindowAttribute(Handle, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref round, 4);
     }
 
     protected override void OnDeactivate(EventArgs e)
     {
         base.OnDeactivate(e);
-        // clicking elsewhere = cancel; never leave a stray input window behind
-        if (Visible && !_sketching) BeginInvoke(new Action(() => { if (!IsDisposed) Close(); }));
+        // clicking elsewhere: the box goes, the card keeps the draft
+        if (Visible && !_sketching && !_done) BeginInvoke(new Action(() => Finish(false, false)));
     }
 
     private void Submit()
     {
         var text = _box.Text.Trim();
-        if (text.Length == 0) { _box.Focus(); return; }
-        if (_sketch.Empty) { _sketch.Dispose(); _send(text, null); }
-        else _send(text, _sketch);           // the receiver owns the sketch now
-        CloseAndReturn(false);
+        if (text.Length == 0 && _sketch.Empty) { _box.Focus(); return; }
+        if (text.Length == 0) text = Settings.Current.Text.ChatSketchOnly;
+        var sk = _sketch.Empty ? null : _sketch;
+        if (sk == null) _sketch.Dispose();
+        _sketch = new Sketch();
+        _box.Text = "";
+        Relayout();
+        Invalidate();
+        _send(text, sk);
     }
 
-    /// <summary>Pencil: hide, let the user circle the area on a frozen screen, come back with the text intact.</summary>
-    private void StartSketch()
+    private void Finish(bool back, bool returnFocus = true)
     {
+        if (_done) return;
+        _done = true;
+        var keep = _sketch.Empty ? null : _sketch;
+        if (keep == null) _sketch.Dispose();
+        var r = _returnTo;
+        _closed(this, _box.Text, keep, back);
+        Close();
+        if (back && returnFocus && r != IntPtr.Zero) SetForegroundWindow(r);
+    }
+
+    /// <summary>Pencil: hide, let the user mark the area on a frozen screen, come back with the text intact.</summary>
+    public void StartSketch()
+    {
+        if (_sketching || _done) return;
         _sketching = true;
         Hide();
         // give DWM a moment to drop this window before the screen is frozen
@@ -1014,79 +1440,66 @@ internal sealed class HelpInput : Form
                 Activate();
                 _box.Focus();
                 _sketching = false;
+                Relayout();
                 Invalidate();
             });
         };
         t.Start();
     }
 
-    protected override void OnFormClosed(FormClosedEventArgs e)
-    {
-        base.OnFormClosed(e);
-        if (_disposeSketch) _sketch.Dispose();
-    }
-
-    private void CloseAndReturn(bool dropSketch = true)
-    {
-        _disposeSketch = dropSketch;
-        var back = _returnTo;
-        Close();
-        if (back != IntPtr.Zero) SetForegroundWindow(back);
-    }
-
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        var g = e.Graphics;
-        Theme.Quality(g);
-        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-        float s = _s, w = ClientSize.Width, h = ClientSize.Height;
-        var loc = Settings.Current.Text;
-        g.Clear(Palette.Ink);
-        using (var pen = new Pen(Palette.Line, 1)) g.DrawRectangle(pen, 0, 0, w - 1, h - 1);
-        using (var tb = new SolidBrush(Palette.Text)) g.DrawString(loc.OtherTitle, Theme.Font(16 * s, true), tb, 18 * s, 16 * s);
-        var field = new RectangleF(18 * s, 44 * s, w - 36 * s, 86 * s);
-        using (var path = Theme.Rounded(field, 6 * s))
-        using (var pen = new Pen(_box.Focused ? Palette.Accent : Palette.Line, 1.2f * s))
-            g.DrawPath(pen, path);
-        using (var hb = new SolidBrush(Palette.WithAlpha(Palette.TextDim, 0.8f)))
-            g.DrawString(loc.OtherHint, Theme.Font(11 * s), hb, new RectangleF(18 * s, field.Bottom + 6 * s, w - 36 * s, 18 * s), new StringFormat(Theme.Center) { Alignment = StringAlignment.Near, FormatFlags = 0 });
-        float bh = 34 * s, by = h - bh - 14 * s;
-        _sendRect = new RectangleF(w - 18 * s - 120 * s, by, 120 * s, bh);
-        _cancelRect = new RectangleF(_sendRect.X - 10 * s - 96 * s, by, 96 * s, bh);
-        _pencilRect = new RectangleF(18 * s, by, _cancelRect.X - 10 * s - 18 * s, bh);
-        DrawPill(g, _cancelRect, loc.Cancel, false, _hover == "cancel");
-        DrawPill(g, _sendRect, loc.Send, true, _hover == "send");
-        DrawPencil(g, _pencilRect, _sketch.Empty ? loc.Sketch : string.Format(loc.Sketched, _sketch.Strokes.Count), !_sketch.Empty, _hover == "pencil");
-    }
-
-    private void DrawPencil(Graphics g, RectangleF r, string text, bool on, bool hover)
-    {
-        var fg = Theme.OutlineButton(g, r, on ? "active" : "secondary", hover, true, _s);
-        if (on) fg = Palette.Accent;
-        float ic = 16 * _s, pad = 12 * _s;
-        var font = Theme.Font(13.5f * _s, true);
-        float tw = Math.Min(Theme.Measure(text, font, r.Width).Width, r.Width - pad * 2 - ic - 6 * _s);
-        float x = r.X + (r.Width - ic - 6 * _s - tw) / 2;
-        Theme.IconPencil(g, new PointF(x + ic / 2, r.Y + r.Height / 2), ic, fg, 1.8f * _s);
-        using var tb = new SolidBrush(fg);
-        g.DrawString(text, font, tb, new RectangleF(x + ic + 6 * _s, r.Y, tw + 2 * _s, r.Height), new StringFormat(Theme.Center) { Alignment = StringAlignment.Near, Trimming = StringTrimming.EllipsisCharacter });
-    }
-
-    private void DrawPill(Graphics g, RectangleF r, string text, bool primary, bool hover) =>
-        Theme.OutlineButton(g, r, text, primary ? "primary" : "ghost", hover, true, _s);
-
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        var hv = _sendRect.Contains(e.Location) ? "send" : _cancelRect.Contains(e.Location) ? "cancel" : _pencilRect.Contains(e.Location) ? "pencil" : "";
+        var hv = _thumbX.Contains(e.Location) ? "thumbx" : _thumbRect.Contains(e.Location) ? "thumb"
+            : _pencilRect.Contains(e.Location) ? "pencil" : _sendRect.Contains(e.Location) ? "send" : "";
         if (hv != _hover) { _hover = hv; Cursor = hv.Length > 0 ? Cursors.Hand : Cursors.Default; Invalidate(); }
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
-        if (_sendRect.Contains(e.Location)) Submit();
-        else if (_cancelRect.Contains(e.Location)) CloseAndReturn();
-        else if (_pencilRect.Contains(e.Location)) StartSketch();
+        if (e.Button != MouseButtons.Left) return;
+        switch (_hover)
+        {
+            case "thumbx": _sketch.Strokes.Clear(); Relayout(); Invalidate(); _box.Focus(); break;
+            case "thumb" or "pencil": StartSketch(); break;
+            case "send": Submit(); break;
+        }
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        Theme.Quality(g);
+        float s = _s, w = ClientSize.Width, h = ClientSize.Height;
+        g.Clear(Palette.Ink);
+        using (var path = Theme.Rounded(new RectangleF(0.5f, 0.5f, w - 1, h - 1), 7 * s))
+        using (var pen = new Pen(Palette.Accent, 1.2f * s))
+            g.DrawPath(pen, path);
+        if (_thumb != null)
+        {
+            var st = g.Save();
+            using (var clip = Theme.Rounded(_thumbRect, 4 * s)) g.SetClip(clip);
+            // cover the box: the middle of the picture, where the marks are
+            float k = Math.Max(_thumbRect.Width / _thumb.Width, _thumbRect.Height / _thumb.Height);
+            float iw = _thumb.Width * k, ih = _thumb.Height * k;
+            g.DrawImage(_thumb, _thumbRect.X + (_thumbRect.Width - iw) / 2, _thumbRect.Y + (_thumbRect.Height - ih) / 2, iw, ih);
+            g.Restore(st);
+            using (var path = Theme.Rounded(_thumbRect, 4 * s))
+            using (var pen = new Pen(_hover == "thumb" ? Palette.TextDim : Palette.Line, 1 * s)) g.DrawPath(pen, path);
+            using (var xb = new SolidBrush(Palette.WithAlpha(Palette.Ink, 0.9f))) g.FillEllipse(xb, _thumbX);
+            Theme.IconCross(g, new PointF(_thumbX.X + _thumbX.Width / 2, _thumbX.Y + _thumbX.Height / 2), 7 * s, _hover == "thumbx" ? Palette.Text : Palette.TextDim, 1.5f * s);
+        }
+        var pc = _hover == "pencil" ? Palette.Text : _sketch.Empty ? Palette.TextDim : Palette.Accent;
+        if (_hover == "pencil") using (var hb = new SolidBrush(Palette.InkRaised)) using (var p = Theme.Rounded(_pencilRect, 6 * s)) g.FillPath(hb, p);
+        Theme.IconPencil(g, new PointF(_pencilRect.X + _pencilRect.Width / 2, _pencilRect.Y + _pencilRect.Height / 2), 16 * s, pc, 1.6f * s);
+        Theme.OutlineButton(g, _sendRect, "primary", _hover == "send", true, s);
+        CardWindow.DrawSendArrow(g, new PointF(_sendRect.X + _sendRect.Width / 2, _sendRect.Y + _sendRect.Height / 2), Palette.Accent, s);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _thumb?.Dispose();
+        base.Dispose(disposing);
     }
 }

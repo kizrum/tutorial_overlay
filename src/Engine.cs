@@ -33,6 +33,7 @@ internal sealed class CardModel
     public object? Lesson;               // the tutorial shown: what the card remembers (an open "why") lasts for one lesson
     public string Agent = "";            // the agent that runs the lesson: "on" (follows events), "off" (does not), "" (none: a replay)
     public DateTime AgentSeen;           // UTC: the agent's last poll or call (how long it has been away)
+    public List<ChatLine> Chat = new();  // the step's conversation with the agent
 }
 
 /// <summary>
@@ -1883,6 +1884,7 @@ internal static partial class Engine
             if (s.Checklist ?? req.Count(m => m.Label != null) >= 2)
                 for (int i = 0; i < req.Count; i++) card.Checklist.Add((req[i].Label ?? string.Format(Settings.Current.Text.Target, i + 1), req[i].Satisfied));
             card.Extra = s.Buttons;
+            card.Chat = s.Chat.ToList();
             card.Hint = s.Hint;
             card.HintTitle = s.HintTitle;
             card.HelpPending = s.HelpPending;
@@ -2091,11 +2093,20 @@ internal static partial class Engine
             var s = t is { State: TutorialState.Running } ? t.Current : null;
             if (s == null) return;
             s.HelpPending = true;
-            // the card answers at once with what the overlay knows itself: the user is never left waiting on an
-            // agent that is thinking, gone, or was never there; a hint from the agent replaces it
             var agent = AgentState(t!);
-            s.Hint = LocalHint(s, agent);
-            s.HintTitle = Settings.Current.Text.HelpTitle;
+            if (reason == "other")
+            {
+                // the user's own words start (or go on with) the step's conversation; the answer comes into it
+                s.Chat.Add(new ChatLine("user", text ?? "", Image: J.Str(drawn, "image"), Shapes: J.Arr(drawn, "strokes")?.Count ?? 0));
+                if (agent != "listening") s.Chat.Add(new ChatLine("note", Settings.Current.Text.HelpAgentIdle));
+            }
+            else
+            {
+                // the card answers at once with what the overlay knows itself: the user is never left waiting on an
+                // agent that is thinking, gone, or was never there; a hint from the agent replaces it
+                s.Hint = LocalHint(s, agent);
+                s.HintTitle = Settings.Current.Text.HelpTitle;
+            }
             s.HighlightUntil = DateTime.UtcNow.AddSeconds(6); s.NextPing = default;
             s.Sketch = sketch is { Empty: false } ? sketch.Strokes.ToList() : null;
             s.SketchAt = DateTime.UtcNow;
@@ -2184,8 +2195,17 @@ internal static partial class Engine
             var t = RequireOwned();
             if (J.Int(args, "expectIndex") is int e && e != t.Index) throw new InvalidOperationException($"current step is {t.Index}, not {e}");
             var s = t.Current ?? throw new InvalidOperationException("no current step");
-            s.Hint = J.Str(args, "text");
-            s.HintTitle = J.Str(args, "title");
+            if (s.Chat.Count > 0)
+            {
+                // the step has a conversation: the answer goes into it (the card's own hint, if any, is done with)
+                s.Chat.Add(new ChatLine("agent", J.Str(args, "text") ?? "", J.Str(args, "title")));
+                s.Hint = s.HintTitle = null;
+            }
+            else
+            {
+                s.Hint = J.Str(args, "text");
+                s.HintTitle = J.Str(args, "title");
+            }
             s.HelpPending = false;
             s.Sketch = null;
             if (J.Bool(args, "highlight") == true) { s.HighlightUntil = DateTime.UtcNow.AddSeconds(J.Int(args, "seconds") ?? 6); s.NextPing = default; }

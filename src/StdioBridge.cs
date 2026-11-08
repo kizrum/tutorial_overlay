@@ -126,6 +126,10 @@ internal static class StdioBridge
     /// <summary>--launch: start the server on its own, then leave.</summary>
     public static int Launch()
     {
+        // an exe unpacked from a downloaded zip (winget) carries the internet mark: started through the shell, Windows
+        // asks "publisher could not be verified" every time, and each MCP request that finds no server asks again.
+        // This process already runs from that file, so the mark guards nothing: drop it.
+        try { File.Delete(Environment.ProcessPath! + ":Zone.Identifier"); } catch { }
         try
         {
             Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--background")

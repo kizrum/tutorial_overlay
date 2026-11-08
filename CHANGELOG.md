@@ -6,6 +6,22 @@ only fixes things.
 
 ## [Unreleased]
 
+- No console window: the exe is a window app now. Started from a shortcut or by the plugin it shows only the
+  tray icon; started from a terminal it still writes into that terminal (`--version`, `--help`, the log), and the
+  event lines still go to stdout when it is piped.
+
+- Fixed: with no server running, the plugin's `--stdio` bridge started the winget-installed exe through the shell,
+  and Windows asked "The publisher could not be verified" every time (the zip's internet mark), once per waiting
+  session and again on every request. The launcher drops that mark from its own exe before starting the server.
+
+- "Something else" is a conversation inside the step card instead of a separate window: the user's questions and the
+  agent's `hint` answers as messages, three dots while the agent is looking, ask again in the same line. "‹ Step N"
+  in the header (or Esc) goes back to the step, and the conversation folds into a row under its text with a dot for
+  an unseen answer. A draft survives clicking away; the conversation belongs to its step.
+- Marking the screen has a toolbar by the card: pencil, circle and frame (1/2/3, Shift for round/square), undo
+  shape, Cancel (no picture) and Done with the shape count. Several shapes per picture, each numbered on screen and
+  in the picture sent to the agent.
+
 - The step card shows whether the assistant is there: its icon next to the close cross is green while the agent
   follows the lesson and grey, struck through, once its turn is over. What only the agent can do is dimmed then:
   "Something else" in Help and "Keep learning" on the end card; pressing them says, in the bottom line, to write to
