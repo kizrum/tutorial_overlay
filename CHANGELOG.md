@@ -6,6 +6,12 @@ only fixes things.
 
 ## [Unreleased]
 
+- The mascot has a new look: a light rim and a soft top light so it stands out on dark apps, lids when it
+  blinks, mitten hands and capsule feet, and a thin dark outline on its limbs so they read on light apps too.
+- The mascot never puts a hand, foot or sparkle on the card: spots are checked against everything it draws, the
+  pointing arm to the fingertip included. When the card is dragged or grows onto it, it fades at once and comes
+  back where it is clear once the card rests; with no such spot it stays away.
+
 - No console window: the exe is a window app now. Started from a shortcut or by the plugin it shows only the
   tray icon; started from a terminal it still writes into that terminal (`--version`, `--help`, the log), and the
   event lines still go to stdout when it is piped.

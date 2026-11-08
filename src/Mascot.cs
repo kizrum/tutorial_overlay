@@ -37,7 +37,8 @@ internal sealed class MascotWindow : Form
     // ---- design palette
     private static readonly Color Body = Color.FromArgb(255, 27, 30, 39), Edge = Color.FromArgb(255, 58, 62, 76),
         Limb = Color.FromArgb(255, 201, 206, 219), White = Color.FromArgb(255, 240, 242, 247), Pupil = Color.FromArgb(255, 18, 20, 26),
-        Track = Color.FromArgb(255, 42, 46, 58);
+        Track = Color.FromArgb(255, 42, 46, 58), Rim = Color.FromArgb(255, 138, 144, 163);
+    private const float ArmLength = 56, FingerTip = 19;   // the pointing arm, design units from the shoulder
 
     private const float Unit = 0.44f;            // design unit → px at 100 %: the body (136 u) is ~60 px
     private const float WalkSpeed = 240;         // px/s at 100 %: slow enough to see the steps, a short hop still takes 0.4 s
@@ -75,6 +76,11 @@ internal sealed class MascotWindow : Form
     private string _stepKey = "";
     private float _bubble;                       // 0..1 fade
     private bool _visible;
+    // The card is never under its hands or feet: when the card moves onto it (dragged, grown), it fades out at once
+    // and comes back at a free spot once the card has rested
+    private bool _tucked;
+    private Rectangle _lastCard, _triedCard;
+    private DateTime _cardChangedAt;
     private float _raisedAt;
     private MascotInput? _lastInput;
 
@@ -131,7 +137,11 @@ internal sealed class MascotWindow : Form
         }
         if (_mood != Mood.Normal && (_moodLeft -= dt) <= 0) _mood = Mood.Normal;
 
-        _alpha = Approach(_alpha, inp != null ? 1 : 0, dt * 6);
+        var card = Engine.CardRect is Rectangle crd && crd.Width > 0 ? crd : Rectangle.Empty;
+        if (card != _lastCard) { _lastCard = card; _cardChangedAt = now; }
+        if (inp != null && _placed && !_tucked && (TouchesCard(_pos, inp.Target, inp.Scale) || (_move is Motion.Walk or Motion.Vanish && TouchesCard(_to, inp.Target, inp.Scale))))
+            Tuck();
+        _alpha = Approach(_alpha, inp != null && !_tucked ? 1 : 0, dt * (_tucked ? 14 : 6));
         if (inp == null)
         {
             if (_alpha <= 0.01f) { Hide(); _placed = false; _spotKey = ""; }
@@ -162,18 +172,55 @@ internal sealed class MascotWindow : Form
 
     // =========================================================== moving
 
+    private void Tuck()
+    {
+        _tucked = true;
+        _move = Motion.None;
+        _walkPhase = 0;
+        _triedCard = Rectangle.Empty;
+    }
+
+    /// <summary>
+    /// Out of the card's way: once the card has rested and the figure has faded, appear at a spot where nothing of
+    /// it touches the card. No such spot: stay away until the card changes.
+    /// </summary>
+    private void Untuck(MascotInput inp)
+    {
+        if (_alpha > 0.05f || (DateTime.UtcNow - _cardChangedAt).TotalSeconds < 0.35 || (_lastCard == _triedCard && !_lastCard.IsEmpty)) return;
+        _triedCard = _lastCard;
+        float s = inp.Scale;
+        var size = FigureSize(s);
+        PointF dest;
+        if (inp.Target is PointF t) dest = ChooseSpot(inp, t, size, s);
+        else
+        {
+            var c = _lastCard;
+            dest = new PointF(c.Left - size.Width * 1.4f, c.Bottom - size.Height * 0.8f);
+            if (TouchesCard(dest, null, s) || !Native.WorkAreaAt(dest).Contains(Point.Round(dest)))
+                dest = new PointF(c.Right + size.Width * 1.4f, c.Bottom - size.Height * 0.8f);
+        }
+        if (TouchesCard(dest, inp.Target, s)) return;
+        _tucked = false;
+        StartAppear(dest);
+        if (inp.Target is PointF tt) { _offset = new PointF(dest.X - tt.X, dest.Y - tt.Y); _spotTarget = tt; }
+        _spotKey = inp.StepKey;
+    }
+
     /// <summary>Decide where to be for this frame's target, and how to get there.</summary>
     private void Steer(MascotInput inp)
     {
         float s = inp.Scale;
         var size = FigureSize(s);
+        if (_tucked) { Untuck(inp); return; }
         if (inp.Target is not PointF t)
         {
             // nothing to point at: stay; the very first time, stand by the card
             if (!_placed)
             {
                 var c = Engine.CardRect is Rectangle cr && cr.Width > 0 ? cr : Screen.PrimaryScreen!.WorkingArea;
-                StartAppear(new PointF(c.Left - size.Width * 0.6f, c.Bottom - size.Height * 0.6f));
+                var at = new PointF(c.Left - size.Width * 1.4f, c.Bottom - size.Height * 0.8f);
+                StartAppear(at);
+                if (TouchesCard(at, null, s)) { Tuck(); _alpha = 0; }
                 _spotKey = inp.StepKey;
             }
             else if (_spotKey != inp.StepKey && _move == Motion.None) _spotKey = inp.StepKey;
@@ -187,6 +234,7 @@ internal sealed class MascotWindow : Form
         {
             var spot = ChooseSpot(inp, t, size, s);
             StartAppear(spot);
+            if (TouchesCard(spot, t, s)) { Tuck(); _alpha = 0; }
             _offset = new PointF(spot.X - t.X, spot.Y - t.Y);
             _spotKey = inp.StepKey;
             _spotTarget = t;
@@ -231,6 +279,7 @@ internal sealed class MascotWindow : Form
             return;
         }
         var dest = ChooseSpot(inp, t, size, s);
+        if (TouchesCard(dest, t, s)) { Tuck(); return; }   // nowhere free of the card: rather not be seen
         _acceptBad = !SpotOk(inp, dest, size, s);
         _cardAtChoice = Engine.CardRect is Rectangle crc ? crc : Rectangle.Empty;
         _offset = new PointF(dest.X - t.X, dest.Y - t.Y);
@@ -292,6 +341,35 @@ internal sealed class MascotWindow : Form
 
     private static SizeF FigureSize(float s) => new(150 * Unit * s, 140 * Unit * s);
 
+    /// <summary>
+    /// Everything the figure may draw when centred at <paramref name="c"/>: hands out and up, feet and shadow, the
+    /// sparkles and thinking dots over its head, and the pointing arm to the fingertip (it faces the target).
+    /// </summary>
+    private static RectangleF[] Reach(PointF c, PointF? target, float s)
+    {
+        float u = Unit * s;
+        bool flip = target is PointF t0 && t0.X < c.X;
+        float m = flip ? -1 : 1;
+        // design units around the centre (130,140): hands 30..230, sparkles to 256, dots up to y 9, shadow to 240
+        var all = RectangleF.FromLTRB(c.X - 126 * u, c.Y - 132 * u, c.X + 126 * u, c.Y + 102 * u);
+        if (target is not PointF t) return new[] { all };
+        var sh = new PointF(c.X + m * 66 * u, c.Y - 6 * u);
+        float dx = t.X - sh.X, dy = t.Y - sh.Y, len = MathF.Max(1, MathF.Sqrt(dx * dx + dy * dy));
+        float reach = (ArmLength + FingerTip + 6) * u;
+        var tip = new PointF(sh.X + dx / len * reach, sh.Y + dy / len * reach);
+        var arm = RectangleF.FromLTRB(Math.Min(sh.X, tip.X), Math.Min(sh.Y, tip.Y), Math.Max(sh.X, tip.X), Math.Max(sh.Y, tip.Y));
+        return new[] { all, RectangleF.Inflate(arm, 14 * u, 14 * u) };
+    }
+
+    /// <summary>Would any part of the figure at <paramref name="c"/> touch the card (with a small gap)?</summary>
+    private static bool TouchesCard(PointF c, PointF? target, float s)
+    {
+        if (Engine.CardRect is not Rectangle cr || cr.Width <= 0) return false;
+        var card = RectangleF.Inflate(cr, 4 * s, 4 * s);
+        foreach (var r in Reach(c, target, s)) if (r.IntersectsWith(card)) return true;
+        return false;
+    }
+
     /// <summary>The figure's own box when centred at <paramref name="c"/>.</summary>
     private static RectangleF Box(PointF c, SizeF size) => new(c.X - size.Width / 2, c.Y - size.Height / 2, size.Width, size.Height);
 
@@ -316,7 +394,7 @@ internal sealed class MascotWindow : Form
         var work = Native.WorkAreaAt(c);
         if (!work.Contains(Rectangle.Round(box))) return false;
         if (inp.Target is PointF t && box.IntersectsWith(RectangleF.Inflate(TargetBox(inp, t, s), 6 * s, 6 * s))) return false;
-        if (Engine.CardRect is Rectangle cr && cr.Width > 0 && box.IntersectsWith(cr)) return false;
+        if (TouchesCard(c, inp.Target, s)) return false;
         foreach (var a in inp.Avoid)
         {
             var i = RectangleF.Intersect(a, box);
@@ -374,12 +452,8 @@ internal sealed class MascotWindow : Form
                 var x = RectangleF.Intersect(a, box);
                 if (!x.IsEmpty) score += 40 + 300 * x.Width * x.Height / (box.Width * box.Height);
             }
-            // the card is what the user reads and presses: standing on it is worse than on a few marks
-            if (!card.IsEmpty && card.IntersectsWith(box))
-            {
-                var x = RectangleF.Intersect(card, box);
-                score += 400 + 600 * x.Width * x.Height / (box.Width * box.Height);
-            }
+            // the card is what the user reads and presses: no hand, foot or sparkle on it, ever
+            if (!card.IsEmpty && TouchesCard(c, t, s)) score += 5000;
             if (SegmentHitsBox(cursor, t, RectangleF.Inflate(box, 12 * s, 12 * s))) score += 25;
             score += busy[i] * 30;
             if (_placed) score += Dist(_pos, c) / size.Width * 2;
@@ -570,7 +644,11 @@ internal sealed class MascotWindow : Form
                      new StringFormat(Theme.Wrap) { Trimming = StringTrimming.EllipsisWord });
     }
 
-    /// <summary>The figure in design units: body 62..198, arms from the shoulders (64,150) / (196,134), legs at x 108 / 152.</summary>
+    /// <summary>
+    /// The figure in design units ("Шажок+"): body 62..198 with a light rim and a soft top light, arms from the
+    /// shoulders (64,150) / (196,134) with mitten hands, capsule feet at x 108 / 152. Limbs carry a thin dark outline
+    /// so they read on light apps as well as dark ones. Everything it draws stays inside <see cref="Reach"/>.
+    /// </summary>
     private void DrawFigure(Graphics g, MascotInput inp, float k, float spin)
     {
         var state = g.Save();
@@ -583,7 +661,7 @@ internal sealed class MascotWindow : Form
         if (inp.Target is PointF tp0 && !walking) _flip = tp0.X < _pos.X;
         bool flip = walking ? _faceLeft : _flip;
 
-        float bob = walking ? -MathF.Abs(MathF.Sin(_walkPhase)) * 7 : moving ? 0 : MathF.Sin(t * MathF.PI * 2 / 2.6f) * 4;
+        float bob = walking ? -MathF.Abs(MathF.Sin(_walkPhase)) * 7 : moving ? 0 : MathF.Sin(t * MathF.PI * 2 / 2.6f) * 3;
         float rot = spin, hop = 0;
         if (!moving && (_mood == Mood.Happy || inp.Outro))
         {
@@ -604,8 +682,14 @@ internal sealed class MascotWindow : Form
 
         int A(int v) => (int)(v * _alpha);
         Color C(Color c) => Color.FromArgb(A(c.A), c);
-        using var limb = new Pen(C(Limb), 7) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        using var limb = new Pen(C(Limb), 8) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        using var under = new Pen(Color.FromArgb(A(150), Pupil), 11.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
         using var whiteB = new SolidBrush(C(White));
+        using var rimP = new Pen(Color.FromArgb(A(150), Pupil), 2.5f);
+
+        void Line(float x1, float y1, float x2, float y2) { g.DrawLine(under, x1, y1, x2, y2); g.DrawLine(limb, x1, y1, x2, y2); }
+        void Curve(PointF a, PointF b, PointF c, PointF d) { g.DrawBezier(under, a, b, c, d); g.DrawBezier(limb, a, b, c, d); }
+        void Hand(float x, float y, float r = 9.5f) { g.FillEllipse(whiteB, x - r, y - r, 2 * r, 2 * r); g.DrawEllipse(rimP, x - r, y - r, 2 * r, 2 * r); }
 
         // shadow on the ground (stays down while it hops)
         using (var sh = new SolidBrush(Color.FromArgb(A(70), 0, 0, 0))) g.FillEllipse(sh, 78, 228 - hop - bob, 104, 12);
@@ -613,21 +697,40 @@ internal sealed class MascotWindow : Form
         // legs: walking swings them in turn and lifts the foot that steps
         float swing = walking ? MathF.Sin(_walkPhase) : 0;
         float lx = 108 + swing * 9, rx = 152 - swing * 9;
-        float ly = 214 - (walking ? Math.Max(0, swing) * 8 : 0), ry = 214 - (walking ? Math.Max(0, -swing) * 8 : 0);
-        g.DrawLine(limb, 108, 198, lx, ly);
-        g.DrawLine(limb, 152, 198, rx, ry);
+        float ly = 214 - (walking ? Math.Max(0, swing) * 11 : 0), ry = 214 - (walking ? Math.Max(0, -swing) * 11 : 0);
+        Line(108, 198, lx, ly);
+        Line(152, 198, rx, ry);
         using (var lb = new SolidBrush(C(Limb)))
         {
-            g.FillEllipse(lb, lx - 15 + 4, ly - 2, 22, 10);
-            g.FillEllipse(lb, rx - 7, ry - 2, 22, 10);
+            foreach (var f in new[] { new RectangleF(lx - 13, ly - 2, 24, 11), new RectangleF(rx - 9, ry - 2, 24, 11) })
+            {
+                using var p = Theme.Rounded(f, 5.5f);
+                g.FillPath(lb, p);
+                g.DrawPath(rimP, p);
+            }
         }
-        // body
-        using (var path = Theme.Rounded(new RectangleF(62, 62, 136, 136), 28))
+        // body: a soft light from above and a light rim, so it stands out from a dark app
+        var bodyR = new RectangleF(62, 62, 136, 136);
+        using (var path = Theme.Rounded(bodyR, 34))
         {
             using (var bb = new SolidBrush(C(Body))) g.FillPath(bb, path);
-            using var ep = new Pen(C(Edge), 3);
+            // over the whole body height, fading out by its middle (a shorter brush would tile and band the body)
+            using (var lg = new LinearGradientBrush(new PointF(0, 60), new PointF(0, 200), Color.White, Color.White))
+            {
+                lg.InterpolationColors = new ColorBlend
+                {
+                    Colors = new[] { Color.FromArgb(A(16), 255, 255, 255), Color.FromArgb(0, 255, 255, 255), Color.FromArgb(0, 255, 255, 255) },
+                    Positions = new[] { 0f, 0.4f, 1f },
+                };
+                g.FillPath(lg, path);
+            }
+            using var ep = new Pen(C(Rim), 3.5f);
             g.DrawPath(ep, path);
         }
+        using (var glow = Theme.Rounded(RectangleF.Inflate(bodyR, 4.5f, 4.5f), 38.5f))
+        using (var gp = new Pen(Color.FromArgb(A(80), Palette.Accent), 1.5f))
+            g.DrawPath(gp, glow);
+
         // progress bar on the forehead
         using (var tb = new SolidBrush(C(Track))) using (var p = Theme.Rounded(new RectangleF(84, 82, 92, 9), 4.5f)) g.FillPath(tb, p);
         float prog = Math.Clamp(inp.Outro ? 1 : inp.Progress, 0.06f, 1);
@@ -661,16 +764,19 @@ internal sealed class MascotWindow : Form
         }
         else
         {
-            float sy = _blink > 0 ? 0.12f : 1;
-            g.FillEllipse(whiteB, 99, 126 - 14 * sy, 22, 28 * sy);
-            g.FillEllipse(whiteB, 139, 126 - 14 * sy, 22, 28 * sy);
-            if (sy > 0.5f)
+            // a blink is a lid coming down, not the eye squashed flat
+            float lid = _blink > 0 ? 0.9f : 0;
+            using var pb = new SolidBrush(C(Pupil));
+            using var lidP = new Pen(C(Rim), 2.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            foreach (float ex in new[] { 110f, 150f })
             {
-                using var pb = new SolidBrush(C(Pupil));
-                g.FillEllipse(pb, 104.5f + look.X, 120.5f + look.Y, 11, 11);
-                g.FillEllipse(pb, 144.5f + look.X, 120.5f + look.Y, 11, 11);
-                g.FillEllipse(whiteB, 108 + look.X, 120 + look.Y, 3.6f, 3.6f);
-                g.FillEllipse(whiteB, 148 + look.X, 120 + look.Y, 3.6f, 3.6f);
+                var st = g.Save();
+                if (lid > 0) g.SetClip(new RectangleF(ex - 20, 112 + 28 * lid, 40, 40));
+                g.FillEllipse(whiteB, ex - 11, 112, 22, 28);
+                g.FillEllipse(pb, ex - 5.5f + look.X, 120.5f + look.Y, 11, 11);
+                g.FillEllipse(whiteB, ex - 2 + look.X, 120 + look.Y, 3.6f, 3.6f);
+                g.Restore(st);
+                if (lid > 0) g.DrawLine(lidP, ex - 10, 112 + 28 * lid, ex + 10, 112 + 28 * lid);
             }
         }
         // cheeks
@@ -698,33 +804,33 @@ internal sealed class MascotWindow : Form
         // arms
         if (happy)
         {
-            g.DrawBezier(limb, 64, 130, 52, 120, 44, 106, 40, 88);
-            g.DrawBezier(limb, 196, 130, 208, 120, 216, 106, 220, 88);
-            g.FillEllipse(whiteB, 32, 76, 16, 16);
-            g.FillEllipse(whiteB, 212, 76, 16, 16);
+            Curve(new(64, 130), new(52, 120), new(44, 106), new(40, 88));
+            Curve(new(196, 130), new(208, 120), new(216, 106), new(220, 88));
+            Hand(40, 84);
+            Hand(220, 84);
             DrawSparkles(g, t, A);
         }
         else if (walking)
         {
             // arms swing against the legs
             float sw = swing * 10;
-            g.DrawBezier(limb, 64, 150, 52, 156, 46 - sw, 166, 44 - sw, 178);
-            g.FillEllipse(whiteB, 36.5f - sw, 173.5f, 15, 15);
-            g.DrawBezier(limb, 196, 150, 208, 156, 214 + sw, 166, 216 + sw, 178);
-            g.FillEllipse(whiteB, 208.5f + sw, 173.5f, 15, 15);
+            Curve(new(64, 150), new(52, 156), new(46 - sw, 166), new(44 - sw, 178));
+            Hand(44 - sw, 181);
+            Curve(new(196, 150), new(208, 156), new(214 + sw, 166), new(216 + sw, 178));
+            Hand(216 + sw, 181);
         }
         else
         {
             if (inp.Thinking && !moving)
             {
-                g.DrawBezier(limb, 64, 160, 74, 176, 98, 184, 116, 168);
-                g.FillEllipse(whiteB, 110.5f, 158.5f, 15, 15);
+                Curve(new(64, 160), new(74, 176), new(98, 184), new(116, 168));
+                Hand(118, 166);
                 DrawThinkDots(g, t, A);
             }
             else
             {
-                g.DrawBezier(limb, 64, 150, 52, 154, 44, 164, 42, 178);
-                g.FillEllipse(whiteB, 34.5f, 173.5f, 15, 15);
+                Curve(new(64, 150), new(52, 154), new(44, 164), new(42, 178));
+                Hand(42, 181);
             }
             // right arm: towards the target, tapping; relaxed with nothing to point at
             if (pointing && inp.Target is PointF tp2)
@@ -734,17 +840,19 @@ internal sealed class MascotWindow : Form
                 ang -= rot * MathF.PI / 180;
                 var dir = new PointF(MathF.Cos(ang), MathF.Sin(ang));
                 var sh = new PointF(196, 134);
-                var end = new PointF(sh.X + dir.X * 52, sh.Y + dir.Y * 52);
-                var ctrl = new PointF(sh.X + dir.X * 26 - dir.Y * 8, sh.Y + dir.Y * 26 + dir.X * 8);
-                g.DrawBezier(limb, sh, ctrl, ctrl, end);
-                g.FillEllipse(whiteB, end.X - 8.5f, end.Y - 8.5f, 17, 17);
-                using var finger = new Pen(C(White), 5.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-                g.DrawLine(finger, end.X + dir.X * 5, end.Y + dir.Y * 5, end.X + dir.X * 17, end.Y + dir.Y * 17);
+                var end = new PointF(sh.X + dir.X * ArmLength, sh.Y + dir.Y * ArmLength);
+                var ctrl = new PointF(sh.X + dir.X * 28 - dir.Y * 8, sh.Y + dir.Y * 28 + dir.X * 8);
+                Curve(sh, ctrl, ctrl, end);
+                using (var fu = new Pen(Color.FromArgb(A(150), Pupil), 8.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                    g.DrawLine(fu, end.X + dir.X * 6, end.Y + dir.Y * 6, end.X + dir.X * FingerTip, end.Y + dir.Y * FingerTip);
+                using var finger = new Pen(C(White), 6) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                g.DrawLine(finger, end.X + dir.X * 6, end.Y + dir.Y * 6, end.X + dir.X * FingerTip, end.Y + dir.Y * FingerTip);
+                Hand(end.X, end.Y);
             }
             else
             {
-                g.DrawBezier(limb, 196, 150, 208, 154, 216, 164, 218, 178);
-                g.FillEllipse(whiteB, 210.5f, 173.5f, 15, 15);
+                Curve(new(196, 150), new(208, 154), new(216, 164), new(218, 178));
+                Hand(218, 181);
             }
         }
         g.Restore(state);
