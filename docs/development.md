@@ -109,10 +109,23 @@ A case file is `{name, launch: {exe, args, process, window, readyTimeoutMs}, spe
 before it starts the app and what it closes afterwards: a case whose app is already open is skipped (the robot never
 touches a window it did not open). The app counts as ready when `validate` resolves the first step's target; when the app opened behind another window, the robot raises it (by `window`, its title, for apps another process hosts, such as Calculator in ApplicationFrameHost; else by `process`).
 
+What it does follows the step: a click with the target's `button` (left, right, middle); the step's keys, with the
+pointer on the target first (Blender's keys act on the area under the pointer); the wheel over the scroll's area; a
+`drag` from `from` to `to`, or a `trace` along its path, with the condition's button pressed and its `hold` keys down.
+Where a region or path lies is asked from the server (a one-step `validate`), so it is resolved as the lesson resolves
+it. Input goes through `SendInput`, moves included, so the overlay's hooks see it as a person's; Delete, Home, the
+arrows and other keys the number pad shares are sent as extended keys. A step that waits for a count or Done is
+completed on the robot's behalf and marked as skipped.
+
+It moves like a person: before acting it watches the step for 1.5 s, holds the pointer on the target for 1 s, looks
+again and aims where the mark is now. In menus the way matters, since many open a submenu on hover: from the menu bar
+into a menu (an `inMenu` step after one that is not) it goes down first, into a submenu (an `inMenu` step after
+another) along the row first, then down.
+
 A step fails on `target_not_found`, on a target that stays not visible (the server's reason is in the report), or when
-it does not complete within 20 s. A step that waits for a drag, a trace, a count or Done is completed on the robot's
-behalf and marked as skipped. Warnings: the card covering the target, a target partly off screen, misses and
-`no_effect`. The report (`results/<time>/report.html` next to the cases) has every step with a screenshot of the
+it does not complete within 20 s. Warnings: twitching (a mark or the card that moved more than 2 px while it watched,
+or a mark that moved while the pointer was on it, a target that blinked between visible and hidden), the card
+covering the target, a target partly off screen, misses and `no_effect`. The report (`results/<time>/report.html` next to the cases) has every step with a screenshot of the
 screen as the user saw it; failed cases are open. The exit code is the number of failed cases.
 
 Cases are tutorial specs, so they stay local like `examples/`.

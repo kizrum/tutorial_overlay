@@ -163,7 +163,7 @@ internal static class Autopilot
             var steps = J.Items(spec["steps"]).ToList();
             for (int i = 0; i < steps.Count; i++)
             {
-                var sr = PlayStep(mcp, steps[i]!.AsObject(), i, ref seq, reportDir, res.Name);
+                var sr = PlayStep(mcp, steps[i]!.AsObject(), spec, i > 0 ? steps[i - 1]!.AsObject() : null, i, ref seq, reportDir, res.Name);
                 res.Steps.Add(sr);
                 if (sr.Verdict == "fail") { res.Verdict = "fail"; res.Note ??= $"step {i + 1}: {sr.Note}"; break; }
             }
@@ -216,7 +216,7 @@ internal static class Autopilot
 
     // ================================================================ one step
 
-    private static StepResult PlayStep(Mcp mcp, JsonObject spec, int index, ref long seq, string reportDir, string caseName)
+    private static StepResult PlayStep(Mcp mcp, JsonObject spec, JsonObject specRoot, JsonObject? prev, int index, ref long seq, string reportDir, string caseName)
     {
         var r = new StepResult { Index = index, Title = J.Str(spec, "title") ?? $"step {index + 1}" };
         var sw = Stopwatch.StartNew();
@@ -227,7 +227,7 @@ internal static class Autopilot
         JsonObject? status = WaitForStep(mcp, index, 5000);
         if (status == null) { r.Verdict = "fail"; r.Note = "the lesson never reached this step"; return r; }
 
-        if (kind is "drag" or "trace" or "count" or "manual")
+        if (kind is "count" or "manual")
         {
             r.Verdict = "skip";
             r.Note = $"the robot cannot do '{kind}' yet: completed on its behalf";
@@ -291,7 +291,8 @@ internal static class Autopilot
                 shot = true;
             }
 
-            if (actions >= 6) { Thread.Sleep(300); continue; }   // done what it can; wait for the step to notice
+            // done what it can; wait for the step to notice (a drawn path is tried twice, a click up to six times)
+            if (actions >= (kind is "drag" or "trace" ? 2 : 6)) { Thread.Sleep(300); continue; }
             actions++;
             switch (kind)
             {
@@ -299,18 +300,61 @@ internal static class Autopilot
                     var keys = until.First(u => J.Str(u, "type") == "key");
                     var chordText = J.Get(keys, "keys") is JsonArray ka ? J.AsStr(ka[0]) : J.Str(keys, "keys") ?? J.Str(keys, "key");
                     if (TutorialOverlay.Keys.Parse(chordText) is not Chord chord) { r.Verdict = "fail"; r.Note = "unreadable keys: " + chordText; return r; }
+                    // a step that marks where to press (Blender's keys act on the area under the pointer): the hand
+                    // goes there first
+                    if (visible != null && Center(visible) is (int hx, int hy)) Input.Hover(hx, hy);
                     Input.Chord(chord.Mods, chord.Vk);
                     break;
                 case "scroll":
                     var sc = until.First(u => J.Str(u, "type") == "scroll");
-                    var at = (visible != null ? Center(visible) : null) ?? Center(J.Items(J.Get(step, "targets")).FirstOrDefault()) ?? ScreenCenter(status!);
-                    int dir = J.Str(sc, "direction") is "up" or "left" ? 1 : -1;
-                    Input.Wheel(at.x, at.y, dir * 120 * 3, J.Str(sc, "direction") is "left" or "right");
+                    // over the area the condition names (in/area/over/anchor), else over the target
+                    var area = J.Get(sc, "in") ?? J.Get(sc, "area") ?? J.Get(sc, "over") ?? (J.Get(sc, "anchor") is JsonNode sa ? new JsonObject { ["anchor"] = sa.DeepClone() } : null);
+                    var at = (area != null ? RegionPoint(mcp, area, specRoot) : null)
+                             ?? (visible != null ? Center(visible) : null) ?? Center(J.Items(J.Get(step, "targets")).FirstOrDefault()) ?? ScreenCenter(status!);
+                    var sdir = (J.Str(sc, "direction") ?? J.Str(sc, "dir") ?? "down").ToLowerInvariant();
+                    int notches = J.Str(sc, "until") == "visible" ? 5 : (int?)J.Num(sc, "notches") ?? (int?)J.Num(sc, "count") ?? 3;
+                    Input.Wheel(at.x, at.y, (sdir is "up" or "left" ? 1 : -1) * 120 * notches, sdir is "left" or "right");
+                    break;
+                case "drag":
+                    var dg = until.First(u => J.Str(u, "type") == "drag");
+                    var p0 = RegionPoint(mcp, J.Get(dg, "from"), specRoot);
+                    var p1 = RegionPoint(mcp, J.Get(dg, "to"), specRoot);
+                    if (p0 == null || p1 == null) { r.Verdict = "fail"; r.Note = $"drag: {(p0 == null ? "from" : "to")} does not resolve"; Shoot(mcp, r, reportDir, caseName); return r; }
+                    Input.Drag(new List<(int, int)> { p0.Value, p1.Value }, J.Str(dg, "button") ?? "left", HoldKeys(dg));
+                    break;
+                case "trace":
+                    var tr = until.First(u => J.Str(u, "type") == "trace");
+                    var anchorNode = J.Get(tr, "anchor") ?? StripRegion(tr);
+                    var basePt = AnchorPoint(mcp, anchorNode, specRoot);
+                    if (basePt == null) { r.Verdict = "fail"; r.Note = "trace: its anchor does not resolve"; Shoot(mcp, r, reportDir, caseName); return r; }
+                    var pts = Condition.ParsePoints(J.Get(tr, "path") ?? J.Get(tr, "points"))
+                        .Select(p => ((int)Math.Round(basePt.Value.x + p.X), (int)Math.Round(basePt.Value.y + p.Y))).ToList();
+                    Input.Drag(pts, J.Str(tr, "button") ?? "left", HoldKeys(tr));
                     break;
                 default:
                     if (visible == null) { Thread.Sleep(300); continue; }   // a step with no target waits for its condition
                     var (x, y) = Center(visible)!.Value;
-                    Input.Click(x, y);
+                    // the way there matters in menus: many open a submenu on hover, so a hand that cuts across the
+                    // neighbours opens theirs. Out of the menu bar a person goes down first (sideways along the bar
+                    // opens the next menu), into a submenu right first along its row, then down.
+                    bool inMenu = J.Get(spec, "inMenu")?.GetValue<bool>() == true;
+                    bool fromMenu = J.Get(prev, "inMenu")?.GetValue<bool>() == true;
+                    var way = !inMenu ? Input.Way.Straight : fromMenu ? Input.Way.AcrossThenDown : Input.Way.DownThenAcross;
+                    if (way != Input.Way.Straight) r.Action = "click · " + (way == Input.Way.AcrossThenDown ? "into a submenu" : "into a menu");
+                    // a person aims at where the mark is when they press, not where it was a moment ago: hover, look
+                    // again, correct the aim. A mark that moved meanwhile, with nothing moving the app, is twitching.
+                    Input.Hover(x, y, way);
+                    Input.Pause();
+                    var targetId = J.Str(visible, "id");
+                    var now = J.Items(J.Get(J.Get(J.Get(mcp.Call("status", new JsonObject()).Json, "tutorial"), "step"), "targets"))
+                        .FirstOrDefault(t => J.Str(t, "id") == targetId && J.Str(t, "visibility") is "visible");
+                    if (now != null && Center(now) is (int nx, int ny))
+                    {
+                        if (Math.Abs(nx - x) > 4 || Math.Abs(ny - y) > 4)
+                            r.Warnings.Add($"the mark of {J.Str(visible, "name") ?? targetId} moved from {x},{y} to {nx},{ny} while the hand was on it (twitching)");
+                        (x, y) = (nx, ny);
+                    }
+                    Input.ClickHere(x, y, TargetButton(spec, visible));
                     break;
             }
             WaitPast(mcp, index, AfterActionMs);
@@ -326,6 +370,83 @@ internal static class Autopilot
         }
         r.Ms = sw.ElapsedMilliseconds;
         return r;
+    }
+
+    // ---- where a condition's places are: the server resolves them, exactly as the lesson will
+
+    /// <summary>
+    /// The resolved point and bounds of an anchor: a one-step lesson with it as the target, validated by the server
+    /// (with the lesson's own defaults, such as its app).
+    /// </summary>
+    private static (double[]? point, double[]? bounds)? Resolve(Mcp mcp, JsonNode? anchor, JsonObject specRoot)
+    {
+        if (anchor == null) return null;
+        var probe = new JsonObject { ["title"] = "probe", ["steps"] = new JsonArray(new JsonObject
+        {
+            ["title"] = "probe", ["targets"] = new JsonArray(new JsonObject { ["anchor"] = anchor.DeepClone() }),
+        }) };
+        foreach (var k in new[] { "app", "process", "window", "anchor" })
+            if (specRoot[k] is JsonNode v) probe[k] = v.DeepClone();
+        var t = J.Items(J.Get(J.Items(J.Get(mcp.Call("validate", new JsonObject { ["spec"] = probe }).Json, "steps")).FirstOrDefault(), "targets")).FirstOrDefault();
+        static double[]? Arr(JsonNode? n) => n is JsonArray a && a.Count >= 2 ? a.Select(x => (double)x!).ToArray() : null;
+        var pt = Arr(J.Get(t, "point"));
+        return pt == null ? null : (pt, Arr(J.Get(t, "bounds")));
+    }
+
+    private static (int x, int y)? AnchorPoint(Mcp mcp, JsonNode? anchor, JsonObject specRoot) =>
+        Resolve(mcp, anchor, specRoot) is { point: double[] p } ? ((int)Math.Round(p[0]), (int)Math.Round(p[1])) : null;
+
+    /// <summary>A region's own anchor fields, without its rect / radius (they are the region's, not the anchor's).</summary>
+    private static JsonObject StripRegion(JsonNode n)
+    {
+        var o = n.DeepClone().AsObject();
+        foreach (var k in new[] { "rect", "radius", "type", "path", "points", "button", "hold", "holding", "smooth", "ordered", "tolerance", "coverage", "show" }) o.Remove(k);
+        return o;
+    }
+
+    /// <summary>
+    /// Where the hand goes for a drag's from / to or a scroll's area, as the server checks it: the rect's centre
+    /// (rect is relative to the anchor point), the anchor point (radius, or nothing to frame), else the centre of
+    /// what the anchor frames.
+    /// </summary>
+    private static (int x, int y)? RegionPoint(Mcp mcp, JsonNode? region, JsonObject specRoot)
+    {
+        if (region == null) return null;
+        var anchor = J.Get(region, "anchor") ?? StripRegion(region);
+        if (Resolve(mcp, anchor, specRoot) is not { point: double[] p } res) return null;
+        if (J.Get(region, "rect") is JsonArray rr && rr.Count >= 4)
+            return ((int)Math.Round(p[0] + (double)rr[0]! + (double)rr[2]! / 2), (int)Math.Round(p[1] + (double)rr[1]! + (double)rr[3]! / 2));
+        if (J.Num(region, "radius") != null || res.bounds is not { Length: >= 4 } b) return ((int)Math.Round(p[0]), (int)Math.Round(p[1]));
+        return ((int)Math.Round(b[0] + b[2] / 2), (int)Math.Round(b[1] + b[3] / 2));
+    }
+
+    /// <summary>"hold": ["Shift"] / "Ctrl+Alt": the keys the drag must keep down, as virtual-key codes.</summary>
+    private static List<uint> HoldKeys(JsonNode cond)
+    {
+        var res = new List<uint>();
+        foreach (var k in J.Items(J.Get(cond, "hold") ?? J.Get(cond, "holding")))
+            foreach (var part in (J.AsStr(k) ?? "").Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                uint vk = part.ToLowerInvariant() switch
+                {
+                    "shift" => 0x10, "ctrl" or "control" => 0x11, "alt" => 0x12, "win" => 0x5B, "space" => 0x20,
+                    _ => TutorialOverlay.Keys.Parse(part)?.Vk ?? 0,
+                };
+                if (vk != 0) res.Add(vk);
+            }
+        return res;
+    }
+
+    /// <summary>The mouse button a target wants ("button": left | right | middle | any), from the lesson.</summary>
+    private static string TargetButton(JsonObject step, JsonNode target)
+    {
+        var id = J.Str(target, "id") ?? "";
+        var list = J.Items(step["targets"]).ToList();
+        var spec = list.FirstOrDefault(t => J.Str(t, "id") == id);
+        if (spec == null && System.Text.RegularExpressions.Regex.Match(id, @"t(\d+)$") is { Success: true } m && int.Parse(m.Groups[1].Value) < list.Count)
+            spec = list[int.Parse(m.Groups[1].Value)];
+        var b = (J.Str(spec, "button") ?? "left").ToLowerInvariant();
+        return b is "right" or "middle" ? b : "left";
     }
 
     /// <summary>The lesson is past this step: a later index, or the lesson is over.</summary>
@@ -614,10 +735,26 @@ internal static class Autopilot
         private struct INPUT { public uint type; public InputUnion u; }
 
         [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint n, INPUT[] inputs, int size);
-        [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
+        [DllImport("user32.dll")] private static extern int GetSystemMetrics(int i);
+        [DllImport("user32.dll")] private static extern uint MapVirtualKey(uint code, uint type);
 
         private const uint MOUSE = 0, KEYBOARD = 1;
-        private const uint LEFTDOWN = 0x02, LEFTUP = 0x04, WHEEL = 0x0800, HWHEEL = 0x1000, KEYUP = 0x02;
+        private const uint MOVE = 0x0001, ABSOLUTE = 0x8000, VIRTUALDESK = 0x4000;
+        private const uint WHEEL = 0x0800, HWHEEL = 0x1000, KEYUP = 0x02, EXTENDED = 0x01;
+
+        /// <summary>Down / up flags of a mouse button.</summary>
+        private static (uint down, uint up) Button(string b) => b switch
+        {
+            "right" => (0x08, 0x10),
+            "middle" => (0x20, 0x40),
+            _ => (0x02, 0x04),
+        };
+
+        /// <summary>
+        /// Keys whose code is shared with the number pad: sent without the "extended" flag, Delete arrives as the
+        /// pad's "." (Blender: View Selected), Home as the pad's 7, an arrow as the pad's digit.
+        /// </summary>
+        private static bool Extended(uint vk) => vk is >= 0x21 and <= 0x28 or 0x2D or 0x2E or 0x5B or 0x5C or 0x6F or 0x90 or 0xA3 or 0xA5;
 
         /// <summary>A person looks before acting: the pause after the hand arrives (or before keys), so hover
         /// effects, the mascot and the card react as they would to a real user.</summary>
@@ -625,16 +762,76 @@ internal static class Autopilot
 
         private static void Send(params INPUT[] i) => SendInput((uint)i.Length, i, Marshal.SizeOf<INPUT>());
         private static INPUT M(uint flags, uint data = 0) => new() { type = MOUSE, u = new InputUnion { mi = new MOUSEINPUT { dwFlags = flags, mouseData = data } } };
-        private static INPUT K(uint vk, bool up) => new() { type = KEYBOARD, u = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)vk, dwFlags = up ? KEYUP : 0 } } };
-
-        /// <summary>Moves there like a hand (a few steps, so hover effects and the mascot's eyes see it) and clicks.</summary>
-        public static void Click(int x, int y)
+        private static INPUT K(uint vk, bool up) => new()
         {
+            type = KEYBOARD,
+            u = new InputUnion { ki = new KEYBDINPUT { wVk = (ushort)vk, wScan = (ushort)MapVirtualKey(vk, 0), dwFlags = (up ? KEYUP : 0) | (Extended(vk) ? EXTENDED : 0) } },
+        };
+
+        /// <summary>Moves there like a hand (a few steps, so hover effects and the mascot's eyes see it) and clicks
+        /// with the given button (left, right, middle).</summary>
+        public static void Click(int x, int y, string button = "left")
+        {
+            var (down, up) = Button(button);
             MoveTo(x, y);
             Thread.Sleep(HumanPauseMs);
-            Send(M(LEFTDOWN));
+            Send(M(down));
             Thread.Sleep(60);
-            Send(M(LEFTUP));
+            Send(M(up));
+        }
+
+        /// <summary>
+        /// Presses a button at the first point, keeps the hold keys and the button down while the hand follows the
+        /// points (densely, as a hand moves: every few pixels), and lets go at the last one.
+        /// </summary>
+        public static void Drag(List<(int x, int y)> points, string button, List<uint> hold)
+        {
+            if (points.Count == 0) return;
+            var (down, up) = Button(button.ToLowerInvariant());
+            MoveTo(points[0].x, points[0].y);
+            Thread.Sleep(HumanPauseMs);
+            foreach (var k in hold) { Send(K(k, false)); Thread.Sleep(40); }
+            Send(M(down));
+            Thread.Sleep(120);   // a press, then motion: apps tell a drag from a click by it
+            var (px, py) = points[0];
+            foreach (var (x, y) in points.Skip(1))
+            {
+                double len = Math.Sqrt((x - px) * (x - px) + (y - py) * (y - py));
+                int n = Math.Max(1, (int)(len / 6));
+                for (int i = 1; i <= n; i++)
+                {
+                    MoveRaw(px + (x - px) * i / n, py + (y - py) * i / n);
+                    Thread.Sleep(8);
+                }
+                (px, py) = (x, y);
+            }
+            Thread.Sleep(120);
+            Send(M(up));
+            foreach (var k in Enumerable.Reverse(hold)) { Thread.Sleep(40); Send(K(k, true)); }
+        }
+
+        public enum Way { Straight, DownThenAcross, AcrossThenDown }
+
+        /// <summary>Moves the hand there, straight or in two legs (see <see cref="Way"/>), without pressing.</summary>
+        public static void Hover(int x, int y, Way way = Way.Straight)
+        {
+            Native.GetCursorPos(out var from);
+            if (way == Way.DownThenAcross) MoveTo(from.X, y);
+            else if (way == Way.AcrossThenDown) MoveTo(x, from.Y);
+            MoveTo(x, y);
+        }
+
+        public static void Pause() => Thread.Sleep(HumanPauseMs);
+
+        /// <summary>A click right away, after the hand has already looked (a short move if the aim changed).</summary>
+        public static void ClickHere(int x, int y, string button = "left")
+        {
+            var (down, up) = Button(button);
+            MoveTo(x, y);
+            Thread.Sleep(80);
+            Send(M(down));
+            Thread.Sleep(60);
+            Send(M(up));
         }
 
         public static void Wheel(int x, int y, int delta, bool horizontal)
@@ -669,9 +866,21 @@ internal static class Autopilot
             Native.GetCursorPos(out var from);
             for (int i = 1; i <= 8; i++)
             {
-                SetCursorPos(from.X + (x - from.X) * i / 8, from.Y + (y - from.Y) * i / 8);
+                MoveRaw(from.X + (x - from.X) * i / 8, from.Y + (y - from.Y) * i / 8);
                 Thread.Sleep(15);
             }
+        }
+
+        /// <summary>
+        /// A real mouse move (SendInput, absolute on the virtual desktop). SetCursorPos would put the pointer there
+        /// too, but no input passes the hooks: the overlay would never see a drag or a stroke being drawn.
+        /// </summary>
+        private static void MoveRaw(int x, int y)
+        {
+            int vx = GetSystemMetrics(76), vy = GetSystemMetrics(77), vw = GetSystemMetrics(78), vh = GetSystemMetrics(79);
+            int ax = (int)Math.Round((x - vx) * 65535.0 / Math.Max(1, vw - 1));
+            int ay = (int)Math.Round((y - vy) * 65535.0 / Math.Max(1, vh - 1));
+            Send(new INPUT { type = MOUSE, u = new InputUnion { mi = new MOUSEINPUT { dx = ax, dy = ay, dwFlags = MOVE | ABSOLUTE | VIRTUALDESK } } });
         }
     }
 }
