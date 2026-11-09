@@ -6,6 +6,8 @@ only fixes things.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-09
+
 - `validate` notes a shape used for what it is not for: a `marker` on a control (it is for a phrase in text,
   anchored with `find.text`) and an arrow as a target's only mark (an arrow shows a direction or a path; the target
   keeps its outline). The skill and the docs say which mark suits which thing.
@@ -320,7 +322,8 @@ The first public release.
 - The tutorial library: saved tutorials run again from the tray menu, without the agent.
 - A self-contained single-file exe: no .NET install needed to run it.
 
-[Unreleased]: https://github.com/kizrum/tutorial_overlay/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/kizrum/tutorial_overlay/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/kizrum/tutorial_overlay/releases/tag/v0.6.0
 [0.5.0]: https://github.com/kizrum/tutorial_overlay/releases/tag/v0.5.0
 [0.4.0]: https://github.com/kizrum/tutorial_overlay/releases/tag/v0.4.0
 [0.3.0]: https://github.com/kizrum/tutorial_overlay/releases/tag/v0.3.0
