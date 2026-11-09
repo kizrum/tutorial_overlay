@@ -671,6 +671,7 @@ internal sealed class Condition
             c.Notches = Math.Max(1, J.Int(n, "notches") ?? J.Int(n, "count") ?? 3);
             c.UntilVisible = (J.Str(n, "until") ?? "").Equals("visible", StringComparison.OrdinalIgnoreCase) || J.Bool(n, "untilVisible") == true;
             c.Show = J.Bool(n, "show") ?? true;
+            c.ParseHold(n);
         }
         else if (c.Type == "uia")
         {

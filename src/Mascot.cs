@@ -22,7 +22,7 @@ internal sealed class MascotInput
     public string? Keys;                   // the step waits for a shortcut: it holds up a plate with it
     public Chord? KeyChord;                // the same, as keys: one key cap each on the plate
     public string? Gesture;                // "drag" | "scroll": nothing to point at, the step is a motion — it shows it
-    public bool ScrollUp;
+    public string ScrollDir = "down";      // the way the scroll gesture runs: up, down, left, right
     public string StepKey = "";            // a new step re-shows the bubble and may move it
     public string TargetKey = "";          // which of the step's targets: the next one of a checklist is a new spot, not a ride-along
     public List<RectangleF> Avoid = new(); // marks, captions, popups
@@ -719,7 +719,8 @@ internal sealed class MascotWindow : Form
         public Eyes Eyes;
         public Mouth Mouth;
         public PointF? Look, ArmR;
-        public bool Point = true, Happy, Wink, Brow, Sparkle, Dots, Zz, BarOk, ArmsUp, ArmsHold, KeyDown, Lean, Loupe, ScrollUp;
+        public bool Point = true, Happy, Wink, Brow, Sparkle, Dots, Zz, BarOk, ArmsUp, ArmsHold, KeyDown, Lean, Loupe;
+        public string ScrollDir = "down";
         public float? Glint, Confetti, DanceArm, Stretch, Thumb, Drag, Scroll, Walk, Dust;
     }
 
@@ -755,7 +756,7 @@ internal sealed class MascotWindow : Form
             P.KeyDown = P.KeyPhase >= CapDownAt(CapLabels(inp.KeyChord.Value).Length) && P.KeyPhase < AllUpAt(CapLabels(inp.KeyChord.Value).Length);
         }
         else if (inp.Gesture == "drag") { P.Point = false; P.Drag = t % 1.8f / 1.8f; }
-        else if (inp.Gesture == "scroll") { P.Point = false; P.Scroll = t; P.ScrollUp = inp.ScrollUp; }
+        else if (inp.Gesture == "scroll") { P.Point = false; P.Scroll = t; P.ScrollDir = inp.ScrollDir; }
         else if (inp.Away)
         {
             P.Point = false; P.Lid = 0.82f + 0.08f * MathF.Sin(t * 1.2f); P.Sy = 0.97f + 0.015f * MathF.Sin(t * 1.6f);
@@ -1129,8 +1130,18 @@ internal sealed class MascotWindow : Form
                 {
                     float q = (sc * 1.4f + i / 3f) % 1;
                     using var ap = new Pen(Color.FromArgb((int)(A(255) * MathF.Sin(q * MathF.PI)), Palette.Accent), 3.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
-                    float cx = 262, cy = P.ScrollUp ? 190 - q * 60 : 130 + q * 60, d = P.ScrollUp ? -1 : 1;
-                    g.DrawLines(ap, new[] { new PointF(cx - 8, cy - 4 * d), new PointF(cx, cy + 4 * d), new PointF(cx + 8, cy - 4 * d) });
+                    if (P.ScrollDir is "left" or "right")
+                    {
+                        // sideways (a timeline, a wide table): chevrons run along above the hand
+                        float d = P.ScrollDir == "right" ? 1 : -1, cy = 112, cx = d > 0 ? 205 + q * 70 : 275 - q * 70;
+                        g.DrawLines(ap, new[] { new PointF(cx - 4 * d, cy - 8), new PointF(cx + 4 * d, cy), new PointF(cx - 4 * d, cy + 8) });
+                    }
+                    else
+                    {
+                        bool up = P.ScrollDir == "up";
+                        float cx = 262, cy = up ? 190 - q * 60 : 130 + q * 60, d = up ? -1 : 1;
+                        g.DrawLines(ap, new[] { new PointF(cx - 8, cy - 4 * d), new PointF(cx, cy + 4 * d), new PointF(cx + 8, cy - 4 * d) });
+                    }
                 }
             }
             else if (P.Point && inp.Target is PointF tp2)

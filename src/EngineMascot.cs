@@ -81,7 +81,8 @@ internal static partial class Engine
                   ?? step.Targets.FirstOrDefault(x => !x.Satisfied && x.Geo != null);
         // the target is past the edge of its pane: stay where it is (no walking while the user scrolls — the wheel
         // at the edge shows the way) and just say which way and how far
-        if (target == null && step.Targets.FirstOrDefault(x => !x.Satisfied && x.ScrollHint is { dir: "up" or "down" or "left" or "right" or "any" }) is { } off)
+        // (not on a step that scrolls until the target shows: there the mascot scrolls in the framed area, below)
+        if (target == null && !MascotLeadsScroll(t, step) && step.Targets.FirstOrDefault(x => !x.Satisfied && x.ScrollHint is { dir: "up" or "down" or "left" or "right" or "any" }) is { } off)
         {
             var hnt = off.ScrollHint!.Value;
             float sc = Native.ScaleAt(hnt.toward);
@@ -108,7 +109,7 @@ internal static partial class Engine
             if (step.Until.FirstOrDefault(c => !c.Met && c.Type is "drag" or "trace" or "scroll") is { } gest)
             {
                 m.Gesture = gest.Type == "scroll" ? "scroll" : "drag";
-                m.ScrollUp = gest.Direction == "up";
+                m.ScrollDir = gest.Direction ?? "down";
             }
             // a stroke or scroll step: point at where the path starts / where to scroll
             if (MotionFocus(step) is { } mf)

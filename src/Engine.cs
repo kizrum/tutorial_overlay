@@ -919,7 +919,11 @@ internal static partial class Engine
             // screen until a slow agent answers it covered the very menu the user was asking about
             if (step?.Sketch is { } sketch && (now - step.SketchAt).TotalSeconds < SketchShownSeconds) AddSketchVisuals(sketch, sc, f.Card.Avoid);
             // a dialog the app waits on comes first: scrolling the pane behind it does nothing until it is answered
-            if (step == null || BlockingDialogWindow(step) == null) AddScrollVisuals(marks, sc, f.Card.Avoid, fgPid);
+            // a step that asks to scroll until its target shows, with the mascot on: the mascot points at where to
+            // scroll and says so; a wheel of the step's own and a two-way "somewhere here" wheel beside it only
+            // contradict each other
+            if ((step == null || BlockingDialogWindow(step) == null) && !(step != null && MascotLeadsScroll(t!, step)))
+                AddScrollVisuals(marks, sc, f.Card.Avoid, fgPid);
             // after a miss, as the mascot points again, the target flashes once
             if (step?.MissPulseAt is DateTime mpa && now >= mpa)
             {
@@ -1334,6 +1338,8 @@ internal static partial class Engine
         {
             var fr = Finder.Get(a.Key);
             if (fr == null) { reason = "searching"; return null; }
+            // read in a window that is gone (the app was restarted): not yet searched in this one
+            if (fr.In != IntPtr.Zero && fr.In != root && fr.Root == IntPtr.Zero) { reason = "searching"; return null; }
             // its window (find.in) is not open: nothing to scroll, nowhere to point — the card says to open it
             if (fr.Closed is string closedIn) { reason = "closed:" + closedIn; return null; }
             // found in one of the app's menus / dialogs (an anchor naming only the app): the mark belongs to that window
@@ -1363,8 +1369,11 @@ internal static partial class Engine
             // an offset that leads off the found piece (a spot in the 3D view, counted from a caption): the target is
             // that spot, not the caption — framing and hitting the caption made a click on the spot a miss
             if (geo.Visible is RectangleF fv && !fv.Contains(geo.P)) geo.Visible = null;
-            // the area searched is the area it can scroll out of
-            geo.View = a.Find.Within is RectangleF fw ? new RectangleF(bounds.X + fw.X, bounds.Y + fw.Y, fw.Width, fw.Height) : bounds;
+            // the area searched is the area it can scroll out of — unless the offset leads out of it: a bar on a
+            // track counted from its number on the ruler lives in the whole pane, not in the ruler's thin strip (judged
+            // by the strip, it was "scrolled away" and the frame threw on a strip too thin for a hint)
+            var searched = a.Find.Within is RectangleF fw ? new RectangleF(bounds.X + fw.X, bounds.Y + fw.Y, fw.Width, fw.Height) : bounds;
+            geo.View = searched.Contains(geo.P) ? searched : bounds;
             geo.FromLastKnown = !fr.Found;
             if (!fr.Found && fr.LastRel is PointF lr)
             {
@@ -1441,6 +1450,9 @@ internal static partial class Engine
         return g is { FromLastKnown: false } ? g : null;
     }
 
+    /// <summary>Math.Clamp that takes an area narrower than its margins (a thin strip): its middle, never a throw.</summary>
+    internal static float ClampIn(float v, float lo, float hi) => lo > hi ? (lo + hi) / 2 : Math.Clamp(v, lo, hi);
+
     private static void ComputeMark(Mark m, Tutorial? t, int fgPid, DateTime now)
     {
         var ag = AnchorNow(m.Anchor, out var reason);
@@ -1502,8 +1514,8 @@ internal static partial class Engine
         {
             string dir = dir0 == "unknown" ? "any" : dir0;      // not seen and no idea which way: just "scroll here"
             // the target scrolled out of the pane: point at the edge it went past
-            var toward = new PointF(Math.Clamp(geo.Center.X, view.Left + 40 * ag.Scale, view.Right - 40 * ag.Scale),
-                                    Math.Clamp(geo.Center.Y, view.Top + 40 * ag.Scale, view.Bottom - 40 * ag.Scale));
+            var toward = new PointF(ClampIn(geo.Center.X, view.Left + 40 * ag.Scale, view.Right - 40 * ag.Scale),
+                                    ClampIn(geo.Center.Y, view.Top + 40 * ag.Scale, view.Bottom - 40 * ag.Scale));
             // how far past the edge it is, when we know where it is (UIA rect, or a text/template seen before)
             float beyond = dir switch
             {
@@ -1647,7 +1659,7 @@ internal static partial class Engine
         float over(float v) => Math.Max(0, v);
         float l = over(area.Left - pt.X), r = over(pt.X - area.Right), u = over(area.Top - pt.Y), d = over(pt.Y - area.Bottom);
         float m = 4 * s, len = 40 * s, depth = 28 * s;
-        float cx = Math.Clamp(pt.X, area.Left + len, area.Right - len), cy = Math.Clamp(pt.Y, area.Top + len, area.Bottom - len);
+        float cx = ClampIn(pt.X, area.Left + len, area.Right - len), cy = ClampIn(pt.Y, area.Top + len, area.Bottom - len);
         RectangleF rect; PointF dir;
         if (Math.Max(l, r) >= Math.Max(u, d))
         {

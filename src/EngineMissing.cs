@@ -24,6 +24,8 @@ internal static partial class Engine
     /// since the user may still be scrolling or switching to it.
     /// </summary>
     private const int ExistingAfterMs = 4000;
+    /// <summary>A step that scrolls until its target shows: the target may stay off screen this long before it is reported.</summary>
+    private const int ScrollFindMs = 20000;
 
     /// <summary>When each top-level window was first seen during this tutorial (MinValue: it was there before it began).</summary>
     private static readonly Dictionary<IntPtr, DateTime> WindowSince = new();
@@ -49,6 +51,10 @@ internal static partial class Engine
         bool listening = t?.Owner != null && McpServer.Lease.Holder == t.Owner;
         if (step is { Checking: true } && !listening) { step.Checking = false; _stepVersion++; }
         if (t == null || step == null || !listening || t.AdvanceAt != null) return;
+        // a step that asks to scroll until its target shows expects it off screen: that is the step, not a miss.
+        // Only a target still missing long after (the list ended without it) is worth a word
+        if (step.Until.Any(c => c.Type == "scroll" && c.UntilVisible && !c.Met)
+            && (now - step.EnteredAt).TotalMilliseconds < ScrollFindMs) { MissingSince.Clear(); return; }
 
         foreach (var m in step.Targets)
         {

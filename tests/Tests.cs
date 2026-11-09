@@ -1222,6 +1222,14 @@ public static class ScrollHintTests
         var strip = AnchorSpec.Parse(A.Json("{\"process\":\"steamwebhelper\",\"find\":{\"text\":\"Steam\",\"within\":[0,0,300,60]}}"), null);
         A.Check(!Engine.ScrollsToFind(strip), "a menu-bar strip does not scroll");
     }
+
+    public static void TestAThinStripNeverThrowsWhereTheHintPoints()
+    {
+        // FL's playlist ruler, 36 px: a bar on a track counted from its number once put the hint 40 px inside a strip
+        // too thin for it, and every frame threw
+        A.Check(Engine.ClampIn(500, 232, 196) == 214, "narrower than its margins: the middle");
+        A.Check(Engine.ClampIn(500, 0, 300) == 300 && Engine.ClampIn(-5, 0, 300) == 0, "a wide area clamps as before");
+    }
 }
 
 public static class OcrShortWordTests

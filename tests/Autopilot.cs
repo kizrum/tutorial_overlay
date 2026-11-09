@@ -31,14 +31,27 @@ internal static class Autopilot
 
     /// <summary>How long the robot looks at each step before it acts (a person reads the card first): the time the
     /// marks and the card are watched for twitching.</summary>
-    private const int WatchMs = 1500;
+    private const int WatchBaseMs = 1500;
+    /// <summary>--speed N: the robot's looking and resting pauses divided by N (a long lesson watched faster); waits on the app are not.</summary>
+    internal static double Speed = 1;
+    private static int WatchMs => (int)(WatchBaseMs / Speed);
+    private static int SettleMs => (int)(600 / Speed);
+
+    /// <summary>
+    /// --keep-open: the app stays open with what the lesson made (to look at, to listen to), passed or not — a
+    /// half-made result is still the user's work, and where the robot stopped is to be seen. The next run of the case
+    /// is skipped until the app is closed by hand.
+    /// </summary>
+    private static bool KeepOpen;
 
     public static int Run(string[] args)
     {
         Native.SetProcessDpiAwarenessContext(Native.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);   // physical pixels
-        if (args.Length == 0) { Console.Error.WriteLine("usage: --autopilot <case.json | folder> [--report DIR] [--case NAME]"); return 1; }
+        if (args.Length == 0) { Console.Error.WriteLine("usage: --autopilot <case.json | folder> [--report DIR] [--case NAME] [--keep-open] [--speed N]"); return 1; }
         var target = Path.GetFullPath(args[0]);
         string? only = Opt(args, "--case");
+        KeepOpen = args.Contains("--keep-open");
+        if (Opt(args, "--speed") is string sp && double.TryParse(sp, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var spd) && spd > 0) Speed = spd;
         var files = Directory.Exists(target) ? Directory.GetFiles(target, "*.json").OrderBy(f => f).ToList()
             : File.Exists(target) ? new List<string> { target } : new List<string>();
         if (only != null) files = files.Where(f => Path.GetFileNameWithoutExtension(f).Contains(only, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -142,11 +155,42 @@ internal static class Autopilot
                     Environment.ExpandEnvironmentVariables(J.Str(launch, "args") ?? "")) { UseShellExecute = true });
             }
 
-            // ---- ready: the first step's target resolves
+            // ---- ready: launch.ready resolves (an app whose first screen varies), else the first step's target
             int readyMs = (int?)J.Num(launch, "readyTimeoutMs") ?? 15000;
             var ready = Stopwatch.StartNew();
             JsonNode? val = null;
-            while (ready.ElapsedMilliseconds < readyMs)
+            bool readyByAnchor = J.Get(launch, "ready") != null;
+            if (J.Get(launch, "ready") is JsonNode readyAnchor)
+            {
+                bool up = false;
+                while (!up && ready.ElapsedMilliseconds < readyMs)
+                {
+                    up = Resolve(mcp, readyAnchor, spec) is { point: not null };
+                    if (!up) { BringToFront(process, J.Str(launch, "window")); Thread.Sleep(700); }
+                }
+                if (!up) { res.Verdict = "fail"; res.Note = "launch.ready never resolved"; return res; }
+                // ---- dismiss: what the app may or may not show when it starts (a warning, a welcome screen, a panel
+                // left open last time) is closed before the lesson, each in turn, waiting a little for it to show
+                foreach (var d in J.Items(J.Get(launch, "dismiss")))
+                {
+                    var an = J.Get(d, "anchor");
+                    int waitMs = (int?)J.Num(d, "waitMs") ?? 3000;
+                    var w = Stopwatch.StartNew();
+                    do
+                    {
+                        if (Resolve(mcp, an, spec) is { point: double[] dp })
+                        {
+                            int dx = (int)Math.Round(dp[0]), dy = (int)Math.Round(dp[1]);
+                            Input.Hover(dx, dy);
+                            Input.ClickHere(dx, dy);
+                            Thread.Sleep(1200);
+                            break;
+                        }
+                        Thread.Sleep(400);
+                    } while (w.ElapsedMilliseconds < waitMs);
+                }
+            }
+            while (!readyByAnchor && ready.ElapsedMilliseconds < readyMs)
             {
                 val = mcp.Call("validate", new JsonObject { ["spec"] = spec.DeepClone() }).Json;
                 if (J.Get(val, "steps") is JsonArray st && st.Count > 0 && FirstStepOk(st[0])) break;
@@ -156,7 +200,7 @@ internal static class Autopilot
                 if (why.Contains("occluded") || why.Contains("inactive")) BringToFront(process, J.Str(launch, "window"));
                 Thread.Sleep(700);
             }
-            if (J.Get(val, "steps") is not JsonArray vs || vs.Count == 0 || !FirstStepOk(vs[0]))
+            if (!readyByAnchor && (J.Get(val, "steps") is not JsonArray vs || vs.Count == 0 || !FirstStepOk(vs[0])))
             {
                 res.Verdict = "fail";
                 res.Note = "the first step's target never resolved: " + Short(val?.ToJsonString(), 300);
@@ -180,9 +224,12 @@ internal static class Autopilot
         finally
         {
             mcp.TryCall("stop_tutorial", new JsonObject { ["outro"] = false });
-            if (attach && process != null) CloseShown(process, shownBefore);
+            // asked to be kept: the app stays as the lesson left it (and its sandbox with it)
+            bool keep = KeepOpen && res.Verdict != "skip";
+            if (keep) res.Note ??= "kept open (--keep-open)";
+            else if (attach && process != null) CloseShown(process, shownBefore);
             else if (process != null) CloseStarted(process, launchedAt);
-            if (sandbox != null) { Thread.Sleep(800); try { Directory.Delete(sandbox, true); } catch { } }
+            if (sandbox != null && !keep) { Thread.Sleep(800); try { Directory.Delete(sandbox, true); } catch { } }
             res.Ms = sw.ElapsedMilliseconds;
         }
         return res;
@@ -280,7 +327,7 @@ internal static class Autopilot
         // or a group's outline followed it) is twitching. Then Done on the robot's behalf.
         if (kind == "manual" && J.Items(J.Get(J.Get(J.Get(status, "tutorial"), "step"), "targets")).Any())
         {
-            Thread.Sleep(600);
+            Thread.Sleep(SettleMs);
             status = Watch(mcp, WatchMs, r) ?? status;
             Shoot(mcp, r, reportDir, caseName);
             foreach (var t in J.Items(J.Get(J.Get(J.Get(status, "tutorial"), "step"), "targets")).ToList())
@@ -310,7 +357,12 @@ internal static class Autopilot
 
         bool shot = false;
         int actions = 0;
-        while (sw.ElapsedMilliseconds < StepTimeoutMs)
+        // a checklist (a row of steps, a melody in the piano roll) is one click per target: the step gets a click
+        // and a few seconds for each, on top of the usual allowance
+        int targetCount = J.Items(J.Get(J.Get(J.Get(status, "tutorial"), "step"), "targets")).Count();
+        int maxActions = kind is "drag" or "trace" ? 2 : Math.Max(6, targetCount + 3);
+        long stepTimeout = StepTimeoutMs + 3000L * Math.Max(0, targetCount - 3);
+        while (sw.ElapsedMilliseconds < stepTimeout)
         {
             // what went wrong is in the events: a target that is not where it should be, a click that did nothing
             foreach (var ev in Events(mcp, ref seq))
@@ -350,7 +402,7 @@ internal static class Autopilot
 
             if (!shot)
             {
-                Thread.Sleep(600);   // the marks and the card settle (the mascot flies in)
+                Thread.Sleep(SettleMs);   // the marks and the card settle (the mascot flies in)
                 status = Watch(mcp, WatchMs, r) ?? status;
                 var tut2 = J.Get(status, "tutorial");
                 if (Past(tut2, index)) break;   // completed while it watched (a condition met by itself)
@@ -361,8 +413,9 @@ internal static class Autopilot
                 shot = true;
             }
 
-            // done what it can; wait for the step to notice (a drawn path is tried twice, a click up to six times)
-            if (actions >= (kind is "drag" or "trace" ? 2 : 6)) { Thread.Sleep(300); continue; }
+            // done what it can; wait for the step to notice (a drawn path is tried twice, a click as often as there are
+            // targets, plus a few retries)
+            if (actions >= maxActions) { Thread.Sleep(300); continue; }
             actions++;
             switch (kind)
             {
@@ -383,7 +436,12 @@ internal static class Autopilot
                              ?? (visible != null ? Center(visible) : null) ?? Center(J.Items(J.Get(step, "targets")).FirstOrDefault()) ?? ScreenCenter(status!);
                     var sdir = (J.Str(sc, "direction") ?? J.Str(sc, "dir") ?? "down").ToLowerInvariant();
                     int notches = J.Str(sc, "until") == "visible" ? 5 : (int?)J.Num(sc, "notches") ?? (int?)J.Num(sc, "count") ?? 3;
-                    Input.Wheel(at.x, at.y, (sdir is "up" or "left" ? 1 : -1) * 120 * notches, sdir is "left" or "right");
+                    // a mouse has one wheel: sideways is Shift + the wheel, down = right (as a person does it)
+                    bool sideways = sdir is "left" or "right";
+                    int sign = sdir is "up" or "left" ? 1 : -1;
+                    var held = HoldKeys(sc);
+                    if (sideways && !held.Contains(0x10)) held.Add(0x10);
+                    Input.Wheel(at.x, at.y, sign * 120 * notches, false, held);
                     break;
                 case "drag":
                     var dg = until.First(u => J.Str(u, "type") == "drag");
@@ -451,7 +509,7 @@ internal static class Autopilot
         if (!Past(J.Get(status, "tutorial"), index))
         {
             r.Verdict = "fail";
-            r.Note = $"the step did not complete after {actions} action(s) in {StepTimeoutMs / 1000} s" +
+            r.Note = $"the step did not complete after {actions} action(s) in {stepTimeout / 1000} s" +
                      (r.Warnings.Count > 0 ? " (" + string.Join("; ", r.Warnings) + ")" : "");
             Shoot(mcp, r, reportDir, caseName);
         }
@@ -643,8 +701,17 @@ internal static class Autopilot
         }
     }
 
-    private static (int x, int y)? Center(JsonNode? target) =>
-        J.Get(target, "center") is JsonArray c && c.Count >= 2 ? ((int)(double)c[0]!, (int)(double)c[1]!) : null;
+    /// <summary>
+    /// Where a person clicks a target: its point — the start of a block when the frame runs on from it (a clip in the
+    /// playlist, a note in the piano roll: clicked in the middle, FL put it a few beats late) — else its frame's centre.
+    /// </summary>
+    private static (int x, int y)? Center(JsonNode? target)
+    {
+        if (J.Get(target, "point") is JsonArray p && p.Count >= 2 && Bounds(target) is { } b
+            && b.Contains((float)(double)p[0]!, (float)(double)p[1]!))
+            return ((int)(double)p[0]!, (int)(double)p[1]!);
+        return J.Get(target, "center") is JsonArray c && c.Count >= 2 ? ((int)(double)c[0]!, (int)(double)c[1]!) : null;
+    }
 
     private static System.Drawing.RectangleF? Bounds(JsonNode? target) =>
         J.Get(target, "bounds") is JsonArray b && b.Count == 4
@@ -859,7 +926,7 @@ internal static class Autopilot
 
         /// <summary>A person looks before acting: the pause after the hand arrives (or before keys), so hover
         /// effects, the mascot and the card react as they would to a real user.</summary>
-        private const int HumanPauseMs = 1000;   // on top of WatchMs: about 2.5 s per step
+        private static int HumanPauseMs => (int)(1000 / Speed);   // on top of WatchMs: about 2.5 s per step
 
         private static void Send(params INPUT[] i) => SendInput((uint)i.Length, i, Marshal.SizeOf<INPUT>());
         private static INPUT M(uint flags, uint data = 0) => new() { type = MOUSE, u = new InputUnion { mi = new MOUSEINPUT { dwFlags = flags, mouseData = data } } };
@@ -953,16 +1020,18 @@ internal static class Autopilot
             Send(M(up));
         }
 
-        public static void Wheel(int x, int y, int delta, bool horizontal)
+        public static void Wheel(int x, int y, int delta, bool horizontal, List<uint>? hold = null)
         {
             MoveTo(x, y);
             Thread.Sleep(HumanPauseMs);
+            foreach (var k in hold ?? new()) { Send(K(k, false)); Thread.Sleep(40); }
             int notches = Math.Abs(delta) / 120;
             for (int i = 0; i < notches; i++)
             {
                 Send(M(horizontal ? HWHEEL : WHEEL, unchecked((uint)(Math.Sign(delta) * 120))));
                 Thread.Sleep(90);
             }
+            foreach (var k in Enumerable.Reverse(hold ?? new())) { Thread.Sleep(40); Send(K(k, true)); }
         }
 
         public static void Chord(uint mods, uint vk)

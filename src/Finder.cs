@@ -82,7 +82,8 @@ internal sealed class Template
 /// <summary>Where a template / text was last found; PrevRel is the sighting before LastRel (which way it was moving).</summary>
 /// <summary>Size: of the found text / template piece (what a shape without coordinates frames); kept while it is out of view.</summary>
 internal sealed record FindResult(bool Found, PointF Rel, float Score, PointF? LastRel, DateTime At, PointF? PrevRel = null, DateTime LastSeenAt = default, bool Moving = false, string? Went = null, SizeF Size = default, IntPtr Root = default, RectangleF? Visible = null, RectangleF? Box = null,
-                              PointF[]? Places = null, string? Closed = null, bool InkLeft = false, bool LooksLike = false);
+                              PointF[]? Places = null, string? Closed = null, bool InkLeft = false, bool LooksLike = false,
+                              IntPtr In = default);   // the window the anchor itself resolved to when it was searched
 
 /// <summary>
 /// Visual anchors: finds templates inside the anchor's element using the window's own pixels (PrintWindow),
@@ -159,7 +160,15 @@ internal static class Finder
                     if (TextSearchedAt.TryGetValue(a.Key, out var at) && (now - at).TotalMilliseconds < TemplateIdleMs) continue;
                     TextSearchedAt[a.Key] = now;
                 }
-                try { Results[a.Key] = Search(a, Get(a.Key)); }
+                // which window it was read in: an app restarted since (a new main window) makes the old spot a
+                // guess about a window that is gone — it must not count as "visible" in the new one
+                try
+                {
+                    var inRoot = Resolver.Get(a.WithoutFind().Key) is { Found: true } wr ? wr.Root : IntPtr.Zero;
+                    var prevRes = Get(a.Key);
+                    if (prevRes is { In: var was } && was != IntPtr.Zero && was != inRoot) prevRes = null;
+                    Results[a.Key] = Search(a, prevRes) with { In = inRoot };
+                }
                 catch (Exception e) { Log.Debug("finder: " + e.Message); }
             }
             // spots framed at their own size: re-measured now and then while their app is in front

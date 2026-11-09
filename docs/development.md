@@ -114,9 +114,13 @@ to complete. It moves the real mouse, so nobody may use the computer while it ru
 ```powershell
 dotnet run --project tests -- --autopilot examples/autopilot             # every case in the folder
 dotnet run --project tests -- --autopilot examples/autopilot --case calc # only cases whose file name has "calc"
+dotnet run --project tests -- --autopilot examples/autopilot/fl-phonk-minute.json --keep-open   # leave the app open with what it made
 ```
 
-A case file is `{name, launch: {exe, args, process, window, readyTimeoutMs}, spec}`. `process` is what the robot checks
+A case file is `{name, launch: {exe, args, process, window, readyTimeoutMs, ready, dismiss}, spec}`. An app whose first
+screen varies from start to start (FL Studio: a cloud-folder warning, a welcome window, the panels left open last time)
+gets `ready`, an anchor that marks it as up, and `dismiss`, a list of `{anchor, waitMs}` the robot clicks in turn if
+they show within `waitMs` — before the lesson, which then starts from the same screen every time. `process` is what the robot checks
 before it starts the app and what it closes afterwards: a case whose app is already open is skipped (the robot never
 touches a window it did not open). An app that keeps running in the tray (Steam) gets `attach: true`: the robot uses it as it runs, `exe` and `args`
 only bring its window up (`steam.exe steam://open/main`), and afterwards it closes the windows that were not on screen
@@ -143,7 +147,7 @@ another) along the row first, then down. A step already done while the pointer r
 opened on hover) gets no click, as a person would not click there either.
 
 A step fails on `target_not_found`, on a target that stays not visible (the server's reason is in the report), or when
-it does not complete within 20 s. Warnings: twitching (a mark or the card that moved more than 2 px while it watched,
+it does not complete within 20 s (3 s more for every target past the third: a checklist gets a click per target). Warnings: twitching (a mark or the card that moved more than 2 px while it watched,
 or a mark that moved while the pointer was on it — unless its frame only grew to the row the hover lit up — a target
 that blinked between visible and hidden), the card
 covering the target, a target partly off screen, misses and `no_effect`. The report (`results/<time>/report.html` next to the cases) has every step with a screenshot of the

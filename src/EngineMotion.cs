@@ -222,8 +222,14 @@ internal static partial class Engine
                     continue;
                 }
                 if (c.Area == null && t!.Defaults.Process != null && !ProcName(fgPid).Equals(t.Defaults.Process, StringComparison.OrdinalIgnoreCase)) continue;
-                // wheel forward (delta > 0) scrolls up; tilt right (delta > 0) scrolls right
-                string dir = e.Button == "v" ? (e.Delta > 0 ? "up" : "down") : (e.Delta > 0 ? "right" : "left");
+                // keys the step asks to hold while scrolling (Ctrl to zoom): a turn without them does not count
+                if (c.Hold.Count > 0 && !AllHeld(c.Hold)) continue;
+                // wheel forward (delta > 0) scrolls up; tilt right (delta > 0) scrolls right. Most mice have no tilt:
+                // sideways is Shift + the wheel (down = right), as in FL's playlist, browsers, editors
+                bool sideways = c.Direction is "left" or "right";
+                bool shiftWheel = e.Button == "v" && sideways && (InputHook.IsHeld(0x10) || GetAsyncKeyState(0x10) < 0);
+                string dir = e.Button == "v" ? (shiftWheel ? (e.Delta > 0 ? "left" : "right") : e.Delta > 0 ? "up" : "down")
+                                             : (e.Delta > 0 ? "right" : "left");
                 if (dir != c.Direction) continue;
                 // a mouse wheel sends 120 per notch, a precision touchpad many small deltas: add them up
                 c.ScrollAccum += Math.Abs(e.Delta);
@@ -240,6 +246,14 @@ internal static partial class Engine
     // =========================================================== per frame (under Sync)
 
     /// <summary>The path to follow (dashed, with the part done so far solid), held-key chips and the wheel hint.</summary>
+    /// <summary>
+    /// A step that scrolls, with the mascot on: the area to scroll is framed and the mascot scrolls in it, the way
+    /// the step wants. No wheel pictures: the step's own and the target's two-way "somewhere here" wheel only
+    /// contradicted each other, and a tilt wheel most mice do not have was no help at all.
+    /// </summary>
+    internal static bool MascotLeadsScroll(Tutorial t, Step step) =>
+        t.Mascot && Settings.Current.Mascot && step.Until.Any(c => c.Type == "scroll" && !c.Met && c.Area != null);
+
     private static void AddMotionVisuals(Step step, Scene sc, List<RectangleF> avoid, int fgPid)
     {
         bool hideInactive = _tut?.HideWhenInactive ?? HideWhenInactiveDefault;
@@ -281,12 +295,10 @@ internal static partial class Engine
                     var areaRect = area.circle ? new RectangleF(area.c.X - area.r, area.c.Y - area.r, 2 * area.r, 2 * area.r) : area.rect;
                     WatchScroll(c, areaRect, area.ag, s);
                     // where to scroll: a thin frame round the area (the wheel alone, at its edge, is easy to miss)
-                    if (!c.UntilVisible)
-                    {
-                        var frame = RectangleF.Inflate(areaRect, -2 * s, -2 * s);
-                        sc.Prims.Add((new Prim { Kind = PrimKind.Rect, Rect = frame, Color = Palette.Accent, Width = 2 * s, Radius = 6 * s, Scale = s, Glow = false }, 1f));
-                    }
+                    var frame = RectangleF.Inflate(areaRect, -2 * s, -2 * s);
+                    sc.Prims.Add((new Prim { Kind = PrimKind.Rect, Rect = frame, Color = Palette.Accent, Width = 2 * s, Radius = 6 * s, Scale = s, Glow = false }, 1f));
                 }
+                if (_tut != null && MascotLeadsScroll(_tut, step)) continue;   // the frame and the mascot show it, no wheel
                 string text = c.UntilVisible ? "" : $"{Math.Min(c.ScrollCount, c.Notches)}/{c.Notches}";
                 sc.Prims.Add((new Prim { Kind = PrimKind.Wheel, A = at, Rect = box, Text = c.Direction + "|" + text, Color = Palette.Accent, Scale = s }, 1f));
                 avoid.Add(box);
