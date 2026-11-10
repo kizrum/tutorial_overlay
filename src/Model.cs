@@ -933,6 +933,8 @@ internal sealed class Tutorial
     public bool Mascot = true;           // "Шажок" points at the targets (also needs the global setting)
     public JsonObject Spec = new();      // what it was started from (+ appended steps) — what "save" writes
     public string? SavedAs;              // name in the tutorial library, once saved
+    public bool Changed;                 // repaired on the way (retarget, appended steps, a fixed version) since it was saved
+    public bool ConfirmOverwrite;        // the end card asks before the saved version is replaced
     public string? Owner;                // MCP session that started it (null: the user, from the tray)
 
     public bool OutroOpen;               // finished, the end card is showing

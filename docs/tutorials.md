@@ -362,6 +362,15 @@ A saved tutorial is plain JSON with the spec (including steps added with `append
 Saving under an existing name overwrites the file; `save_tutorial` then answers `replaced`. Windows device names
 (`con`, `nul`, `com1`…) get a `-1` suffix.
 
+**Repairing a tutorial on the way.** `retarget` and `append_steps` change the running tutorial itself, whether
+the agent wrote it just now or it came from the library. A step that needs rewriting is fixed in the spec (for a
+saved tutorial, its file), then the tutorial goes on from it with
+`start_tutorial({ spec, "startAt": <index>, "replace": true })`; a saved tutorial's fixed version keeps its library
+name in the spec (`name` next to `steps`). `save_tutorial()` then keeps the repaired version. For a tutorial from the
+library, `status` shows its library name as `savedAs`, and saving under it replaces the old version: when it was
+repaired on the way, the end card says so and offers Save, and Save first asks whether to overwrite the old version
+(**Overwrite** / **Cancel**).
+
 **Display scale.** Offsets in a spec are physical pixels, right only for the scale they were measured at. A saved
 tutorial remembers it (`"scale": 1.65`; it can also be given by hand). If the tutorial runs at another scale, the
 pixel fields (`offset`, `x`, `y`, `w`, `h`, `r`, numeric `from`/`to`/`step`, `at`, `path`, `points`, `within`,

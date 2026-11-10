@@ -114,6 +114,30 @@ restart Claude Code. Do not try to install or download it yourself.
    why. (An older TutorialOverlay only hides the card on `stop_tutorial`: say "that's all" with `hint` first.) Offer
    to save the tutorial (the end card does too), then call `release`.
 
+11. **A lesson broke for the user: repair it, then save the repaired lesson.** Any lesson the user is going through —
+   the one you wrote in this conversation or one from their library (replayed from the tray or with
+   `start_tutorial({name})`) — can fail them: `target_not_found`, `no_effect`, misses on the same step, a `help`
+   saying the step does not match the screen. Fix the lesson itself, not only this run, by how much of it is broken:
+   - **one target moved or was renamed:** `retarget` it (the lesson itself changes);
+   - **a step is wrong or missing** (the app asks for one more click, opens a dialog, wants another order): take the
+     lesson's spec — your own, or the saved file (`path` in `list_tutorials`) — fix or add those steps, `validate`,
+     and go on from the broken step with `start_tutorial({spec, startAt, replace: true})`, `startAt` being that step's
+     index as events give it: what the user already did stays done. For a lesson from the library keep its library
+     name in the spec (`name`) next to the fixed `steps`: it stays that lesson, now repaired. A step only missing at
+     the end is `append_steps`;
+   - **every step fails** (a redesigned app, another version or language, a wrong path from the start): `inspect` the
+     app and write the lesson anew, as in steps 1–7, and start it in place of the old one.
+   When the user has gone through the repaired steps, the repaired lesson is saved:
+   - **written in this conversation:** `save_tutorial()` it yourself and tell the user in one line what changed and
+     that it is saved;
+   - **from the library** (`status` gives its `savedAs`; an older TutorialOverlay does not, then find its title in
+     `list_tutorials`): saving replaces the old version, so the user decides. Finish with `stop_tutorial`: the end card
+     says the lesson was repaired and offers Save, and Save first warns that the old lesson will be overwritten. An
+     older TutorialOverlay's end card does not warn: there `ask` the user ("the old «…» will be overwritten — save the
+     repaired one?") and `save_tutorial({name})` with its library name only on yes.
+   Save only steps the user has gone through or `validate` resolved, never a guess. This is for lessons real users
+   take; not for test runs (an autopilot, a developer checking the overlay), whose lessons stay as they were.
+
 For a single "where is X" question, `draw` one mark instead of a whole tutorial.
 
 ## Rules

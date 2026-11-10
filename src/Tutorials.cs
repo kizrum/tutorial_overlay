@@ -39,6 +39,9 @@ internal static class Tutorials
 
     private static string PathOf(string name) => Path.Combine(Dir, name + ".json");
 
+    /// <summary>Whether the library has a tutorial saved under this name.</summary>
+    public static bool Exists(string name) => File.Exists(PathOf(Slug(name)));
+
     /// <summary>
     /// Saves (or overwrites — then Replaced is true) a spec, with the PNGs of the templates it uses inside.
     /// </summary>

@@ -129,6 +129,9 @@ internal sealed class Loc
     public string OutroHead = "ГОТОВО", OutroTitle = "Туториал пройден!", OutroText = "Вы прошли «{0}» — шагов: {1}. Что дальше?",
         OutroSave = "Сохранить туториал", OutroRepeat = "Пройти ещё раз", OutroContinue = "Продолжить обучение", OutroClose = "Закрыть", WaitFinish = "Завершить",
         OutroSavedTitle = "Сохранено", OutroSavedText = "Туториал в вашей библиотеке: его можно пройти снова из меню значка в трее (Туториалы).",
+        OutroChangedTitle = "Урок исправлен", OutroChangedText = "По ходу урок поправлен под то, что было на экране. Сохраните, чтобы в следующий раз он шёл уже так.",
+        OutroOverwriteTitle = "Перезаписать урок?", OutroOverwriteText = "Старый урок «{0}» в библиотеке будет перезаписан исправленным.",
+        OutroOverwrite = "Перезаписать", OutroKeep = "Отмена",
         TrayTutorials = "Туториалы", TrayTutorialsEmpty = "Пока нет сохранённых", TrayTutorialsFolder = "Открыть папку туториалов";
     public string HoldKeys = "Держите {0}";
     public string AskTitle = "Вопрос от ассистента", AskHint = "Enter — отправить · Shift+Enter — новая строка · Esc — закрыть";
@@ -217,6 +220,9 @@ internal sealed class Loc
         OutroHead = "DONE", OutroTitle = "Tutorial complete!", OutroText = "You finished \"{0}\" — {1} steps. What next?",
         OutroSave = "Save tutorial", OutroRepeat = "Go through again", OutroContinue = "Keep learning", OutroClose = "Close", WaitFinish = "Finish",
         OutroSavedTitle = "Saved", OutroSavedText = "It is in your library: replay it any time from the tray icon menu (Tutorials).",
+        OutroChangedTitle = "Lesson repaired", OutroChangedText = "The lesson was fixed on the way to match your screen. Save it so it runs this way next time.",
+        OutroOverwriteTitle = "Overwrite the lesson?", OutroOverwriteText = "The old “{0}” in your library will be replaced by the repaired one.",
+        OutroOverwrite = "Overwrite", OutroKeep = "Cancel",
         TrayTutorials = "Tutorials", TrayTutorialsEmpty = "Nothing saved yet", TrayTutorialsFolder = "Open tutorials folder",
         HoldKeys = "Hold {0}",
         AskTitle = "The assistant asks", AskHint = "Enter — send · Shift+Enter — new line · Esc — close",

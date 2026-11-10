@@ -236,6 +236,7 @@ internal static partial class Engine
                 && rawTargets.Count == s.Targets.Count && rawTargets[k] is JsonObject rawTarget)
             {
                 rawTarget["anchor"] = anchorJson.DeepClone();
+                t.Changed = true;
                 if (J.Str(args, "label") is string l) rawTarget["label"] = l;
                 if (J.Str(args, "title") is string ti) rawStep["title"] = ti;
                 if (J.Str(args, "text") is string te) rawStep["text"] = te;

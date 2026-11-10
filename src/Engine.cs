@@ -120,6 +120,13 @@ internal static partial class Engine
                 if (startAt != null) spec["startAt"] = startAt;
                 savedAs = Tutorials.Slug(libName);
             }
+            // a repaired version of a saved tutorial ({name, steps}): saving it replaces the one in the library
+            bool changed = false;
+            if (J.Str(spec, "name") is string fixedOf && J.Has(spec, "steps") && Tutorials.Exists(fixedOf))
+            {
+                savedAs = Tutorials.Slug(fixedOf);
+                changed = true;
+            }
             if (spec is not JsonObject) throw new ArgumentException("spec must be an object {title, app, steps:[…]}");
             spec = (JsonObject)spec.DeepClone();
             var warnings = SpecLint.CheckSpec(spec);
@@ -143,6 +150,7 @@ internal static partial class Engine
                 Mascot = J.Bool(spec, "mascot") ?? true,
                 Spec = (JsonObject)spec.DeepClone(),
                 SavedAs = savedAs,
+                Changed = changed,
             };
             t.Spec.Remove("startAt");
             t.Spec.Remove("replace");
@@ -230,6 +238,7 @@ internal static partial class Engine
                 foreach (var r in raw) SpecScale.Apply(r, now / was);
             var parsed = raw.Select(s => Step.Parse(s, _tut.Defaults, i++)).ToList();
             if (_tut.Spec["steps"] is not JsonArray specSteps) _tut.Spec["steps"] = specSteps = new JsonArray();
+            _tut.Changed = true;
             if (insertAt is int at && at > _tut.Index && at <= _tut.Steps.Count)
             {
                 _tut.Steps.InsertRange(at, parsed);
@@ -373,7 +382,7 @@ internal static partial class Engine
                 case "done" or "next" or "back" or "skip" or "undo" or "stop":
                     UserAction(action, source);
                     break;
-                case "outro_save" or "outro_repeat" or "outro_continue" or "outro_close":
+                case "outro_save" or "outro_overwrite" or "outro_keep" or "outro_repeat" or "outro_continue" or "outro_close":
                     Outro(action, source);
                     break;
                 case "wait_finish":
@@ -2543,6 +2552,7 @@ internal static partial class Engine
         {
             ["state"] = t.StateName, ["title"] = t.Title, ["index"] = t.Index, ["total"] = t.Steps.Count,
             ["app"] = t.Defaults.Process, ["completing"] = t.AdvanceAt != null, ["owner"] = OwnerLabel(t),
+            ["savedAs"] = t.SavedAs,   // the library name: a lesson repaired on the way is saved back under it
         };
         var s = t.Current;
         if (s != null && t.Active)

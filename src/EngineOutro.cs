@@ -42,12 +42,25 @@ internal static partial class Engine
         card.Completed = true;           // full progress bar and the green tick next to the header
         card.Title = loc.OutroTitle;
         card.Text = string.Format(loc.OutroText, t.Title.Length > 0 ? t.Title : loc.Tutorial, t.Steps.Count);
-        if (t.SavedAs != null) { card.HintTitle = loc.OutroSavedTitle; card.Hint = loc.OutroSavedText; }
         var buttons = new List<CardButton>();
-        if (t.SavedAs == null) buttons.Add(new CardButton("outro_save", loc.OutroSave, "primary", "outro_save"));
-        if (AgentConnected()) buttons.Add(new CardButton("outro_continue", loc.OutroContinue, t.SavedAs == null ? "secondary" : "primary", "outro_continue"));
-        buttons.Add(new CardButton("outro_repeat", loc.OutroRepeat, "secondary", "outro_repeat"));
-        buttons.Add(new CardButton("outro_close", loc.OutroClose, "ghost", "outro_close"));
+        if (t.ConfirmOverwrite)
+        {
+            // Save on a repaired saved tutorial: say first that the old version goes
+            card.HintTitle = loc.OutroOverwriteTitle;
+            card.Hint = string.Format(loc.OutroOverwriteText, t.Title.Length > 0 ? t.Title : t.SavedAs);
+            buttons.Add(new CardButton("outro_overwrite", loc.OutroOverwrite, "primary", "outro_overwrite"));
+            buttons.Add(new CardButton("outro_keep", loc.OutroKeep, "secondary", "outro_keep"));
+        }
+        else
+        {
+            bool canSave = t.SavedAs == null || t.Changed;
+            if (t.SavedAs != null && t.Changed) { card.HintTitle = loc.OutroChangedTitle; card.Hint = loc.OutroChangedText; }
+            else if (t.SavedAs != null) { card.HintTitle = loc.OutroSavedTitle; card.Hint = loc.OutroSavedText; }
+            if (canSave) buttons.Add(new CardButton("outro_save", loc.OutroSave, "primary", "outro_save"));
+            if (AgentConnected()) buttons.Add(new CardButton("outro_continue", loc.OutroContinue, canSave ? "secondary" : "primary", "outro_continue"));
+            buttons.Add(new CardButton("outro_repeat", loc.OutroRepeat, "secondary", "outro_repeat"));
+            buttons.Add(new CardButton("outro_close", loc.OutroClose, "ghost", "outro_close"));
+        }
         card.Extra = buttons;
         card.Controls = new HashSet<string> { "stop" };
         var appGeo = t.Defaults.Process != null ? AnchorNow(t.Defaults, out _) : null;
@@ -60,6 +73,16 @@ internal static partial class Engine
     {
         var t = _tut;
         if (t == null || !t.OutroOpen) return;
+        // Save on a saved tutorial repaired on the way replaces the version in the library: the card asks first
+        if (action == "outro_save" && t.SavedAs != null && t.Changed && !t.ConfirmOverwrite)
+        {
+            t.ConfirmOverwrite = true;
+            _stepVersion++;
+            return;
+        }
+        if (action == "outro_keep") { t.ConfirmOverwrite = false; _stepVersion++; return; }
+        t.ConfirmOverwrite = false;
+        if (action == "outro_overwrite") action = "outro_save";
         Events.Emit("outro", new() { ["choice"] = action.Replace("outro_", ""), ["title"] = t.Title, ["source"] = source });
         switch (action)
         {
@@ -69,6 +92,7 @@ internal static partial class Engine
                     StampScale(t.Spec, t.Defaults);
                     var r = Tutorials.Save(t.Spec, t.SavedAs);
                     t.SavedAs = r.Name;
+                    t.Changed = false;
                     var ev = new JsonObject { ["name"] = r.Name, ["path"] = r.Path, ["title"] = t.Title, ["source"] = source };
                     if (r.Replaced) ev["replaced"] = true;
                     if (r.MissingTemplates.Count > 0) ev["missingTemplates"] = new JsonArray(r.MissingTemplates.Select(x => (JsonNode)x).ToArray());
@@ -85,7 +109,7 @@ internal static partial class Engine
                 var saved = t.SavedAs;
                 StartTutorial(spec);
                 // going through it again is still that agent's tutorial
-                if (_tut != null) { _tut.SavedAs = saved; _tut.Owner = t.Owner; }
+                if (_tut != null) { _tut.SavedAs = saved; _tut.Changed = t.Changed; _tut.Owner = t.Owner; }
                 break;
             case "outro_continue":
                 // the card waits ("preparing the next step") until the agent appends steps
@@ -123,7 +147,7 @@ internal static partial class Engine
             var defaults = _tut != null && ReferenceEquals(spec, _tut.Spec) ? _tut.Defaults : DefaultsOf(spec);
             StampScale(spec, defaults);
             var r = Tutorials.Save(spec, J.Str(args, "name"));
-            if (_tut != null && ReferenceEquals(spec, _tut.Spec)) { _tut.SavedAs = r.Name; _stepVersion++; }
+            if (_tut != null && ReferenceEquals(spec, _tut.Spec)) { _tut.SavedAs = r.Name; _tut.Changed = false; _tut.ConfirmOverwrite = false; _stepVersion++; }
             var saved = new JsonObject { ["name"] = r.Name, ["path"] = r.Path, ["title"] = J.Str(spec, "title"), ["source"] = "agent" };
             if (r.Replaced) saved["replaced"] = true;
             Events.Emit("tutorial_saved", saved);
