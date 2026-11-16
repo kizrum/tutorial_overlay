@@ -8,7 +8,7 @@ only fixes things.
 
 - When the tools are missing, the skill tells the user to install from the Releases zip and put the exe on `PATH`
   as `tutorial-overlay`, instead of a winget package that is not published yet. The plugin's README says the same.
-- A new README: a lesson clip, the step card, the agent's lesson as an example, installation for Claude Code (the
+- A new README: a logo (the step card in 3D under a sticker wordmark), a lesson clip, the step card, the agent's lesson as an example, installation for Claude Code (the
   plugin), Codex and other MCP clients, and building from source. The docs now list every spec field, shape style,
   condition, event and command-line option the program has.
 

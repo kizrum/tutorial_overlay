@@ -164,9 +164,10 @@ Cases are tutorial specs, so they stay local like `examples/`.
 
 ## The README's pictures
 
-`docs/media/` holds the README's pictures: the banner (`banner-dark.svg`, `banner-light.svg` — plain SVG, edited
-by hand, in the card's colours), the lesson clip, the step card and the mascot. The animations are made locally
-with `tests/make_media.py` (Python with Pillow: `pip install pillow`):
+`docs/media/` holds the README's pictures: the logo, the lesson clip, the step card and the mascot. The logo
+(`logo.webp`, one transparent picture for both GitHub themes) is an HTML page in `tests/logo.py` rendered by headless
+Edge: `python tests/logo.py`. The animations are made locally with `tests/make_media.py` (Python with Pillow:
+`pip install pillow`):
 
 ```powershell
 # the mascot: the act drawn by the real figure code (MascotWindow.DrawStill) at 2x, lossless, empty margin trimmed

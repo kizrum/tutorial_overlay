@@ -1,8 +1,4 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/banner-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/media/banner-light.svg">
-  <img alt="TutorialOverlay — lessons drawn on top of any Windows app" src="docs/media/banner-dark.svg" width="100%">
-</picture>
+<img alt="TutorialOverlay — lessons drawn on top of any Windows app" src="docs/media/logo.webp" width="100%">
 
 <b>English</b> · <a href="README.ru.md">Русский</a>
 
