@@ -1,87 +1,152 @@
-# TutorialOverlay
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/banner-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/media/banner-light.svg">
+  <img alt="TutorialOverlay — lessons drawn on top of any Windows app" src="docs/media/banner-dark.svg" width="100%">
+</picture>
 
-**English** · [Русский](README.ru.md)
+<b>English</b> · <a href="README.ru.md">Русский</a>
 
-An on-screen overlay for step-by-step tutorials in any Windows app. An AI agent (Claude Code) drives it over MCP:
-the agent reads the app's interface, highlights the right buttons right on top of it and walks the user through
-the steps, while the overlay notices what the user did and moves on by itself.
+Step-by-step tutorials drawn right on top of any Windows app — led by an AI agent.
 
-A single exe in C# / .NET 8, written from scratch: no NuGet packages and no third-party assets. All graphics
-(rings, arrows, icons, check marks) are drawn as vectors in code; text uses the Windows system font.
+<img alt="A lesson in FL Studio: the mascot points at the step cells, the card ticks off each step" src="docs/media/fl-lesson.webp" width="800" />
 
-## What it does
+The lesson above was played through by the project's test robot in FL Studio.
 
-- **Marks on top of any app** — rings, frames, arrows, captions. They are tied to UI elements (UI Automation), to
-  text on screen (the OCR built into Windows) or to a small picture of the UI, and follow the window as it moves
-  and scrolls. Clicks go straight through to the app.
-- **A step card** — "Step 2 / 5", text, a checklist and Back, Skip, Done and Help buttons.
-- **Steps complete by themselves**: a click on the target, a pixel colour (a cell switched on), a window that
-  opened, a key combination, a drag, a mouse path, scrolling.
-- **The mascot "Shazhok"** walks up to the target, points at it and says what to do.
-- **Help**: the user presses "?" or circles a spot with a pencil — the agent learns where the user is stuck and
-  answers right in the card.
-- **A library**: a finished tutorial can be saved and run again from the tray icon's menu, without the agent.
+## Tutorial
 
-The interface of the overlay itself is in Russian or English (`"lang"` in the settings).
+To get started, [install TutorialOverlay](#installation) and ask your AI agent how to do something in an app:
 
-## Install
+> [!TIP]
+> *“Walk me through turning on word wrap in Notepad, step by step”*
 
-Windows 10 or 11, x64. Nothing else: .NET is inside the exe.
+The agent reads the app's interface over MCP and writes the lesson — steps, targets and a *why* for each one:
 
-**Claude Code** — download `TutorialOverlay-<version>-win-x64.zip` from
-[Releases](https://github.com/kizrum/tutorial_overlay/releases/latest), unzip it to a folder of your choice (say
-`C:\Tools\TutorialOverlay`) and register it once, for all projects:
-
+```json
+{
+  "title": "Word wrap in Notepad",
+  "app": "Notepad",
+  "steps": [
+    {
+      "title": "Open the View menu",
+      "why": "Notepad keeps everything about how text looks in the View menu.",
+      "targets": [{ "name": "View", "anchor": { "element": { "name": "View", "role": "MenuItem" } } }]
+    },
+    {
+      "title": "Close the menu with Esc",
+      "until": [{ "type": "key", "keys": "Esc" }]
+    }
+  ]
+}
 ```
-claude mcp add --scope user tutorial-overlay -- "C:\Tools\TutorialOverlay\TutorialOverlay.exe" --stdio
-```
 
-That's all: no key, no port. When the agent needs the overlay, it starts it (an icon appears in the tray) and it
-keeps running there until you quit it from the tray menu. The same command is in the tray menu: **"Copy the
-command for the agent"**.
+The overlay rings each target on top of the app, the mascot points at it, and a step card leads the way. Steps
+complete by themselves — a click, a pixel, a window, a shortcut, a drag, a scroll. Stuck? Press **Help** and the
+agent answers right in the card. At the end the lesson can be saved and replayed from the tray, no agent needed.
 
-**Any other MCP client** — a local (stdio) server: the command `TutorialOverlay.exe` with the argument `--stdio`.
-Clients that speak Streamable HTTP can also connect to the running overlay directly: see [Server](docs/server.md).
+<img width="420" alt="The step card: Why opens, Help offers choices, the agent's answer appears, the end card offers Save tutorial" src="docs/media/card-help.webp" />
 
-### Updating
+For the full spec format see [`docs/tutorials.md`](docs/tutorials.md).
 
-Quit TutorialOverlay from the tray menu, unzip the new version over the old folder. Settings, the key and saved
-tutorials live in `%LOCALAPPDATA%\TutorialOverlay` and stay as they are; the `claude mcp add` line stays right too.
+## Installation
 
-## Build from source
+> [!NOTE]
+> Windows 10 or 11, x64. Nothing else: .NET is inside the exe.
 
-[.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0):
+TutorialOverlay is a local MCP server, so any agent that speaks MCP can drive it. Download
+`TutorialOverlay-<version>-win-x64.zip` from [Releases][releases], unzip it (say to `C:\Tools\TutorialOverlay`) and
+put it on `PATH` as `tutorial-overlay`:
 
 ```powershell
+Copy-Item C:\Tools\TutorialOverlay\TutorialOverlay.exe C:\Tools\TutorialOverlay\tutorial-overlay.exe
+$p = [Environment]::GetEnvironmentVariable('Path', 'User')
+[Environment]::SetEnvironmentVariable('Path', "$p;C:\Tools\TutorialOverlay", 'User')
+```
+
+Then, in **Claude Code**, install the plugin — the server plus the skill that teaches the agent to write good
+lessons:
+
+```text
+/plugin marketplace add kizrum/tutorial_overlay
+/plugin install tutorial-overlay@tutorial-overlay
+```
+
+That's all: no key, no port. The agent starts the overlay when it needs it, and it stays in the tray until you
+quit it from the tray menu.
+
+> [!TIP]
+> Claude Code with the plugin works best. Other agents get the same tools and the server's short instructions, but
+> not the skill.
+
+<details>
+<summary>Codex</summary>
+
+Add to `~/.codex/config.toml` (or `.codex/config.toml` in a project):
+
+```toml
+[mcp_servers.tutorial-overlay]
+command = "tutorial-overlay"
+args = ["--stdio"]
+```
+
+</details>
+
+<details>
+<summary>Claude Code without the plugin, other MCP clients</summary>
+
+Add a local (stdio) MCP server: the command `tutorial-overlay` (or the full path to `TutorialOverlay.exe`) with the
+argument `--stdio`. In Claude Code:
+
+```powershell
+claude mcp add --scope user tutorial-overlay -- tutorial-overlay --stdio
+```
+
+Do not add it this way next to the plugin: the agent would see every tool twice. Clients that speak Streamable HTTP
+can also connect to the running overlay directly — see [`docs/server.md`](docs/server.md).
+
+</details>
+
+<details>
+<summary>Updating</summary>
+
+Quit TutorialOverlay from the tray menu, unzip the new version over the old folder and copy `TutorialOverlay.exe` to
+`tutorial-overlay.exe` again. Settings, the key and saved tutorials live in `%LOCALAPPDATA%\TutorialOverlay` and
+stay as they are; the agent's settings stay right too.
+
+</details>
+
+## Building from source
+
+Needs the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0). From the repository root:
+
+```powershell
+# build: publish\TutorialOverlay.exe
 dotnet publish -c Release -o publish
+
+# run the tests
+dotnet run --project tests
+
+# use your build in Claude Code
 claude mcp add --scope user tutorial-overlay -- "$PWD\publish\TutorialOverlay.exe" --stdio
 ```
 
-`.\release.ps1` builds the release zip; see [Development](docs/development.md).
+`.\release.ps1` builds the release zip. How the program is built inside is in
+[`docs/development.md`](docs/development.md).
 
-## Try it
+## Reference
 
-Open Claude Code and ask, for example:
-
-- "Show me where word wrap is turned on in Notepad" — the agent finds the menu item and highlights it;
-- "Walk me through changing the font in Notepad, step by step" — the step card, marks and the mascot appear; steps
-  complete as you click;
-- "Make an FL Studio tutorial: add a channel to the Channel rack and switch on some of its steps" — an example for
-  an app that draws its own interface.
-
-At the end the card offers to save the tutorial. Saved tutorials are in the tray icon's menu under **"Tutorials"**.
-
-To stop the server: **"Quit TutorialOverlay"** in the tray icon's menu, or `TutorialOverlay.exe --stop`.
-
-## Documentation
-
-- [Server](docs/server.md) — command-line options, one agent at a time, the tray icon, the settings window,
-  `config.json`, security, the log.
-- [MCP tools and events](docs/tools.md) — what the agent can call and what it gets back.
-- [Tutorials: the spec format](docs/tutorials.md) — shapes, anchors, steps and conditions, the mascot, the
-  library, help.
-- [Development](docs/development.md) — how the program is built inside, and the tests.
+- [Server](docs/server.md) — command-line options, the tray icon, settings, `config.json`, security, the log
+- [MCP tools and events](docs/tools.md) — what the agent can call and what it gets back
+- [Tutorials](docs/tutorials.md) — the spec format: shapes, anchors, steps and conditions, the mascot, help
+- [Development](docs/development.md) — the inside of the program, the tests, the test robot
 
 ## License
 
 [MIT](LICENSE)
+
+***
+
+<img src="docs/media/mascot-outro.webp" width="140" alt="Shazhok, the mascot, dancing" />
+
+Shazhok says hi. Like everything else here, it is drawn in code — no images, no fonts, no packages.
+
+[releases]: https://github.com/kizrum/tutorial_overlay/releases/latest

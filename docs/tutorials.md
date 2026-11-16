@@ -2,6 +2,30 @@
 
 [← README](../README.md) · [Server](server.md) · [MCP tools](tools.md) · [Tutorials](tutorials.md) · [Development](development.md)
 
+## The spec
+
+What `start_tutorial` takes. Only `steps` is required.
+
+| Field | What it does |
+|---|---|
+| `title` | the lesson's name: the card, the end card, the library |
+| `app`, `window` | the default process (and window) for every anchor that names none |
+| `steps` | the steps — see [Steps and conditions](#steps-and-conditions) |
+| `lang` | `ru` or `en` for the card's own words; default: the language the steps are written in |
+| `keepOpen` | after the last step, wait for `append_steps` instead of finishing (a lesson fed step by step) |
+| `advanceDelayMs` | the pause on a completed step before the next one shows (default 450; a step may set its own) |
+| `startAt` | the index of the step to start from |
+| `outro` | `false` turns the end card off |
+| `mascot` | `false` turns the mascot off for this lesson |
+| `dim`, `toggle` | the defaults for every step (see the step fields) |
+| `hideWhenInactive` | hide the marks while the app is not in front (default `true`) |
+| `accent`, `autoColor`, `animate`, `hotkeys`, `hideFromCapture` | the [settings](server.md#settings), for this lesson only |
+| `replace` | take over a lesson another agent runs (after asking the user); that agent gets `tutorial_stopped`, reason `replaced` |
+| `name` | instead of a spec: replay a saved lesson from the library (with `startAt`) |
+
+A saved lesson also carries `scale` (see [Display scale](#end-of-a-tutorial-and-the-library)) and `templates` (the
+pictures its template anchors use), written by the server.
+
 ## Shapes
 
 On the canvas (clicks go straight through to the app):
@@ -25,6 +49,10 @@ On the canvas (clicks go straight through to the app):
 - `badge` — a number; `label` — a caption; `info` — an info box with a title and an icon;
 - `check` — a check mark; `checkbox` — a checkbox that ticks itself when the target is done (handy for FL's cells);
 - `dim` — darkens the screen, with "windows" over the targets.
+
+Every shape takes `color` (a name — `pink`, `red`, `orange`, `yellow`, `green`, `teal`, `blue`, `purple`, `white` — or
+`#RRGGBB`; without it the accent or the colour `autoColor` picks), `thickness` (the line width), `opacity` (0–1) and
+`size` (a caption's or a badge's text).
 
 Clickable (separate windows that do not take the focus from the app):
 
@@ -212,6 +240,8 @@ More conditions:
 - `{ "type": "uia", "element": { "name": "Bold" }, "property": "toggle", "equals": "on" }` — an element's state:
   `exists`, `name`, `value`, `toggle`, `selected`, `expanded`, `enabled`, `focused`, `text`. Compared with `equals`,
   `contains` or `matches` (regex), plus `not`. When the value changes, the `uia_changed` event is sent.
+- `"manual"` — never met by itself: the step waits for Done (or `complete_step`) even when it has targets — for a
+  step whose marks only show where to look.
 
 **Follow a path** — the `path` shape and the `trace` condition:
 

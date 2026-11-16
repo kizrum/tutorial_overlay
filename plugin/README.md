@@ -8,14 +8,17 @@ press "?" on the card when you are stuck and Claude answers right there.
 ## Requirements
 
 - Windows 10 or 11, x64.
-- The TutorialOverlay program. Install it once:
+- The TutorialOverlay program on `PATH` as `tutorial-overlay`. Download the zip from
+  [Releases](https://github.com/kizrum/tutorial_overlay/releases/latest), unzip it (say to `C:\Tools\TutorialOverlay`)
+  and run once in PowerShell:
 
-  ```
-  winget install Kizrum.TutorialOverlay
+  ```powershell
+  Copy-Item C:\Tools\TutorialOverlay\TutorialOverlay.exe C:\Tools\TutorialOverlay\tutorial-overlay.exe
+  $p = [Environment]::GetEnvironmentVariable('Path', 'User')
+  [Environment]::SetEnvironmentVariable('Path', "$p;C:\Tools\TutorialOverlay", 'User')
   ```
 
-  Or download the zip from [Releases](https://github.com/kizrum/tutorial_overlay/releases/latest), unzip it and add
-  the folder to `PATH` with the exe renamed or linked as `tutorial-overlay.exe`.
+  (A winget package, `Kizrum.TutorialOverlay`, is on its way.)
 
 Then install the plugin in Claude Code:
 
@@ -25,7 +28,8 @@ Then install the plugin in Claude Code:
 ```
 
 The plugin starts the program for you when Claude needs it; it then stays in the tray until you quit it from the tray menu.
-Update with `winget upgrade Kizrum.TutorialOverlay`.
+To update: quit TutorialOverlay from the tray menu, unzip the new version over the old folder and copy
+`TutorialOverlay.exe` to `tutorial-overlay.exe` again.
 
 ## What the plugin contains
 

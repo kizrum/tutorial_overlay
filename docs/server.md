@@ -5,7 +5,10 @@
 ## Running and options
 
 Options: `--port 7788` (1–65535; an invalid value exits with code 1), `--key KEY`, `--no-anim`, `--show-inactive`
-(do not hide the marks while the app is not in front), `--verbose`. The key comes from `--key`, from the
+(do not hide the marks while the app is not in front), `--hide-from-capture` (see
+[Screenshots and privacy](#screenshots-and-privacy)), `--verbose`, `--settings [server|look|keys]`, `--stop`,
+`--version`; `--stdio` is the MCP bridge (see [Connecting an MCP client](#connecting-an-mcp-client)). `--record` is
+for development (see [Development](development.md#live-ux-run)). The key comes from `--key`, from the
 `TUTORIAL_OVERLAY_KEY` variable or from `%LOCALAPPDATA%\TutorialOverlay\key.txt` (created on the first run).
 
 The default port is 7788; the `port` field in `config.json` changes it (`--port` wins).
@@ -83,8 +86,8 @@ If Explorer restarts, the icon comes back.
 **The tray icon** shows that the server is running: a small step card. During a tutorial the bar at the top shows
 its progress; the dot in the corner is green if the agent made a request in the last 5 minutes, grey if not. The
 tooltip shows the port, the agent's last request, the current tutorial and step. A left click opens the settings, a
-right click a dark menu: "Tutorials ▸" (saved tutorials, a click runs one), "Settings…", "Copy the key", "Copy the
-MCP address", "Copy the command for the agent", "Open the settings folder", "Stop tutorial", "Quit TutorialOverlay".
+right click a dark menu: "Tutorials ▸" (saved tutorials, a click runs one), "Settings…", "Copy key", "Copy MCP
+address", "Copy the command for the agent", "Open settings folder", "Stop tutorial", "Quit TutorialOverlay".
 
 **The settings window** (tabs "Server", "Look", "Hotkeys") is drawn in the card's dark style: toggles, rounded
 fields, colour swatches for the marks, a dark title bar. It writes `config.json` and applies changes at once.
@@ -115,10 +118,12 @@ over, 3 previous files are kept). It is useful when the exe runs without a conso
 
 ## Connecting an MCP client
 
-**stdio (the usual way).** `TutorialOverlay.exe --stdio` is what MCP clients start:
+**stdio (the usual way).** `tutorial-overlay --stdio` is what MCP clients start — the exe on `PATH` under that name,
+as the [README](../README.md#installation) sets it up (the full path to `TutorialOverlay.exe` works too). In Claude
+Code the plugin registers it; without the plugin:
 
 ```
-claude mcp add --scope user tutorial-overlay -- "C:\path\to\TutorialOverlay.exe" --stdio
+claude mcp add --scope user tutorial-overlay -- tutorial-overlay --stdio
 ```
 
 It is a thin bridge to the one server of this user, not a second overlay:
@@ -154,8 +159,10 @@ does not hold the development exe open, so rebuilding is not blocked while Claud
 spec; they then apply until it ends:
 
 ```json
-{ "port": 7788, "lang": "ru", "accent": "#FF4D6D", "animate": true, "hideWhenInactive": true, "autoColor": true, "hideFromCapture": false,
-  "hotkeys": { "done": "Ctrl+Alt+Right", "back": "Ctrl+Alt+Left", "skip": "Ctrl+Alt+Down", "undo": "Ctrl+Alt+Z", "stop": "none" } }
+{ "port": 7788, "lang": "ru", "accent": "#FF4D6D", "animate": true, "hideWhenInactive": true, "autoColor": true,
+  "hideFromCapture": false, "mascot": true,
+  "hotkeys": { "done": "Ctrl+Alt+Right", "back": "Ctrl+Alt+Left", "skip": "Ctrl+Alt+Down", "undo": "Ctrl+Alt+Z",
+               "stop": "none", "help": "Ctrl+Alt+H" } }
 ```
 
 The settings window writes the file atomically. If `config.json` cannot be read (a typo made by hand), it is kept
@@ -169,7 +176,8 @@ between Russian buttons. `"none"`
 turns a hotkey off. The hint line at the bottom of the card is built from the hotkeys in effect.
 
 Default hotkeys (active while the card is shown): **Ctrl+Alt+→** done, **←** back, **↓** skip, **Z** undo a hit,
-**X** stop.
+**X** stop, **H** help. `mascot` (default `true`) turns the mascot off for every lesson; a spec can do the same for
+its own.
 
 A guard watches the mouse and keyboard hooks. If the system sees input while the hooks have been silent for more
 than 1.5 s, it is not necessarily broken: some input never reaches the hooks — touchpad scrolling and gestures in

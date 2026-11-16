@@ -11,8 +11,10 @@ instead of asking "done?".
 
 ## If the tools are missing or fail to start
 
-The program is not installed. Tell the user to run `winget install Kizrum.TutorialOverlay` (Windows 10/11) and to
-restart Claude Code. Do not try to install or download it yourself.
+The program is not installed. Tell the user to download the zip from
+https://github.com/kizrum/tutorial_overlay/releases/latest (Windows 10/11), put it on PATH as tutorial-overlay as the
+Installation section of the project's README shows, and restart Claude Code. Do not try to install or download it
+yourself.
 
 ## How to build a tutorial
 

@@ -6,6 +6,12 @@ only fixes things.
 
 ## [Unreleased]
 
+- When the tools are missing, the skill tells the user to install from the Releases zip and put the exe on `PATH`
+  as `tutorial-overlay`, instead of a winget package that is not published yet. The plugin's README says the same.
+- A new README: a lesson clip, the step card, the agent's lesson as an example, installation for Claude Code (the
+  plugin), Codex and other MCP clients, and building from source. The docs now list every spec field, shape style,
+  condition, event and command-line option the program has.
+
 ## [0.6.0] - 2026-11-09
 
 - `validate` notes a shape used for what it is not for: a `marker` on a control (it is for a phrase in text,

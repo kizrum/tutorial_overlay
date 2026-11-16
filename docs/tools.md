@@ -36,8 +36,24 @@
 `ready`, `tutorial_started/finished/stopped/waiting`, `steps_appended`, `step_started/completed/back/skipped`,
 `hit`, `unhit`, `miss`, `undo`, `check_changed`, `uia_changed`, `key_matched`, `drag`, `opened`, `no_effect`,
 `button`, `help`, `sequence_reset`, `pick_started`, `pick`, `pick_finished`, `ask`, `answer`, `ask_area`, `area`,
-`window_opened/closed`, `anchor_found/lost`, `target_not_found`, `target_changed`, `hook_reinstalled`, `exit`. `miss` carries `wrongButton` /
-`expectedButton` when the click hit the target with the wrong mouse button.
+`window_opened/closed`, `anchor_found/lost`, `target_not_found`, `target_changed`, `target_pinned`, `blocked`,
+`scroll_done`, `trace_done`, `trace_off`, `prepare_started/done`, `outro`, `continue_requested`,
+`tutorial_saved`, `tutorial_save_failed`, `hook_reinstalled`, `already_running`, `exit`. `miss` carries
+`wrongButton` / `expectedButton` when the click hit the target with the wrong mouse button.
+
+Some of them in a few words:
+
+| Event | When |
+|---|---|
+| `blocked` | the user clicked a target while a modal dialog of the app was open: the click never reached the window (`dialog` names it) |
+| `target_pinned` | a target was found in one particular window (a dialog, a tab) and is followed there from now on |
+| `scroll_done` | a `scroll` step counted: enough notches, or the content it waited for came into view |
+| `trace_done` / `trace_off` | a `trace` step: the path was followed (`progress`) / the drag left it (`reason`) |
+| `prepare_started` / `prepare_done` | step 0: the app waits on a dialog before step 1 can start / the dialog is gone |
+| `outro` | the user chose on the end card (`choice`: `save`, `repeat`, `continue`, `close`) |
+| `continue_requested` | “Keep learning” on the end card: the agent should append the next lesson |
+| `tutorial_saved` / `tutorial_save_failed` | saving the lesson to the library worked / failed (`error`) |
+| `already_running` | a second start found the server already running (`port`, `pid`): connect to that one |
 
 `target_not_found`: a target of the current step does not resolve where it should be. `where: "new window"` — a
 window of the app opened around the step (a menu, a dialog) and the target is still not in it 1.5 s later.

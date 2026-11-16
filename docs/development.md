@@ -2,6 +2,8 @@
 
 [← README](../README.md) · [Server](server.md) · [MCP tools](tools.md) · [Tutorials](tutorials.md) · [Development](development.md)
 
+Building from source and installing are in the [README](../README.md#building-from-source).
+
 ## How it is built
 
 One process, several threads. All tutorial state lives in `Engine` (files `src/Engine*.cs`) behind one lock,
@@ -101,6 +103,11 @@ through the plugin as a user would, each time through all of these:
 5. go back a step and do it again;
 6. finish, and ask to go on with a new topic.
 
+Start the server with `--record` for such a run: it saves a picture of the screen (the overlay included) for every
+lesson event and every change of a mark's state, with what happened beside it, to
+`%LOCALAPPDATA%\TutorialOverlay\records\<start time>\` (`NNNN-reason.jpg` and `index.jsonl`). The run can then be
+looked at exactly as the user saw it.
+
 For every problem note: the app, the step, what happened, how much it got in the way (blocks the lesson / costs
 time / cosmetic), whether it repeats, and whether it is general or this app only. Fix in that order: what breaks the
 lesson, marks on the wrong place or lost, steps that complete wrongly or never, Help, then navigation.
@@ -154,6 +161,32 @@ covering the target, a target partly off screen, misses and `no_effect`. The rep
 screen as the user saw it; failed cases are open. The exit code is the number of failed cases.
 
 Cases are tutorial specs, so they stay local like `examples/`.
+
+## The README's pictures
+
+`docs/media/` holds the README's pictures: the banner (`banner-dark.svg`, `banner-light.svg` — plain SVG, edited
+by hand, in the card's colours), the lesson clip, the step card and the mascot. The animations are made locally
+with `tests/make_media.py` (Python with Pillow: `pip install pillow`):
+
+```powershell
+# the mascot: the act drawn by the real figure code (MascotWindow.DrawStill) at 2x, lossless, empty margin trimmed
+dotnet run --project tests -- --mascot $env:TEMP\mascot 25 2
+python tests/make_media.py mascot $env:TEMP\mascot docs/media --act outro
+
+# a lesson: record the screen (pointer drawn in, a ring on each click) while the autopilot plays a case
+python tests/make_media.py record $env:TEMP\rec            # in a second terminal; stops when $env:TEMP\rec\stop exists
+dotnet run --project tests -- --autopilot <case.json>
+New-Item $env:TEMP\rec\stop
+python tests/make_media.py clip $env:TEMP\rec docs/media/fl-lesson.webp --from 180 --to 730 --crop 420,0,2140,1500 --width 1600 --quality 90
+
+# the step card alone, cut out of a recording of a lesson (Why, Help and the agent's answer, the end card)
+python tests/make_media.py card $env:TEMP\rec docs/media/card-help.webp
+```
+
+Keep them sharp: frames are recorded nearly lossless, the card and the mascot are encoded lossless, and pictures
+are about twice the width the page shows them at (high-DPI screens). The recording is the whole screen: take only
+the lesson's frames and crop away the taskbar and anything else that is yours. Mascot acts are listed in
+`tests/MascotFilm.cs`.
 
 ## Example tutorials
 

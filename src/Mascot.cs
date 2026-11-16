@@ -621,6 +621,29 @@ internal sealed class MascotWindow : Form
         Present(bmp, rect);
     }
 
+    /// <summary>
+    /// Development only (the README's pictures: tests --mascot): one frame of an act drawn into <paramref name="g"/>
+    /// without the window — the same pose model and figure as in a lesson. act: point | appear | walk | hit1 | hit2 |
+    /// hit3 | miss (anything else: what <paramref name="inp"/> asks for — keys, a gesture, thinking, the end);
+    /// p is how far into the act (0..1), time the figure's clock (breathing, the key plate, confetti).
+    /// </summary>
+    internal void DrawStill(Graphics g, MascotInput inp, PointF pos, float time, string act, float p,
+                            string? say = null, RectangleF bubble = default)
+    {
+        _pos = pos; _time = time; _alpha = 1; _blink = 0; _bubble = 1; _faceLeft = false;
+        _move = Motion.None; _moveT = p; _mood = Mood.Normal; _idleSince = DateTime.UtcNow;
+        switch (act)
+        {
+            case "appear": _move = Motion.Appear; break;
+            case "walk": _move = Motion.Walk; _walkPhase = time * 2.6f * MathF.PI * 2; break;
+            case "miss": _mood = Mood.Miss; _moodLeft = (1 - p) * MissTime; break;
+            case "hit1" or "hit2" or "hit3": _mood = Mood.Happy; _moodLeft = (1 - p) * HitTime; _hitN = act[^1] - '0'; break;
+        }
+        var pose = PoseFor(inp, 140);
+        DrawFigure(g, inp, Unit * inp.Scale, 0, pose);
+        if (say != null && !bubble.IsEmpty) DrawBubble(g, bubble, say, Theme.Font(13 * inp.Scale), inp.Scale);
+    }
+
     /// <summary>A ring of sparks where it vanishes.</summary>
     private void DrawPoof(Graphics g, float s)
     {
