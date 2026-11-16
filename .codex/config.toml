@@ -1,0 +1,3 @@
+[mcp_servers.tutorial-overlay]
+command = "tutorial-overlay"
+args = ["--stdio"]
