@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -496,8 +497,12 @@ internal static class Autopilot
                     var anchorNode = J.Get(tr, "anchor") ?? StripRegion(tr);
                     var basePt = AnchorPoint(mcp, anchorNode, specRoot);
                     if (basePt == null) { r.Verdict = "fail"; r.Note = "trace: its anchor does not resolve"; Shoot(mcp, r, reportDir, caseName); return r; }
-                    var pts = Condition.ParsePoints(J.Get(tr, "path") ?? J.Get(tr, "points"))
-                        .Select(p => ((int)Math.Round(basePt.Value.x + p.X), (int)Math.Round(basePt.Value.y + p.Y))).ToList();
+                    // the hand follows the line the overlay draws: a curve through the points unless smooth is false
+                    // (straight segments between them would be a broken line the tolerance happens to forgive)
+                    var pts = Engine.Densify(Condition.ParsePoints(J.Get(tr, "path") ?? J.Get(tr, "points"))
+                            .Select(p => new PointF(basePt.Value.x + p.X, basePt.Value.y + p.Y)).ToList(),
+                            J.Get(tr, "smooth")?.GetValue<bool>() ?? true, 6)
+                        .Select(p => ((int)Math.Round(p.X), (int)Math.Round(p.Y))).ToList();
                     Input.Drag(pts, J.Str(tr, "button") ?? "left", HoldKeys(tr));
                     break;
                 default:
