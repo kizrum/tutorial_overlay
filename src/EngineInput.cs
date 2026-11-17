@@ -319,16 +319,61 @@ internal static partial class Engine
                 : new Prim { Kind = PrimKind.Rect, Rect = g.rect, Color = col, Width = 3 * s, Radius = 8 * s, Scale = s };
             var fp = RegionPrim(fv, blue);
             var tp = RegionPrim(tv, Palette.Success);
-            float dx = tv.c.X - fv.c.X, dy = tv.c.Y - fv.c.Y, len = Math.Max(1, (float)Math.Sqrt(dx * dx + dy * dy));
-            float ux = dx / len, uy = dy / len;
-            float startOff = fv.circle ? fv.r + 6 * s : 0, endOff = tv.circle ? tv.r + 6 * s : Math.Min(len / 3, Math.Min(tv.rect.Width, tv.rect.Height) / 2);
-            var arrow = new Prim
-            {
-                Kind = PrimKind.Arrow, A = new PointF(fv.c.X + ux * startOff, fv.c.Y + uy * startOff),
-                B = new PointF(tv.c.X - ux * endOff, tv.c.Y - uy * endOff), Color = blue, Width = 4 * s, Scale = s,
-            };
+            var arrow = DragArrow(fv.circle, fv.c, fv.r, fv.rect, tv.circle, tv.c, tv.r, tv.rect, s);
+            arrow.Color = blue;
             foreach (var p in new[] { fp, tp, arrow }) { sc.Prims.Add((p, 1f)); avoid.Add(p.Extent()); }
         }
+    }
+
+    /// <summary>
+    /// The arrow of a drag: straight from the source's edge to the drop zone's edge when there is room between
+    /// them for an arrow one can read; when the two are close or overlap (a short drag, big zones), a bow beside
+    /// them — out of the source's side, over to the drop zone's — so it never shrinks to a blob or hides under a frame.
+    /// </summary>
+    internal static Prim DragArrow(bool fCircle, PointF fc, float fr, RectangleF frect, bool tCircle, PointF tc, float tr, RectangleF trect, float s)
+    {
+        float gap = 6 * s, minArrow = 40 * s;
+        float dx = tc.X - fc.X, dy = tc.Y - fc.Y, len = (float)Math.Sqrt(dx * dx + dy * dy);
+        // a drag in place has no direction of its own: show it left to right
+        float ux = len < 0.5f ? 1 : dx / len, uy = len < 0.5f ? 0 : dy / len;
+        float fe = EdgeAlong(fCircle, fr, frect, ux, uy), te = EdgeAlong(tCircle, tr, trect, ux, uy);
+        var arrow = new Prim { Kind = PrimKind.Arrow, Width = 4 * s, Scale = s };
+        if (len - fe - te - 2 * gap >= minArrow)
+        {
+            arrow.A = new PointF(fc.X + ux * (fe + gap), fc.Y + uy * (fe + gap));
+            arrow.B = new PointF(tc.X - ux * (te + gap), tc.Y - uy * (te + gap));
+            return arrow;
+        }
+        // beside them: on the side of the drag's line that faces up (the left of a drag to the right)
+        float nx = uy, ny = -ux;
+        if (ny > 0 || (ny == 0 && nx > 0)) { nx = -nx; ny = -ny; }
+        float fn = EdgeAlong(fCircle, fr, frect, nx, ny), tn = EdgeAlong(tCircle, tr, trect, nx, ny);
+        var a = new PointF(fc.X + nx * (fn + gap), fc.Y + ny * (fn + gap));
+        var b = new PointF(tc.X + nx * (tn + gap), tc.Y + ny * (tn + gap));
+        // too short to read as an arrow: spread both ends along the drag, around their middle
+        float along = (b.X - a.X) * ux + (b.Y - a.Y) * uy, minBow = 56 * s;
+        if (along < minBow)
+        {
+            float push = (minBow - along) / 2;
+            a = new PointF(a.X - ux * push, a.Y - uy * push);
+            b = new PointF(b.X + ux * push, b.Y + uy * push);
+        }
+        float ab = (float)Math.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y));
+        // bow away from the zones: + is the left of tail→tip, which is the chosen side when it faces the same way
+        bool left = (b.Y - a.Y) * nx - (b.X - a.X) * ny >= 0;
+        // a high bow, so the tip comes down onto the drop zone; a thinner line keeps the head in proportion
+        float bow = Math.Max(18 * s, ab * 0.42f);
+        arrow.A = a; arrow.B = b; arrow.Bend = left ? bow : -bow; arrow.Width = 3 * s;
+        return arrow;
+    }
+
+    /// <summary>How far from a zone's centre its edge is in direction (x, y) (a unit vector).</summary>
+    private static float EdgeAlong(bool circle, float r, RectangleF rect, float x, float y)
+    {
+        if (circle) return r;
+        float hx = Math.Abs(x) < 1e-4f ? float.MaxValue : rect.Width / 2 / Math.Abs(x);
+        float hy = Math.Abs(y) < 1e-4f ? float.MaxValue : rect.Height / 2 / Math.Abs(y);
+        return Math.Min(hx, hy);
     }
 
     // =========================================================== keys

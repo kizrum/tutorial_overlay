@@ -263,6 +263,43 @@ public static class LintTests
     }
 }
 
+public static class DragArrowTests
+{
+    private static float Dist(PointF a, PointF b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+
+    public static void TestALongDragIsStraightEdgeToEdge()
+    {
+        var p = Engine.DragArrow(true, new PointF(0, 0), 30, RectangleF.Empty, true, new PointF(600, 0), 30, RectangleF.Empty, 1);
+        A.Eq(0f, p.Bend, "straight");
+        A.Check(p.A.X > 30 && p.B.X < 570, $"ends outside both rings: {p.A} → {p.B}");
+        // a frame: the arrow leaves from its edge, not from its middle
+        var r = Engine.DragArrow(false, new PointF(0, 0), 0, new RectangleF(-60, -40, 120, 80), false, new PointF(600, 0), 0, new RectangleF(540, -40, 120, 80), 1);
+        A.Check(r.A.X >= 60 && r.B.X <= 540, $"from frame edge to frame edge: {r.A} → {r.B}");
+    }
+
+    public static void TestAShortDragBowsBesideTheZones()
+    {
+        // rings 70 px apart, radius 30: no room between them for an arrow
+        var p = Engine.DragArrow(true, new PointF(0, 0), 30, RectangleF.Empty, true, new PointF(70, 0), 30, RectangleF.Empty, 1);
+        A.Check(p.Bend != 0, "bows");
+        A.Check(Dist(p.A, new PointF(0, 0)) > 30 && Dist(p.B, new PointF(70, 0)) > 30, $"ends outside the rings: {p.A} → {p.B}");
+        A.Check(p.A.Y < 0 && p.B.Y < 0, "above them");
+        A.Check(p.B.X - p.A.X >= 40, "long enough to read, pointing the drag's way");
+        var mid = p.ArrowLine()[12];
+        A.Check(mid.Y < Math.Min(p.A.Y, p.B.Y), $"the bow goes up, away from the zones: {mid}");
+    }
+
+    public static void TestOverlappingFramesAndADragInPlace()
+    {
+        var f = new RectangleF(-60, -40, 120, 80);
+        var p = Engine.DragArrow(false, new PointF(0, 0), 0, f, false, new PointF(90, 30), 0, new RectangleF(30, -10, 120, 80), 1);
+        A.Check(p.Bend != 0, "overlapping frames: bows");
+        A.Check(!f.Contains(p.A) && !f.Contains(p.B), $"neither end under the source frame: {p.A} → {p.B}");
+        var z = Engine.DragArrow(true, new PointF(5, 5), 20, RectangleF.Empty, true, new PointF(5, 5), 20, RectangleF.Empty, 1);
+        A.Check(Dist(z.A, z.B) >= 40 && !float.IsNaN(z.A.X), $"a drag in place still gets a readable arrow: {z.A} → {z.B}");
+    }
+}
+
 public static class ScaleTests
 {
     public static void TestPixelFieldsScaled()
