@@ -137,8 +137,11 @@ internal static class Tools
         Tool("release", "Done with the overlay: let another agent use it (a running tutorial keeps running for the user).", new JsonObject()),
         Tool("events", "Events after seq: hit, miss, step_*, tutorial_*, window_opened/closed, anchor_found/lost, target_not_found (a window opened, the target is not in it: its numbered contents attached → retarget), opened, no_effect, blocked, prepare_started/done (step 0: a dialog to answer before step 1), button, pick, " +
             "help (reason cant_find|dont_understand|other; other: user text + optional pencil sketch with image path → answer with hint), " +
-            "continue_requested (append the next lesson), outro, …. timeoutMs long-polls.",
-            Obj(("since", T("integer", "last seen seq")), ("timeoutMs", T("integer", "max 300000")))),
+            "continue_requested (append the next lesson), outro, …. timeoutMs long-polls. During a lesson pass wake: 'decisions': only events you must act on " +
+            "(help, continue_requested, button, outro, answer, target_not_found, no_effect, miss, blocked, tutorial_waiting/finished/stopped, …) end the poll; " +
+            "the others (hit, step_*, window_*, …) come along with them or at the timeout — none is dropped.",
+            Obj(("since", T("integer", "last seen seq")), ("timeoutMs", T("integer", "max 300000")),
+                ("wake", T("string", "which events end the long-poll: 'decisions', 'all' (default), or event names, comma-separated (may include 'decisions')")))),
     };
 
     /// <summary>Screenshots: the long edge an image is scaled to unless the agent asks for more.</summary>
@@ -439,7 +442,7 @@ internal static class Tools
         int timeout = Math.Clamp(J.Int(args, "timeoutMs") ?? 0, 0, 300000);
         List<JsonObject> list;
         bool gap;
-        if (timeout > 0) (list, gap) = await Events.WaitSince(since, timeout, ct);
+        if (timeout > 0) (list, gap) = await Events.WaitSince(since, timeout, ct, Events.WakeSet(J.Get(args, "wake")));
         else list = Events.Since(since, out gap);
         var res = new JsonObject
         {

@@ -673,6 +673,67 @@ public static class EventTests
         A.Check(!gap, "recent ones are all there");
     }
 
+    private static (List<JsonObject> list, bool gap) Wait(long since, int ms, string? wake) =>
+        Events.WaitSince(since, ms, System.Threading.CancellationToken.None, Events.WakeSet(wake == null ? null : JsonValue.Create(wake)))
+              .GetAwaiter().GetResult();
+
+    public static void TestWakeOnDecisionsBringsTheRestAlong()
+    {
+        Events.ResetForTests();
+        Events.Emit("hit"); Events.Emit("step_completed"); Events.Emit("step_started");
+        var task = Events.WaitSince(0, 5000, System.Threading.CancellationToken.None, Events.WakeSet(JsonValue.Create("decisions")));
+        System.Threading.Thread.Sleep(150);
+        A.Check(!task.IsCompleted, "the overlay's own progress does not end the poll");
+        Events.Emit("help", new JsonObject { ["reason"] = "cant_find" });
+        A.Check(task.Wait(2000), "help ends it at once");
+        var (list, gap) = task.Result;
+        A.Eq(4, list.Count, "the events before help come along");
+        A.Eq("hit", (string?)list[0]["event"], "in order");
+        A.Eq("help", (string?)list[^1]["event"], "help last");
+        A.Check(!gap, "no gap");
+    }
+
+    public static void TestWakeTimeoutReturnsWhatCame()
+    {
+        Events.ResetForTests();
+        Events.Emit("step_started");
+        var (list, _) = Wait(0, 300, "decisions");
+        A.Eq(1, list.Count, "at the timeout, the events that did not wake it");
+        var (none, _) = Wait(1, 200, "decisions");
+        A.Eq(0, none.Count, "nothing new: empty");
+    }
+
+    public static void TestWakeWithoutFilterIsTheOldPoll()
+    {
+        Events.ResetForTests();
+        Events.Emit("step_started");
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var (list, _) = Wait(0, 5000, null);
+        A.Check(sw.ElapsedMilliseconds < 1000 && list.Count == 1, "any event ends it");
+        (list, _) = Wait(0, 5000, "all");
+        A.Eq(1, list.Count, "'all' too");
+    }
+
+    public static void TestWakeSetNames()
+    {
+        var s = Events.WakeSet(JsonValue.Create("decisions, step_completed"))!;
+        A.Check(s.Contains("help") && s.Contains("target_not_found") && s.Contains("step_completed"), "decisions plus a name");
+        A.Check(!s.Contains("hit"), "not hit");
+        A.Check(Events.WakeSet(null) == null && Events.WakeSet(JsonValue.Create("")) == null, "nothing: no filter");
+        foreach (var must in new[] { "help", "continue_requested", "button", "outro", "target_not_found", "no_effect", "miss", "tutorial_waiting", "tutorial_finished", "tutorial_stopped" })
+            A.Check(Events.Decisions.Contains(must), must + " wakes the agent");
+    }
+
+    public static void TestWakeReturnsBeforeEventsFallOut()
+    {
+        Events.ResetForTests();
+        var task = Events.WaitSince(0, 5000, System.Threading.CancellationToken.None, Events.WakeSet(JsonValue.Create("decisions")));
+        for (int i = 0; i < 205; i++) Events.Emit("window_opened");
+        A.Check(task.Wait(2000), "a pile of progress events ends the poll");
+        var (list, gap) = task.Result;
+        A.Check(!gap && list.Count >= 200 && (long)list[0]["seq"]! == 1, $"none of them cut off ({list.Count}, gap {gap})");
+    }
+
     public static void TestEmitMovesFields()
     {
         Events.ResetForTests();

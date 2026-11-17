@@ -138,8 +138,52 @@ internal static class Events
         return t != 0 && DateTime.UtcNow.Ticks - t < grace.Ticks;
     }
 
-    /// <summary>Long-poll: returns as soon as there is at least one event after <paramref name="seq"/>.</summary>
-    public static async Task<(List<JsonObject> list, bool gap)> WaitSince(long seq, int timeoutMs, CancellationToken ct)
+    /// <summary>
+    /// events({wake: 'decisions'}): the events an agent must act on. The rest (hit, step_started / step_completed,
+    /// window_opened / closed, target_pinned, check_changed, …) are the overlay doing its job: they do not end the
+    /// long-poll, and come with the next event that does (or at the timeout) — none is dropped, so an agent sees the
+    /// same stream, only in fewer turns. When in doubt an event is here: a needless turn costs tokens, a missed one
+    /// leaves the user waiting.
+    /// </summary>
+    /// <summary>A filtered long-poll returns once this many events came without waking it.</summary>
+    private const int PileMax = 200;
+
+    public static readonly HashSet<string> Decisions = new(StringComparer.Ordinal)
+    {
+        // the user asks or answers
+        "help", "continue_requested", "button", "outro", "answer", "area", "pick", "pick_finished",
+        // the lesson needs fixing: a target that is not there, a click that did nothing or went wide, a dialog in the way
+        "target_not_found", "no_effect", "miss", "blocked", "prepare_started", "step_skipped",
+        // the lesson ran out of steps, ended or was taken over; the server is going away
+        "tutorial_waiting", "tutorial_finished", "tutorial_stopped", "tutorial_save_failed", "exit", "already_running",
+    };
+
+    /// <summary>
+    /// The wake filter of an events call: null (any event ends the long-poll — the old behaviour), or the event
+    /// names that do. <paramref name="wake"/> is "decisions" (<see cref="Decisions"/>), "all", or event names
+    /// (comma-separated, or an array) that may include "decisions".
+    /// </summary>
+    public static HashSet<string>? WakeSet(JsonNode? wake)
+    {
+        if (wake == null) return null;
+        var parts = wake is JsonArray arr ? arr.Select(n => J.AsStr(n)) : new[] { J.AsStr(wake) };
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var n0 in parts.SelectMany(p => (p ?? "").Split(',')))
+        {
+            var n = n0.Trim();
+            if (n.Length == 0) continue;
+            if (n == "all") return null;
+            if (n == "decisions") set.UnionWith(Decisions);
+            else set.Add(n);
+        }
+        return set.Count == 0 ? null : set;
+    }
+
+    /// <summary>
+    /// Long-poll: returns as soon as there is an event after <paramref name="seq"/> — with <paramref name="wakeOn"/>,
+    /// one of those names; the events before it come along. At the timeout, whatever came meanwhile.
+    /// </summary>
+    public static async Task<(List<JsonObject> list, bool gap)> WaitSince(long seq, int timeoutMs, CancellationToken ct, HashSet<string>? wakeOn = null)
     {
         bool poll = timeoutMs > 0;
         if (poll) Interlocked.Increment(ref _listeners);
@@ -151,11 +195,24 @@ internal static class Events
                 Task wait;
                 lock (Lock)
                 {
-                    if (_seq > seq || seq > _seq) return (Since(seq, out var gap), gap);
+                    // a "since" from before a restart returns at once, whatever the filter: the agent must resync
+                    if (seq > _seq) return (Since(seq, out var g0), g0);
+                    if (_seq > seq)
+                    {
+                        if (wakeOn == null) return (Since(seq, out var g1), g1);
+                        // a pile of events that did not wake it is returned before the ring would drop its oldest
+                        var got = Since(seq, out var g2, RingSize);
+                        if (g2 || got.Count >= PileMax || got.Any(e => wakeOn.Contains((string?)e["event"] ?? ""))) return (got, g2);
+                    }
                     wait = _pulse.Task;
                 }
                 var left = deadline - DateTime.UtcNow;
-                if (left <= TimeSpan.Zero) return (new List<JsonObject>(), false);
+                if (left <= TimeSpan.Zero)
+                {
+                    // the timeout: what came meanwhile (with a filter, events that did not wake it; else nothing)
+                    var rest = wakeOn == null ? Since(seq, out var gl) : Since(seq, out gl, RingSize);
+                    return (rest, gl);
+                }
                 await Task.WhenAny(wait, Task.Delay(left, ct));
                 ct.ThrowIfCancellationRequested();
             }

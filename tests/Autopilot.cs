@@ -32,6 +32,8 @@ internal static class Autopilot
     /// <summary>How long the robot looks at each step before it acts (a person reads the card first): the time the
     /// marks and the card are watched for twitching.</summary>
     private const int WatchBaseMs = 1500;
+    /// <summary>How long the robot waits for an answer after pressing Help before it goes on without one.</summary>
+    private const int HelpAnswerTimeoutMs = 20000;
     /// <summary>--speed N: the robot's looking and resting pauses divided by N (a long lesson watched faster); waits on the app are not.</summary>
     internal static double Speed = 1;
     private static int WatchMs => (int)(WatchBaseMs / Speed);
@@ -67,17 +69,29 @@ internal static class Autopilot
         mcp.TakeTurn();
 
         var results = new List<CaseResult>();
+        // two agents' ears on the same lesson: one wakes only on decisions, one on any event (the old poll)
+        var ears = args.Contains("--no-ears") ? Array.Empty<AgentEar>()
+            : new[] { new AgentEar(mcp, "wake: decisions", "decisions", answers: true), new AgentEar(mcp, "any event", null) };
         try
         {
             foreach (var f in files)
             {
+                var before = ears.Select(e => e.Snapshot()).ToArray();
                 var r = RunCase(mcp, f, reportDir);
+                r.Ears = ears.Select((e, i) => (e.Name, e.Snapshot().Minus(before[i]))).ToList();
                 results.Add(r);
                 Console.WriteLine($"{(r.Verdict == "pass" ? "PASS" : r.Verdict == "skip" ? "SKIP" : "FAIL")}  {r.Name}" +
                                   (r.Note != null ? "  — " + r.Note : ""));
+                foreach (var (name, t) in r.Ears)
+                    Console.WriteLine($"      {name,-16} {t.Turns} turns ({t.DecisionTurns} on decisions, {t.IdleTurns} timeouts) · {t.Events} events, {t.Decisions} decisions · heard {t.Latency} · holes {t.Holes}{t.Answers}");
             }
         }
-        finally { mcp.TryCall("release", new JsonObject()); }
+        finally
+        {
+            Console.WriteLine("the ears finish their last poll…");
+            foreach (var e in ears) e.Stop();
+            mcp.TryCall("release", new JsonObject());
+        }
 
         var html = Path.Combine(reportDir, "report.html");
         File.WriteAllText(html, Report(results, mcp));
@@ -113,6 +127,8 @@ internal static class Autopilot
         public string? Note;
         public List<StepResult> Steps = new();
         public long Ms;
+        /// <summary>What each agent's ear heard during the case (<see cref="AgentEar"/>).</summary>
+        public List<(string Name, AgentEar.Tally Tally)> Ears = new();
     }
 
     private static CaseResult RunCase(Mcp mcp, string file, string reportDir)
@@ -213,9 +229,11 @@ internal static class Autopilot
             if (startAns.IsError) { res.Verdict = "fail"; res.Note = "start_tutorial: " + Short(startAns.Text, 300); return res; }
             long seq = (long?)J.Num(startAns.Json, "seq") ?? (long?)J.Num(mcp.Call("status", new JsonObject()).Json, "lastEventSeq") ?? 0;
             var steps = J.Items(spec["steps"]).ToList();
+            // askHelp: [step indices] — on those steps the robot first asks for help, as a person who is stuck does
+            var askHelp = J.Items(J.Get(c, "askHelp")).Select(n => (int?)J.AsNum(n)).Where(n => n != null).Select(n => n!.Value).ToHashSet();
             for (int i = 0; i < steps.Count; i++)
             {
-                var sr = PlayStep(mcp, steps[i]!.AsObject(), spec, i > 0 ? steps[i - 1]!.AsObject() : null, i, ref seq, reportDir, res.Name);
+                var sr = PlayStep(mcp, steps[i]!.AsObject(), spec, i > 0 ? steps[i - 1]!.AsObject() : null, i, ref seq, reportDir, res.Name, askHelp.Contains(i));
                 res.Steps.Add(sr);
                 if (sr.Verdict == "fail") { res.Verdict = "fail"; res.Note ??= $"step {i + 1}: {sr.Note}"; break; }
             }
@@ -311,7 +329,7 @@ internal static class Autopilot
 
     // ================================================================ one step
 
-    private static StepResult PlayStep(Mcp mcp, JsonObject spec, JsonObject specRoot, JsonObject? prev, int index, ref long seq, string reportDir, string caseName)
+    private static StepResult PlayStep(Mcp mcp, JsonObject spec, JsonObject specRoot, JsonObject? prev, int index, ref long seq, string reportDir, string caseName, bool askHelp = false)
     {
         var r = new StepResult { Index = index, Title = J.Str(spec, "title") ?? $"step {index + 1}" };
         var sw = Stopwatch.StartNew();
@@ -321,6 +339,29 @@ internal static class Autopilot
 
         JsonObject? status = WaitForStep(mcp, index, 5000);
         if (status == null) { r.Verdict = "fail"; r.Note = "the lesson never reached this step"; return r; }
+
+        // stuck on this step: read the card, press Help (the card's hotkey), wait for the agent's answer in the card,
+        // read it — then go on as usual. How long the answer took is what a person would wait.
+        if (askHelp)
+        {
+            Thread.Sleep(SettleMs);
+            Watch(mcp, WatchMs, r);
+            Input.Chord(Native.MOD_CONTROL | Native.MOD_ALT, 'H');
+            var asked = Stopwatch.StartNew();
+            string? hint = null;
+            while (asked.ElapsedMilliseconds < HelpAnswerTimeoutMs)
+            {
+                hint = J.Str(J.Get(J.Get(mcp.Call("status", new JsonObject()).Json, "tutorial"), "step"), "hint");
+                if (hint != null) break;
+                Thread.Sleep(100);
+            }
+            var line = hint != null ? $"help: the card answered in {asked.ElapsedMilliseconds} ms — \"{Short(hint, 120)}\""
+                                    : $"help: no answer in the card after {HelpAnswerTimeoutMs / 1000} s";
+            Console.WriteLine($"      step {index + 1}: {line}");
+            r.Warnings.Add(line);
+            r.Action = kind + " · asked for help";
+            if (hint != null) Watch(mcp, WatchMs, r);   // reads the answer before acting on it
+        }
 
         // a step the user only looks at (Done on the card): look as a person does — read it, then point at each
         // target in turn. Nothing is clicked, so a mark that moves meanwhile (a hovered field lit up and the frame
@@ -500,6 +541,19 @@ internal static class Autopilot
                         (x, y) = (nx, ny);
                     }
                     Input.ClickHere(x, y, TargetButton(spec, visible));
+                    // the click as it happened: the aim, the pointer when it pressed, and what the overlay made of it
+                    Thread.Sleep(400);
+                    var heard = Events(mcp, ref seq).Where(e => J.Str(e, "event") is "hit" or "miss" or "unhit")
+                        .Select(e => $"{J.Str(e, "event")}{(J.Num(e, "x") is double ex ? $" at {ex},{J.Num(e, "y")}" : "")}" +
+                                     (J.Str(e, "nearest") is string nr ? $" (nearest {nr}, {J.Num(e, "distance")} px)" : "") +
+                                     (J.Str(e, "mark") is string mk ? $" ({mk})" : ""));
+                    var b0 = Bounds(now ?? visible);
+                    var press = Input.LastPress;
+                    bool inside = b0 is { } bb && bb.Contains(press.x, press.y);
+                    var line = $"click: aim {x},{y} · pointer {press.x},{press.y}{(press != (x, y) ? " ≠ aim" : "")} · target {(b0 is { } bx ? $"{bx.X:0},{bx.Y:0} {bx.Width:0}x{bx.Height:0}" : "?")}" +
+                               $"{(inside ? "" : " · OUTSIDE the target")} · overlay: {string.Join("; ", heard.DefaultIfEmpty("nothing"))}";
+                    Console.WriteLine($"      step {index + 1}: {line}");
+                    r.Warnings.Add(line);
                     break;
             }
             WaitPast(mcp, index, AfterActionMs, kind == "click" ? J.Items(J.Get(step, "targets")).Count() - targets.Count : int.MaxValue);
@@ -523,7 +577,7 @@ internal static class Autopilot
     /// The resolved point and bounds of an anchor: a one-step lesson with it as the target, validated by the server
     /// (with the lesson's own defaults, such as its app).
     /// </summary>
-    private static (double[]? point, double[]? bounds)? Resolve(Mcp mcp, JsonNode? anchor, JsonObject specRoot)
+    private static (double[]? point, double[]? bounds, double[]? visible)? Resolve(Mcp mcp, JsonNode? anchor, JsonObject specRoot)
     {
         if (anchor == null) return null;
         var probe = new JsonObject { ["title"] = "probe", ["steps"] = new JsonArray(new JsonObject
@@ -535,7 +589,7 @@ internal static class Autopilot
         var t = J.Items(J.Get(J.Items(J.Get(mcp.Call("validate", new JsonObject { ["spec"] = probe }).Json, "steps")).FirstOrDefault(), "targets")).FirstOrDefault();
         static double[]? Arr(JsonNode? n) => n is JsonArray a && a.Count >= 2 ? a.Select(x => (double)x!).ToArray() : null;
         var pt = Arr(J.Get(t, "point"));
-        return pt == null ? null : (pt, Arr(J.Get(t, "bounds")));
+        return pt == null ? null : (pt, Arr(J.Get(t, "bounds")), Arr(J.Get(t, "visible")));
     }
 
     private static (int x, int y)? AnchorPoint(Mcp mcp, JsonNode? anchor, JsonObject specRoot) =>
@@ -561,8 +615,11 @@ internal static class Autopilot
         if (Resolve(mcp, anchor, specRoot) is not { point: double[] p } res) return null;
         if (J.Get(region, "rect") is JsonArray rr && rr.Count >= 4)
             return ((int)Math.Round(p[0] + (double)rr[0]! + (double)rr[2]! / 2), (int)Math.Round(p[1] + (double)rr[1]! + (double)rr[3]! / 2));
-        if (J.Num(region, "radius") != null || res.bounds is not { Length: >= 4 } b) return ((int)Math.Round(p[0]), (int)Math.Round(p[1]));
-        return ((int)Math.Round(b[0] + b[2] / 2), (int)Math.Round(b[1] + b[3] / 2));
+        if (J.Num(region, "radius") != null) return ((int)Math.Round(p[0]), (int)Math.Round(p[1]));
+        // the middle of what the anchor names as the server sees it: the found text, the element, the measured spot —
+        // not "bounds", which for a text is the whole element it is looked for in
+        if (res.visible is { Length: >= 4 } v) return ((int)Math.Round(v[0] + v[2] / 2), (int)Math.Round(v[1] + v[3] / 2));
+        return ((int)Math.Round(p[0]), (int)Math.Round(p[1]));
     }
 
     /// <summary>"hold": ["Shift"] / "Ctrl+Alt": the keys the drag must keep down, as virtual-key codes.</summary>
@@ -707,6 +764,8 @@ internal static class Autopilot
     /// </summary>
     private static (int x, int y)? Center(JsonNode? target)
     {
+        // a server that says where a person clicks the target: the middle of the found text / element, or its spot
+        if (J.Get(target, "aim") is JsonArray aim && aim.Count >= 2) return ((int)Math.Round((double)aim[0]!), (int)Math.Round((double)aim[1]!));
         if (J.Get(target, "point") is JsonArray p && p.Count >= 2 && Bounds(target) is { } b
             && b.Contains((float)(double)p[0]!, (float)(double)p[1]!))
             return ((int)(double)p[0]!, (int)(double)p[1]!);
@@ -763,6 +822,10 @@ internal static class Autopilot
         {
             sb.Append($"<details{(c.Verdict == "fail" ? " open" : "")}><summary><span class={c.Verdict}>{c.Verdict.ToUpperInvariant()}</span> {H(c.Name)} ")
               .Append($"<span class=note>· {c.Steps.Count} step(s) · {c.Ms / 1000.0:0.0} s{(c.Note != null ? " · " + H(c.Note) : "")}</span></summary>");
+            if (c.Ears.Count > 0)
+                sb.Append("<ul class=note>").Append(string.Concat(c.Ears.Select(e =>
+                    $"<li>agent ear, {H(e.Name)}: {e.Tally.Turns} turns ({e.Tally.DecisionTurns} on decisions, {e.Tally.IdleTurns} timeouts) · " +
+                    $"{e.Tally.Events} events, {e.Tally.Decisions} decisions · heard {H(e.Tally.Latency)} · holes {e.Tally.Holes}</li>"))).Append("</ul>");
             foreach (var s in c.Steps)
             {
                 sb.Append($"<div class=step><div><b class={s.Verdict}>{s.Index + 1}. {H(s.Title)}</b> <span class=note>({H(s.Action)}, {s.Ms} ms)</span>");
@@ -1010,11 +1073,16 @@ internal static class Autopilot
         public static void Pause() => Thread.Sleep(HumanPauseMs);
 
         /// <summary>A click right away, after the hand has already looked (a short move if the aim changed).</summary>
+        /// <summary>Where the pointer really was when the last click pressed (GetCursorPos, physical pixels).</summary>
+        public static (int x, int y) LastPress;
+
         public static void ClickHere(int x, int y, string button = "left")
         {
             var (down, up) = Button(button);
             MoveTo(x, y);
             Thread.Sleep(80);
+            Native.GetCursorPos(out var at);
+            LastPress = (at.X, at.Y);
             Send(M(down));
             Thread.Sleep(60);
             Send(M(up));

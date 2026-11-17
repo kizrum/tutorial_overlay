@@ -97,8 +97,10 @@ yourself.
    older TutorialOverlay does not say `slow`: when `inspect` takes many seconds on a window, do the same there.
 8. **Start and follow:** `start_tutorial(spec)`, then `events(since, timeoutMs)` to see hits, misses, `no_effect`
    and `help`. For a long lesson use `keepOpen: true` and `append_steps`. While the lesson runs, keep an `events`
-   long-poll going all the time (`timeoutMs: 100000`: it returns at once when something happens, so a long one only
-   saves you turns; an older server cuts it to 60 s, and Claude Code moves a call longer than 120 s to the background) and do nothing slow in between (no builds, no restarts, no long reading): the user
+   long-poll going all the time (`timeoutMs: 100000, wake: 'decisions'`: it returns at once when something needs
+   you — help, a miss, a target not found, no more steps — and brings the lesson's progress (hits, steps, windows)
+   along with it, none dropped; an older TutorialOverlay ignores `wake` and returns on any event; an older server
+   cuts the poll to 60 s, and Claude Code moves a call longer than 120 s to the background) and do nothing slow in between (no builds, no restarts, no long reading): the user
    is waiting on you. **Do not end your turn while the lesson runs** — the card's buttons ("Help", "Keep learning")
    reach you only through `events`, and the user's chat messages still arrive between your calls. If your turn did
    end, on the user's next message call `events` first: a `help` or `continue_requested` may be waiting

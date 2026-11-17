@@ -2559,6 +2559,7 @@ internal static partial class Engine
             o["step"] = new JsonObject
             {
                 ["id"] = s.Id, ["title"] = s.Title, ["text"] = s.Text, ["checking"] = s.Checking ? true : null,
+                ["hint"] = s.Hint,   // what the card answers now (the agent's hint, or the overlay's own)
                 ["targets"] = new JsonArray(s.Targets.Select(m => (JsonNode)MarkJson(m)).ToArray()),
                 ["until"] = new JsonArray(s.Until.Select(c => (JsonNode)c.ToJson()).ToArray()),
                 ["undoDepth"] = s.History.Count,
@@ -2580,6 +2581,13 @@ internal static partial class Engine
         {
             o["point"] = J.PtJson(m.Geo.A.P);
             o["center"] = J.PtJson(m.Geo.Center);
+            // where a person clicks it: the middle of the target as drawn (the found text, the element, or its caption
+            // while a slow element has not answered yet) — "point" is the anchor's origin (an element's top-left
+            // corner) and "center" the middle of the whole mark with its label; an anchor at a spot (an offset,
+            // another origin) is clicked at that spot
+            var tb = m.Geo.TargetBounds;
+            o["aim"] = J.PtJson(!m.Anchor.HasPoint && tb.Width > 0 && tb.Height > 0
+                ? new PointF(tb.X + tb.Width / 2, tb.Y + tb.Height / 2) : m.Geo.A.P);
             if (m.Geo.A.Bounds is RectangleF b) o["anchorBounds"] = J.RectJson(b);
             o["bounds"] = J.RectJson(m.Geo.Bounds);
             // an arrow at the target is the way the hand goes (a G-move in Blender): its line, tail to tip, as drawn
