@@ -6,6 +6,19 @@ only fixes things.
 
 ## [Unreleased]
 
+- Step 0 comes first: while a window of the app is in the way (a modal dialog, or before the lesson starts a window
+  over the app, such as Steam's "Special Offers"), step 1's marks are not shown, a click on them counts neither as a
+  hit nor as a miss, and step 1 begins (its timers, the mascot's walk) only once the window is gone. The overlay finds
+  the window's close button itself — UI Automation, Windows' own close box, or the "X" drawn at the right of the
+  title strip (Steam) — marks it, and the mascot says "close this window here". `status` gives it as `step.dialog`
+  (`title`, `modal`, `frame`, `close`).
+- Fixed: a window that does not block the app (Steam's "Special Offers") was reported mid-lesson as "close it first —
+  the app ignores clicks". Only a modal dialog, or a window over a target, is in the way now; a window that only
+  covered the app is out of the way once the user brings the app over it.
+- Fixed: "It was in a window that is closed now — open it again" while the window the previous step opened was still
+  opening (Steam's settings take over 6 s on a Steam just started). The card waits 12 s for a window the previous
+  step opens, 4 s for "not answering".
+
 - Fixed: the frame on a menu item found by its text (and the mascot pointing at it) jumped — it first hugged the
   words, then grew to the whole item once the pointer lit it up, or was read while the menu still slid in. The item's
   rectangle now comes from UI Automation at once (also inside WinUI 3 popups, which answer hit-testing only with

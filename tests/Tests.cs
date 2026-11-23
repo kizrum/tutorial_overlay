@@ -2022,4 +2022,33 @@ public static class AreaShapeTests
         A.Check(corner.B.Y == 1 && corner.Rect.Left >= 0, "furthest past the bottom: bottom edge, kept on screen");
         A.Check(right.Text == null || right.EdgeTabLabel().Right <= right.Rect.Left, "caption on the screen's side");
     }
+
+    /// <summary>A title strip drawn as Steam draws it: text, a maximise box, a minimise bar and the close "X" at the right.</summary>
+    public static void TestCloseCrossIsFoundInATitleStrip()
+    {
+        foreach (float k in new[] { 1f, 1.5f })
+        {
+            using var bmp = new Bitmap((int)(220 * k), (int)(60 * k));
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.Clear(Color.FromArgb(37, 40, 47));
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using var pen = new Pen(Color.FromArgb(150, 160, 170), 1.6f * k);
+                using var font = new Font("Segoe UI", 11 * k, GraphicsUnit.Pixel);
+                g.DrawString("Offers x", font, Brushes.Gainsboro, 4 * k, 18 * k);
+                g.DrawRectangle(pen, 130 * k, 20 * k, 11 * k, 11 * k);   // maximise
+                g.DrawLine(pen, 100 * k, 30 * k, 112 * k, 30 * k);        // minimise
+                g.DrawLine(pen, 180 * k, 18 * k, 194 * k, 32 * k);        // close
+                g.DrawLine(pen, 194 * k, 18 * k, 180 * k, 32 * k);
+            }
+            var x = Engine_DialogClose(bmp, k);
+            A.Check(x is RectangleF r && Math.Abs(r.X + r.Width / 2 - 187 * k) < 3 * k && Math.Abs(r.Y + r.Height / 2 - 25 * k) < 3 * k,
+                $"the close X at {187 * k},{25 * k} (scale {k}): found {x}");
+        }
+        using var plain = new Bitmap(200, 50);
+        using (var g = Graphics.FromImage(plain)) { g.Clear(Color.White); g.FillEllipse(Brushes.Gray, 150, 15, 16, 16); }
+        A.Check(Engine_DialogClose(plain, 1) == null, "a dot is no close X");
+    }
+
+    private static RectangleF? Engine_DialogClose(Bitmap b, float k) => DialogClose.FindCross(b, k);
 }

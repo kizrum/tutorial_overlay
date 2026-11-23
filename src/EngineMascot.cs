@@ -68,12 +68,14 @@ internal static partial class Engine
         // the app waits on a dialog: nothing else on the step can happen until it is answered, so go there and say so
         if (BlockingDialogWindow(step) is { } dlg)
         {
-            var fr = (RectangleF)dlg.frame;
+            // its close button when found: that is what to press
+            var close = CloseSpot(dlg);
+            var fr = close ?? (RectangleF)dlg.frame;
             m.Target = new PointF(fr.X + fr.Width / 2, fr.Y + fr.Height / 2);
             m.TargetBounds = fr;
             m.Root = dlg.hwnd;
-            m.Say = Settings.Current.Text.DialogMark;
-            m.StepKey += "/dialog" + dlg.hwnd;      // another dialog is another spot to go to
+            m.Say = close != null ? Settings.Current.Text.DialogCloseMark : Settings.Current.Text.DialogMark;
+            m.StepKey += "/dialog" + dlg.hwnd + (close != null ? "/close" : "");      // another dialog is another spot to go to
             m.Scale = Native.ScaleAt(m.Target.Value);
             return m;
         }

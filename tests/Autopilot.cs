@@ -408,6 +408,10 @@ internal static class Autopilot
         // target then shows up where it was, that was a false alarm the user read
         string? cardSaid = null;
         bool cardSaidNoted = false;
+        long? dialogSeen = null;
+        long dialogClickAt = -10000;
+        int dialogClicks = 0;
+        bool dialogShot = false, dialogNoted = false;
         while (sw.ElapsedMilliseconds < stepTimeout)
         {
             // what went wrong is in the events: a target that is not where it should be, a click that did nothing
@@ -430,6 +434,37 @@ internal static class Autopilot
             var tut = J.Get(status, "tutorial");
             if (Past(tut, index)) break;
             var step = J.Get(tut, "step");
+            // a window in the way (step 0, "close it, then we start"; or a dialog mid-lesson): a person closes it
+            // where the lesson points, its close button, and leaves the step alone until it is gone
+            if (J.Get(step, "dialog") is JsonObject dlg)
+            {
+                dialogSeen ??= sw.ElapsedMilliseconds;
+                if (J.Get(dlg, "close") is JsonArray cr && cr.Count == 4 && dialogClicks < 3)
+                {
+                    if (!dialogShot) { Thread.Sleep(SettleMs); Shoot(mcp, r, reportDir, caseName, "prep"); dialogShot = true; }
+                    if (sw.ElapsedMilliseconds - dialogClickAt > 2500)
+                    {
+                        Input.Click((int)((double)cr[0]! + (double)cr[2]! / 2), (int)((double)cr[1]! + (double)cr[3]! / 2));
+                        dialogClicks++;
+                        dialogClickAt = sw.ElapsedMilliseconds;
+                    }
+                }
+                else if (dialogClicks >= 3 || sw.ElapsedMilliseconds - dialogSeen > 4000)
+                {
+                    r.Verdict = "fail";
+                    r.Note = dialogClicks >= 3 ? $"the window in the way (\"{J.Str(dlg, "title")}\") stayed after {dialogClicks} clicks on its close button"
+                                               : $"the window in the way (\"{J.Str(dlg, "title")}\") has no close button marked: the user is told to close it but not where";
+                    Shoot(mcp, r, reportDir, caseName);
+                    return r;
+                }
+                Thread.Sleep(300);
+                continue;
+            }
+            if (dialogSeen != null && !dialogNoted)
+            {
+                dialogNoted = true;
+                Console.WriteLine($"  step {index + 1}: a window in the way closed by its marked close button ({dialogClicks} click(s))");
+            }
             var targets = J.Items(J.Get(step, "targets")).Where(t => J.Get(t, "satisfied")?.GetValue<bool>() != true).ToList();
             var visible = targets.FirstOrDefault(t => J.Str(t, "visibility") is "visible");
             if (J.Str(step, "issue") is string said) cardSaid ??= said;
@@ -796,7 +831,7 @@ internal static class Autopilot
             ? ((int)((double)v[0]! + (double)v[2]! / 2), (int)((double)v[1]! + (double)v[3]! / 2)) : (500, 500);
 
     /// <summary>A picture of the screen with the overlay's marks, card and mascot, for the report.</summary>
-    private static void Shoot(Mcp mcp, StepResult r, string dir, string caseName)
+    private static void Shoot(Mcp mcp, StepResult r, string dir, string caseName, string? kind = null)
     {
         try
         {
@@ -804,9 +839,9 @@ internal static class Autopilot
             var vs = J.Get(st, "virtualScreen")?.DeepClone() ?? new JsonArray(0, 0, 1920, 1080);
             var ans = mcp.Call("screenshot", new JsonObject { ["rect"] = vs, ["includeOverlay"] = true, ["maxEdge"] = 1280 });
             if (ans.Image == null) return;
-            var name = $"{Safe(caseName)}-{r.Index + 1:00}-{(r.Verdict == "fail" ? "fail" : "step")}.png";
+            var name = $"{Safe(caseName)}-{r.Index + 1:00}-{(r.Verdict == "fail" ? "fail" : kind ?? "step")}.png";
             File.WriteAllBytes(Path.Combine(dir, name), ans.Image);
-            r.Shot = name;
+            if (kind == null) r.Shot = name;
         }
         catch { /* a missing picture never fails a case */ }
     }

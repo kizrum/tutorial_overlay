@@ -24,6 +24,7 @@ internal static partial class Engine
     /// since the user may still be scrolling or switching to it.
     /// </summary>
     private const int ExistingAfterMs = 4000;
+    private const int OpeningWindowMs = 12000;   // the card's patience with a window the previous step opened
     /// <summary>A step that scrolls until its target shows: the target may stay off screen this long before it is reported.</summary>
     private const int ScrollFindMs = 20000;
 

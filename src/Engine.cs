@@ -533,7 +533,7 @@ internal static partial class Engine
             if (best != null)
             {
                 // a modal dialog of the app is open: the click never reaches the main window
-                if (step != null && step.Targets.Contains(best) && BlockingDialog(step) is string dialog && Native.HitWindow(pt).root != GetForegroundWindow())
+                if (step != null && step.Targets.Contains(best) && BlockingDialog(step) is string dialog)
                 {
                     Events.Emit("blocked", new() { ["step"] = t!.Index, ["mark"] = best.Id, ["dialog"] = dialog, ["x"] = c.X, ["y"] = c.Y });
                     return;
@@ -542,6 +542,8 @@ internal static partial class Engine
                 return;
             }
             if (step != null && step.Targets.Any(m => m.OpensArmedAt != null)) return;
+            // a window in the way is being dealt with (its close button pressed): no miss on a step not begun yet
+            if (step != null && BlockingDialogWindow(step) != null) return;
             if (step != null && step.Targets.Any(m => m.Geo != null && (m.Geo.A.Pids.Contains(rootPid) || m.Geo.A.Pids.Contains(childPid))))
             {
                 var nearest = step.Targets.Where(m => m.Geo != null && m.Geo.Hits.Count > 0 && !m.Satisfied)
@@ -864,7 +866,10 @@ internal static partial class Engine
                     if (!SeenState.TryGetValue(m.Id, out var was) || was != state) { SeenState[m.Id] = state; Log.Debug($"mark {m.Id}: {state}"); }
                 }
             if (step is { Sequence: true }) ApplySequence(step, now);
-            WatchMissing(t, step, now);
+            // a window the app waits on (or, before the lesson starts, one over the app) comes first: the step's own
+            // marks wait until it is gone; step 1 does not begin under "close this window first"
+            bool inTheWay = step != null && (BlockingDialogWindow(step) != null || DialogUndecided(step, now));
+            if (!inTheWay) WatchMissing(t, step, now);
             var visible = marks.Where(m => m.Geo != null).ToList();
             Declutter(visible);
 
@@ -887,7 +892,7 @@ internal static partial class Engine
             var sc = new Scene { Pulse = Animate ? 0.5f + 0.5f * (float)Math.Sin(now.Ticks / (double)TimeSpan.TicksPerMillisecond / 1600.0 * Math.PI * 2) : 1f };
             float dim = 0;
             // with the mascot on, a step's highlight appears when it has arrived (appeared, or stopped walking)
-            bool holdTargets = step != null && HoldForMascot(t!, step, now);
+            bool holdTargets = step != null && (inTheWay || HoldForMascot(t!, step, now));
             var grouped = holdTargets || step == null ? new HashSet<Mark>() : GroupedTargets(step);
             foreach (var m in visible)
             {
@@ -919,8 +924,8 @@ internal static partial class Engine
             foreach (var m in marks.Where(m => m.Geo == null)) m.ShownAt = null;
             if (grouped.Count > 0) AddGroupVisuals(grouped, sc, f.Card.Avoid);
             if (step != null && !holdTargets) AddOffscreenVisuals(step, sc, f.Card.Avoid);
-            if (step != null) AddDragVisuals(step, sc, f.Card.Avoid, fgPid);
-            if (step != null && t!.AdvanceAt == null) AddMotionVisuals(step, sc, f.Card.Avoid, fgPid);
+            if (step != null && !inTheWay) AddDragVisuals(step, sc, f.Card.Avoid, fgPid);
+            if (step != null && !inTheWay && t!.AdvanceAt == null) AddMotionVisuals(step, sc, f.Card.Avoid, fgPid);
             if (step != null && t!.AdvanceAt == null) AddDialogVisuals(step, sc, f.Card.Avoid);
             CheckOpens(marks, step, now);
             AddPickVisuals(sc, f.Card.Avoid);
@@ -1003,9 +1008,9 @@ internal static partial class Engine
     private static string? BlockingDialog(Step s) => BlockingDialogWindow(s)?.title;
 
     // the card, the dialog frame and help all ask within one frame: work it out once per frame (and per step)
-    private static (Step step, long tick, (IntPtr hwnd, string title, Rectangle frame)? value)? _dialogMemo;
+    private static (Step step, long tick, Blocker? value)? _dialogMemo;
 
-    private static (IntPtr hwnd, string title, Rectangle frame)? BlockingDialogWindow(Step s)
+    private static Blocker? BlockingDialogWindow(Step s)
     {
         long tick = Environment.TickCount64;
         if (_dialogMemo is { } dm && ReferenceEquals(dm.step, s) && tick - dm.tick < 25) return dm.value;
@@ -1055,24 +1060,27 @@ internal static partial class Engine
     }
 
     /// <summary>A dialog found in the way on this step: it stays in the way while it is open, wherever focus goes.</summary>
-    private static (Step step, IntPtr hwnd)? _stickyDialog;
+    private static (Step step, IntPtr hwnd, bool modal)? _stickyDialog;
 
-    private static (IntPtr hwnd, string title, Rectangle frame)? ComputeBlockingDialog(Step s)
+    private static Blocker? ComputeBlockingDialog(Step s)
     {
         // Blender hands focus to the window under the pointer: with the pointer off the dialog, the main window was
         // "in front" for a moment, the card dropped "close it first" and the target's mark came up behind the dialog
         if (_stickyDialog is { } sd && ReferenceEquals(sd.step, s))
         {
-            if (Native.IsWindow(sd.hwnd) && Native.IsWindowVisible(sd.hwnd) && !Native.IsIconic(sd.hwnd))
-                return (sd.hwnd, CleanTitle(Native.WindowTitle(sd.hwnd)), Native.FrameRect(sd.hwnd));
+            var sfr = Native.FrameRect(sd.hwnd);
+            // a modal dialog is in the way wherever focus goes; a window that only covered the app is out of the way
+            // once the app is brought over it (the user clicked the app: what lay under that window is in reach again)
+            if (Native.IsWindow(sd.hwnd) && Native.IsWindowVisible(sd.hwnd) && !Native.IsIconic(sd.hwnd) && (sd.modal || OnTop(sd.hwnd, sfr)))
+                return new Blocker(sd.hwnd, CleanTitle(Native.WindowTitle(sd.hwnd)), sfr, sd.modal);
             _stickyDialog = null;
         }
         var found = ComputeBlockingDialogNow(s);
-        if (found is { } f) _stickyDialog = (s, f.hwnd);
+        if (found is { } f) _stickyDialog = (s, f.hwnd, f.modal);
         return found;
     }
 
-    private static (IntPtr hwnd, string title, Rectangle frame)? ComputeBlockingDialogNow(Step s)
+    private static Blocker? ComputeBlockingDialogNow(Step s)
     {
         var fg = AppForegroundWindow();
         if (fg == IntPtr.Zero) return null;
@@ -1098,8 +1106,57 @@ internal static partial class Engine
         var frame = Native.FrameRect(fg);
         var main = Native.FrameRect(roots.First());
         if ((long)frame.Width * frame.Height >= (long)main.Width * main.Height * 0.6) return null;   // another big window, not a dialog
-        return (fg, title, frame);
+        // a modal dialog (Windows disables the window it belongs to): the app ignores clicks until it is answered.
+        // Any other window in front is in the way only when it covers a target (Blender's render window over the
+        // viewport) or, before the lesson starts, when it lies over the app the lesson works in (Steam's "Special
+        // Offers", popped up by itself at start): that is the preparation, step 1 begins once it is closed
+        bool modal = !roots.All(Native.IsWindowEnabled);
+        if (!modal)
+        {
+            var targetRects = s.Targets.Where(m => m.Geo != null && !m.Satisfied).Select(m => m.Geo!.TargetBounds).Where(r => r.Width > 0 && r.Height > 0).ToList();
+            bool coversTarget = targetRects.Any(r => r.IntersectsWith(frame));
+            var over = Rectangle.Intersect(frame, main);
+            bool coversApp = _tut is { } tt && IsPrep(tt, s) && (long)over.Width * over.Height * 4 >= (long)frame.Width * frame.Height;
+            if (!coversTarget && !coversApp) return null;
+            // the step's first moments: the window a target lives in may not be resolved yet (it is never in the
+            // way). Undecided, the step's marks wait too: they must not flash up and go again under "close it first"
+            if (!coversTarget && (DateTime.UtcNow - s.EnteredAt).TotalMilliseconds < PrepSettleMs) { _dialogUndecided = s; return null; }
+        }
+        return new Blocker(fg, title, frame, modal);
     }
+
+    private const int PrepSettleMs = 600;
+    private static Step? _dialogUndecided;
+
+    private static bool DialogUndecided(Step s, DateTime now) => ReferenceEquals(_dialogUndecided, s) && (now - s.EnteredAt).TotalMilliseconds < PrepSettleMs;
+
+    /// <summary>Before the lesson's first step has begun: nothing done on it yet.</summary>
+    private static bool IsPrep(Tutorial t, Step s) => t.Index == 0 && ReferenceEquals(t.Current, s) && s.History.Count == 0 && !s.Targets.Any(m => m.Satisfied);
+
+    /// <summary>Whether the screen shows <paramref name="hwnd"/> over its frame (our own windows looked through).</summary>
+    private static bool OnTop(IntPtr hwnd, Rectangle frame) => OnTop(hwnd, new[]
+    {
+        new PointF(frame.X + frame.Width / 2f, frame.Y + frame.Height / 2f),
+        new PointF(frame.X + frame.Width * 0.25f, frame.Y + frame.Height * 0.25f), new PointF(frame.X + frame.Width * 0.75f, frame.Y + frame.Height * 0.25f),
+        new PointF(frame.X + frame.Width * 0.25f, frame.Y + frame.Height * 0.75f), new PointF(frame.X + frame.Width * 0.75f, frame.Y + frame.Height * 0.75f),
+    });
+
+    private static bool OnTop(IntPtr hwnd, IEnumerable<PointF> spots)
+    {
+        bool any = false;
+        foreach (var p in spots)
+        {
+            var hit = Native.HitWindow(p);
+            if (hit.rootPid == Environment.ProcessId) continue;
+            any = true;
+            if (hit.root == hwnd) return true;
+        }
+        return !any;
+    }
+
+    /// <summary>The close button of a window in the way, when the overlay has found it and it is in sight.</summary>
+    private static RectangleF? CloseSpot(Blocker d) =>
+        DialogClose.For(d.hwnd, d.frame) is RectangleF r && OnTop(d.hwnd, new[] { new PointF(r.X + r.Width / 2, r.Y + r.Height / 2) }) ? r : null;
 
     /// <summary>
     /// A window the lesson itself led to: a target of this or an earlier step lives in it (find.in, written or pinned —
@@ -1153,11 +1210,19 @@ internal static partial class Engine
         float k = Native.ScaleAt(center);
         var r = (RectangleF)d.frame;
         r.Inflate(6 * k, 6 * k);
-        sc.Prims.Add((new Prim { Kind = PrimKind.Rect, Rect = r, Color = Palette.Warn, Width = 3.5f * k, Radius = 8 * k, Scale = k }, 1f));
+        var close = CloseSpot(d);
+        // the close button found: it is what to press, the window's outline only says which window
+        sc.Prims.Add((new Prim { Kind = PrimKind.Rect, Rect = r, Color = Palette.Warn, Width = (close != null ? 2f : 3.5f) * k, Radius = 8 * k, Scale = k }, close != null ? 0.55f : 1f));
         avoid.Add(r);
+        if (close is RectangleF c)
+        {
+            c.Inflate(3 * k, 3 * k);
+            sc.Prims.Add((new Prim { Kind = PrimKind.Rect, Rect = c, Color = Palette.Warn, Width = 3.5f * k, Radius = 6 * k, Scale = k }, 1f));
+            avoid.Add(c);
+        }
         // the mascot stands by the dialog and says this itself; a caption of its own only when there is no mascot
         if (_tut is { Mascot: true } && Settings.Current.Mascot) return;
-        var text = Settings.Current.Text.DialogMark;
+        var text = close != null ? Settings.Current.Text.DialogCloseMark : Settings.Current.Text.DialogMark;
         float px = 15 * k;
         var sz = Theme.Measure(text, Theme.Font(px), 360 * k);
         float w = sz.Width + 24 * k + 4 * k, h = sz.Height + 16 * k;
@@ -2180,7 +2245,7 @@ internal static partial class Engine
             card.Issue = TargetIssue(s);
             card.Review = s.Review && !s.Until.Any(c => c.SeenUnmet && c.Type != "manual");
             card.Controls = s.Controls ?? new HashSet<string> { "back", "undo", "skip", "done", "stop", "help" };
-            if (BlockingDialog(s) is string dialog) ShowDialogFirst(card, t, s, dialog);
+            if (BlockingDialogWindow(s) is { } dialog) ShowDialogFirst(card, t, s, dialog);
             NotePrep(t, card.Prep ? BlockingDialog(s) : null);
             var firstVisible = s.Targets.FirstOrDefault(m => m.Geo != null);
             if (firstVisible != null) card.Focus = firstVisible.Geo!.Center;
@@ -2192,13 +2257,13 @@ internal static partial class Engine
     /// The app waits on a dialog the step knows nothing about: the step's own text would describe a screen the user
     /// cannot reach yet, so the card asks to deal with the dialog instead — "let's get ready" before the first step.
     /// </summary>
-    private static void ShowDialogFirst(CardModel card, Tutorial t, Step s, string dialog)
+    private static void ShowDialogFirst(CardModel card, Tutorial t, Step s, Blocker dialog)
     {
         var loc = Settings.Current.Text;
-        bool notStarted = t.Index == 0 && s.History.Count == 0 && !s.Targets.Any(m => m.Satisfied);
+        bool notStarted = IsPrep(t, s);
         card.Prep = notStarted;
         card.Title = notStarted ? loc.PrepareTitle : loc.DialogTitle;
-        card.Text = string.Format(loc.PrepareText, dialog);
+        card.Text = string.Format(dialog.modal ? loc.PrepareText : notStarted ? loc.PrepareTextCover : loc.CoverText, dialog.title);
         card.Why = null;
         card.Issue = null;
         card.Hint = null;
@@ -2224,6 +2289,9 @@ internal static partial class Engine
         {
             _prep = null;
             Events.Emit("prepare_done", new() { ["dialog"] = p.dialog, ["note"] = "the dialog is gone: step 1 is shown" });
+            // step 1 begins now, not when the lesson was started under the dialog: its first moments (the mascot
+            // walking over, the grace before "I can't see it") are its own
+            if (t.Index == 0 && t.Current is { } cur) { cur.EnteredAt = DateTime.UtcNow; Finder.StepSince = cur.EnteredAt; }
         }
         else if (_prep is { } q && !ReferenceEquals(q.t, t)) _prep = null;
     }
@@ -2297,7 +2365,7 @@ internal static partial class Engine
 
     private static string? TargetIssue(Step s)
     {
-        if (BlockingDialog(s) is string dialog) return string.Format(Settings.Current.Text.IssueDialog, dialog);
+        if (BlockingDialogWindow(s) is { } dialog) return string.Format(dialog.modal ? Settings.Current.Text.IssueDialog : Settings.Current.Text.IssueCover, dialog.title);
         var open = s.Targets.Where(m => !m.Satisfied && (m.HasHitArea || m.HasButtons || m.Check != null)).ToList();
         if (open.Count == 0 || open.Any(m => m.Visibility == "visible")) return null;
         var t = Settings.Current.Text;
@@ -2306,6 +2374,12 @@ internal static partial class Engine
         // "I can't see it" / "can't find the element" over an open menu sends the user wrong. As long as the agent
         // is not told either (MissingAfterMs), the card says nothing about a target that is not found yet
         if (IsMissing(v) && (DateTime.UtcNow - s.EnteredAt).TotalMilliseconds < MissingAfterMs) return null;
+        // a window the previous step opened that is not there yet ("closed"), or an app whose UI Automation is busy
+        // while it opens one ("not answering": Steam's settings, drawn by Chromium, take seconds): only after a while
+        // When the previous step's click was to open a window (opens), it may well take longer: Steam's settings,
+        // on a Steam just started, came after 6 s — "it is closed, open it again" was false, the click had done it
+        bool opening = _tut is { } tu && tu.Index > 0 && ReferenceEquals(tu.Current, s) && tu.Steps[tu.Index - 1].Targets.Any(m => m.Opens != null);
+        if ((v.StartsWith("closed") || v == "not answering") && (DateTime.UtcNow - s.EnteredAt).TotalMilliseconds < (opening ? OpeningWindowMs : ExistingAfterMs)) return null;
         return v switch
         {
             "minimized" => t.IssueMinimized,
@@ -2565,6 +2639,12 @@ internal static partial class Engine
                 ["id"] = s.Id, ["title"] = s.Title, ["text"] = s.Text, ["checking"] = s.Checking ? true : null,
                 ["hint"] = s.Hint,   // what the card answers now (the agent's hint, or the overlay's own)
                 ["issue"] = TargetIssue(s),   // what the card tells the user is wrong with the targets ("I can't see …")
+                // a window in the way (step 0 before step 1, or a dialog mid-lesson): its close button when found
+                ["dialog"] = BlockingDialogWindow(s) is { } dlg ? new JsonObject
+                {
+                    ["title"] = dlg.title, ["modal"] = dlg.modal, ["frame"] = J.RectJson(dlg.frame),
+                    ["close"] = CloseSpot(dlg) is RectangleF cs ? J.RectJson(cs) : null,
+                } : null,
                 ["targets"] = new JsonArray(s.Targets.Select(m => (JsonNode)MarkJson(m)).ToArray()),
                 ["until"] = new JsonArray(s.Until.Select(c => (JsonNode)c.ToJson()).ToArray()),
                 ["undoDepth"] = s.History.Count,

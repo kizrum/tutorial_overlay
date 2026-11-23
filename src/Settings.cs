@@ -113,6 +113,10 @@ internal sealed class Loc
     public string PrepareTitle = "Подготовимся к началу туториала", DialogTitle = "Сначала закроем окно",
         PrepareText = "В программе открыто окно «{0}». Ответьте на него или закройте — пока оно открыто, программа не принимает клики. Потом продолжим.";
     public string DialogMark = "Сначала ответьте на это окно или закройте его";
+    public string DialogCloseMark = "Закройте это окно здесь";
+    public string PrepareTextCover = "Окно «{0}» открыто поверх программы. Закройте его — потом начнём.",
+        CoverText = "Окно «{0}» закрывает то, что нужно на этом шаге. Закройте или сдвиньте его — потом продолжим.",
+        IssueCover = "Окно «{0}» закрывает нужное место — закройте или сдвиньте его.";
     public string CantFind = "Не вижу, куда жать", DontGet = "Не понимаю, что делать", Cancel = "Отмена", HintHelp = "помощь";
     public string Other = "Другое — опишу сам", OtherTitle = "Опишите, что не получается", Send = "Отправить",
         OtherHint = "Enter — отправить · Shift+Enter — новая строка · Esc — отмена";
@@ -204,7 +208,10 @@ internal sealed class Loc
         IssueDialog = "Close the \"{0}\" window first — the app ignores clicks while it is open.",
         PrepareTitle = "Let's get ready to start", DialogTitle = "First, close this window",
         PrepareText = "The app has the \"{0}\" window open. Answer or close it — the app ignores clicks while it is open. Then we carry on.",
-        DialogMark = "Answer or close this window first",
+        DialogMark = "Answer or close this window first", DialogCloseMark = "Close this window here",
+        PrepareTextCover = "The \"{0}\" window is open over the app. Close it — then we start.",
+        CoverText = "The \"{0}\" window covers what this step needs. Close or move it — then we carry on.",
+        IssueCover = "The \"{0}\" window covers the spot — close or move it.",
         CantFind = "I can't find where to click", DontGet = "I don't get what to do", Cancel = "Cancel", HintHelp = "help",
         Other = "Something else — I'll describe it", OtherTitle = "Describe what isn't working", Send = "Send",
         OtherHint = "Enter — send · Shift+Enter — new line · Esc — cancel",
