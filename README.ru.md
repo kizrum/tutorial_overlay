@@ -2,6 +2,8 @@
 
 <a href="README.md">English</a> · <b>Русский</b>
 
+[![kizrum/tutorial_overlay MCP server](https://glama.ai/mcp/servers/kizrum/tutorial_overlay/badges/score.svg)](https://glama.ai/mcp/servers/kizrum/tutorial_overlay)
+
 Пошаговые туториалы прямо поверх любой программы Windows — их ведёт ИИ-агент.
 
 <img alt="Урок в FL Studio: маскот показывает на ячейки, карточка отмечает каждый шаг" src="docs/media/fl-lesson.webp" width="800" />

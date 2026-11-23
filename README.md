@@ -2,6 +2,8 @@
 
 <b>English</b> · <a href="README.ru.md">Русский</a>
 
+[![kizrum/tutorial_overlay MCP server](https://glama.ai/mcp/servers/kizrum/tutorial_overlay/badges/score.svg)](https://glama.ai/mcp/servers/kizrum/tutorial_overlay)
+
 Step-by-step tutorials drawn right on top of any Windows app — led by an AI agent.
 
 <img alt="A lesson in FL Studio: the mascot points at the step cells, the card ticks off each step" src="docs/media/fl-lesson.webp" width="800" />
