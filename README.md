@@ -8,6 +8,13 @@ Step-by-step tutorials drawn right on top of any Windows app — led by an AI ag
 
 The lesson above was played through by the project's test robot in FL Studio.
 
+**Shows where. Explains why.** Agents that click through an app for you get the job done and leave you none the
+wiser. TutorialOverlay leaves the clicks to you: it points at each one and says why it is the right one, so next
+time you need no help.
+
+Everything runs on your computer. The server listens on `127.0.0.1` only and sends nothing anywhere; it does not
+record the screen and takes a screenshot only when the agent asks for one ([more](docs/server.md#screenshots-and-privacy)).
+
 ## Tutorial
 
 To get started, [install TutorialOverlay](#installation) and ask your AI agent how to do something in an app:
@@ -83,6 +90,28 @@ Add to `~/.codex/config.toml` (or `.codex/config.toml` in a project):
 command = "tutorial-overlay"
 args = ["--stdio"]
 ```
+
+</details>
+
+<details>
+<summary>Claude Desktop</summary>
+
+In Claude Desktop open **Settings → Developer → Edit Config** and add the server to `claude_desktop_config.json`
+(keep the other entries of `mcpServers` if you have some):
+
+```json
+{
+  "mcpServers": {
+    "tutorial-overlay": {
+      "command": "C:\\Tools\\TutorialOverlay\\TutorialOverlay.exe",
+      "args": ["--stdio"]
+    }
+  }
+}
+```
+
+Use the full path to the exe: Claude Desktop may not see a `PATH` you changed while it was running. Restart Claude
+Desktop, and the tools appear in a new chat. Then just ask: *“Show me how to turn on word wrap in Notepad.”*
 
 </details>
 
