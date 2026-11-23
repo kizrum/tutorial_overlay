@@ -197,7 +197,10 @@ administrator too, and `validate` counts it as an error. The hook guard does not
 ## Screenshots and privacy
 
 The overlay does not record the screen on its own. A full screenshot is taken only on a `screenshot` call. A pixel
-check reads a 3×3 square at the target's point every 150 ms, and only for targets with a `check`.
+check reads a 3×3 square at the target's point every 150 ms, and only for targets with a `check`. A text target is
+read from its window's own pixels about once a second; a window that gives none (a WinUI 3 popup such as Notepad's
+menus) is read from the screen in its rectangle instead, with the overlay's windows kept out of that capture for
+about 0.1 s — a screen recording of yours may miss the overlay for that moment.
 
 Your own screenshots and screen recordings see the overlay. A pixel check looks through a tiny transparent "hole"
 the canvas leaves at the probe point. The agent's `screenshot()` excludes the overlay's windows from capture for a

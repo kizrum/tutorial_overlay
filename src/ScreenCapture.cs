@@ -199,6 +199,25 @@ internal static class ScreenCapture
         return distinct < 3 && first.R + first.G + first.B < 30;
     }
 
+    /// <summary>
+    /// The window's own pixels, else — a window PrintWindow gives nothing for, such as a WinUI 3 popup (Notepad's View
+    /// menu) — the screen there, with our own windows kept out of that capture for a moment (the card says the step's
+    /// words: read from the screen, "Word wrap" would be found in it). For text reads (about once a second), not for
+    /// anything that runs every frame.
+    /// </summary>
+    public static Bitmap? CaptureWindowOrScreen(IntPtr hwnd, Rectangle screenRect, int maxAgeMs = ShotTtlMs)
+    {
+        var shot = CaptureWindow(hwnd, screenRect, maxAgeMs);
+        if (shot != null || !Native.IsWindowVisible(hwnd) || Native.IsIconic(hwnd) || !Native.GetWindowRect(hwnd, out var wr)) return shot;
+        var area = Rectangle.Intersect(screenRect, wr.ToRectangle());
+        if (area.Width < 4 || area.Height < 4) return null;
+        if (Log.Verbose) Log.Debug($"  0x{hwnd.ToInt64():X} prints nothing: reading the screen there");
+        bool flip = !Settings.Global.HideFromCapture;
+        if (flip) { Program.SetCapturable(false); System.Threading.Thread.Sleep(80); }
+        try { return Capture(area); }
+        finally { if (flip) Program.SetCapturable(true); }
+    }
+
     public static Bitmap Capture(Rectangle r)
     {
         var bmp = new Bitmap(Math.Max(1, r.Width), Math.Max(1, r.Height), PixelFormat.Format32bppArgb);

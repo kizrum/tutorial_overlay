@@ -79,9 +79,12 @@ internal static partial class Engine
                                          && at >= step.EnteredAt.AddMilliseconds(-Finder.GraceFor(step.Review))
                                          && (now - at).TotalMilliseconds >= MissingAfterMs)
                              .OrderByDescending(w => WindowSince[w.Hwnd]).FirstOrDefault();
-            // a "not found" given before that window opened says nothing about it: an app with a big, slow UIA tree
-            // (Steam's library) keeps the resolver busy for seconds, and its menu opened in the middle of a search
-            if (win != null && VerdictAt(m.Anchor) is DateTime verdict && verdict < WindowSince[win.Hwnd]) continue;
+            // only a "not found" read once that window stood still counts. One given before it opened says nothing
+            // about it (an app with a big, slow UIA tree — Steam's library — keeps the resolver busy for seconds, and
+            // its menu opened in the middle of a search); nor does the first read while it was fading in: a text is
+            // re-read only every second or so, and Notepad's View menu was reported 70 ms before the next read found
+            // "Word wrap" in it. Until such a read comes, wait for it
+            if (win != null && VerdictAt(m.Anchor) is DateTime verdict && verdict < WindowSince[win.Hwnd].AddMilliseconds(MissingAfterMs)) continue;
             RectangleF? scope = null;
             string where = "new window";
             if (win == null)

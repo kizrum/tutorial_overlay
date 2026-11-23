@@ -635,7 +635,7 @@ internal static class Finder
             if (readArea.Height < followed.H) readArea = area;
         }
         var shotAt = DateTime.UtcNow;
-        var shot = ScreenCapture.CaptureWindow(r.Root, Rectangle.Round(readArea));
+        var shot = ScreenCapture.CaptureWindowOrScreen(r.Root, Rectangle.Round(readArea));
         if (shot == null) { if (Log.Verbose) Log.Debug($"  no picture of 0x{r.Root.ToInt64():X} {Rectangle.Round(readArea)}"); return Miss(); }
         if (Log.Verbose && f.Text != null) Log.Debug($"  reading 0x{r.Root.ToInt64():X} {shot.Width}x{shot.Height}{(followed != null ? " (band around the followed text)" : "")}");
         try
@@ -651,7 +651,7 @@ internal static class Finder
                 readArea = area;
                 shot.Dispose();
                 shotAt = DateTime.UtcNow;
-                shot = ScreenCapture.CaptureWindow(r.Root, Rectangle.Round(readArea));
+                shot = ScreenCapture.CaptureWindowOrScreen(r.Root, Rectangle.Round(readArea));
                 if (shot == null) return Miss();
                 found = FindIn(shot, f, out read, WholeAreaBudget);
             }

@@ -6,6 +6,11 @@ only fixes things.
 
 ## [Unreleased]
 
+- Fixed: a text target in Notepad's menus (WinUI 3 popups) was not found for seconds, and the agent got a false
+  `target_not_found` — such a popup gives no picture of its own, so its text could not be read. It is now read from
+  the screen there, with the overlay kept out of that capture. A target is also reported missing only after a read of
+  its window that came once the window stood still, not the first read while a menu was still fading in.
+
 - A new tool, `guide`: the plugin's skill, built into the exe, for agents without the Claude Code plugin (Claude
   Desktop, Codex, Cursor, …). The server's instructions tell them to call it once before the first lesson. Reading
   it never takes the overlay from the agent that holds it. The skill no longer speaks only to Claude Code.
