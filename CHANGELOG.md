@@ -6,6 +6,9 @@ only fixes things.
 
 ## [Unreleased]
 
+- The release zip is built by GitHub Actions on the release tag (`.github/workflows/release.yml`), ready to sign the
+  exe through SignPath Foundation once the project is accepted; until then it is unsigned as before. Tests stay
+  local; `release.ps1 -Winget` writes the winget manifest from the published zip.
 - When the tools are missing, the skill tells the user to install from the Releases zip and put the exe on `PATH`
   as `tutorial-overlay`, instead of a winget package that is not published yet. The plugin's README says the same.
 - A new README: a logo (the step card in 3D under a sticker wordmark), a lesson clip, the step card, the agent's lesson as an example, installation for Claude Code (the

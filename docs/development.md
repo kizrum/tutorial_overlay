@@ -198,13 +198,22 @@ its offsets were measured at; without it these tests check nothing.
 
 ## Releases
 
-Built on this computer, no hosted CI. Bump `<Version>` in `TutorialOverlay.csproj`, add its section to
-`CHANGELOG.md`, then:
+Tests and checks run on this computer; the published zip is built by GitHub Actions, and only on a release tag (so
+that the exe can be signed: SignPath Foundation signs only builds it sees made from the source). Bump `<Version>` in
+`TutorialOverlay.csproj`, add its section to `CHANGELOG.md`, then:
 
 ```powershell
 .\release.ps1 -Tag
+git push origin main v<version>
+# when the workflow is done:
+.\release.ps1 -Winget
 ```
 
-It runs the tests, publishes a self-contained single-file exe, checks that `--version` reports the new version, and
-writes `dist\TutorialOverlay-<version>-win-x64.zip` and tags `v<version>`. Then: push `main` and the tag, and
-create the GitHub release `v<version>` with the zip.
+`-Tag` runs the tests, publishes a self-contained single-file exe, checks that `--version` reports the new version,
+builds a local zip as a check and tags `v<version>`. The pushed tag starts
+[`.github/workflows/release.yml`](../.github/workflows/release.yml): it builds the exe again (`release.ps1 -Ci`),
+signs it once the repository has the variable `SIGNPATH_ORGANIZATION_ID` and the secret `SIGNPATH_API_TOKEN`
+(unsigned until then), zips it and creates the GitHub release `v<version>` with the zip and the version's
+`CHANGELOG.md` section. It never replaces an existing release. `-Winget` downloads that zip and writes the winget
+manifest with its hash to `dist\winget\<version>`. The workflow runs on a standard runner, free for a public
+repository; nothing else runs on GitHub Actions.

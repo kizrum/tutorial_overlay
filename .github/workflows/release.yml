@@ -1,0 +1,87 @@
+# The release build: runs only when a version tag v* is pushed (.\release.ps1 -Tag, then git push origin v<version>).
+# Tests run locally before the tag; here the exe is built, signed by SignPath Foundation once it is set up, zipped
+# and published as the GitHub release of the tag. A standard runner: free for a public repository.
+#
+# Signing turns on when the repository has the variable SIGNPATH_ORGANIZATION_ID and the secret SIGNPATH_API_TOKEN
+# (Settings → Secrets and variables → Actions). Until then the zip carries the unsigned exe.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # create the GitHub release
+  actions: read     # SignPath reads the uploaded artifact
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Check the tag against the version
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content TutorialOverlay.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if ("v$version" -ne '${{ github.ref_name }}') { throw "tag ${{ github.ref_name }} does not match <Version> $version" }
+          "version=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Build
+        id: build
+        shell: pwsh
+        run: ./release.ps1 -Ci
+
+      - name: Upload the exe for signing
+        id: unsigned
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-exe
+          path: dist/${{ steps.build.outputs.name }}/TutorialOverlay.exe
+          if-no-files-found: error
+
+      - name: Sign (SignPath Foundation)
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: tutorial_overlay
+          signing-policy-slug: release-signing
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Put the signed exe in place
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature signed/TutorialOverlay.exe
+          if ($sig.Status -ne 'Valid') { throw "the signed exe does not verify: $($sig.Status) $($sig.StatusMessage)" }
+          Copy-Item signed/TutorialOverlay.exe 'dist/${{ steps.build.outputs.name }}/TutorialOverlay.exe' -Force
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          $name = '${{ steps.build.outputs.name }}'
+          Compress-Archive -Path "dist/$name/*" -DestinationPath "dist/$name.zip"
+          "{0}  SHA256 {1}" -f "$name.zip", (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+
+      - name: GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # the release notes: this version's section of CHANGELOG.md, without its heading
+          $lines = Get-Content CHANGELOG.md
+          $start = [array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match "^## \[$([regex]::Escape($env:version))\]" })
+          $end = [array]::FindIndex([string[]]$lines, $start + 1, [Predicate[string]]{ param($l) $l -match '^## \[' })
+          if ($end -lt 0) { $end = $lines.Count }
+          ($lines[($start + 1)..($end - 1)] -join "`n").Trim() | Out-File -Encoding utf8 notes.md
+          # never replaces an existing release: a published zip is pinned by its winget manifest
+          gh release create '${{ github.ref_name }}' 'dist/${{ steps.build.outputs.name }}.zip' --title "TutorialOverlay $env:version" --notes-file notes.md

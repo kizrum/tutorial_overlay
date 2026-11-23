@@ -157,7 +157,8 @@ dotnet run --project tests
 claude mcp add --scope user tutorial-overlay -- "$PWD\publish\TutorialOverlay.exe" --stdio
 ```
 
-`.\release.ps1` builds the release zip. How the program is built inside is in
+`.\release.ps1` builds the release zip as a check; the published one is built on a release tag by
+[GitHub Actions](docs/development.md#releases). How the program is built inside is in
 [`docs/development.md`](docs/development.md).
 
 ## Reference

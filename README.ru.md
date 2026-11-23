@@ -157,7 +157,8 @@ dotnet run --project tests
 claude mcp add --scope user tutorial-overlay -- "$PWD\publish\TutorialOverlay.exe" --stdio
 ```
 
-`.\release.ps1` собирает zip для релиза. Устройство программы — в [`docs/development.md`](docs/development.md).
+`.\release.ps1` собирает zip для проверки; опубликованный собирает [GitHub Actions](docs/development.md#releases) по
+тегу релиза. Устройство программы — в [`docs/development.md`](docs/development.md).
 
 ## Справочник (на английском)
 
