@@ -6,6 +6,13 @@ only fixes things.
 
 ## [Unreleased]
 
+- Fixed: the frame on a menu item found by its text (and the mascot pointing at it) jumped — it first hugged the
+  words, then grew to the whole item once the pointer lit it up, or was read while the menu still slid in. The item's
+  rectangle now comes from UI Automation at once (also inside WinUI 3 popups, which answer hit-testing only with
+  their host), and a window is read only once it has stopped opening.
+- Fixed: the card said "I can't see …, open View again" or "Can't find the element" for a moment while the menu the
+  previous step opened was still appearing. It says so only as late as the agent is told (after 1.5 s).
+
 - Fixed: a text target in Notepad's menus (WinUI 3 popups) was not found for seconds, and the agent got a false
   `target_not_found` — such a popup gives no picture of its own, so its text could not be read. It is now read from
   the screen there, with the overlay kept out of that capture. A target is also reported missing only after a read of

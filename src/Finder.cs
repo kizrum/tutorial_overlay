@@ -96,6 +96,8 @@ internal static class Finder
     private static readonly ConcurrentDictionary<string, FindResult> Results = new();
     /// <summary>The biggest control measured around a text, and where (window-relative) it was.</summary>
     private static readonly ConcurrentDictionary<string, (PointF at, RectangleF box)> Boxes = new();
+    /// <summary>What UI Automation said about the control under a text, and where (null box: it names none there — asked once per place).</summary>
+    private static readonly ConcurrentDictionary<string, (PointF at, RectangleF? box)> UiaBoxes = new();
     private static readonly ConcurrentDictionary<string, DateTime> TextSearchedAt = new();
     /// <summary>The app is not in front (its marks are usually hidden): templates are looked for only this often.</summary>
     private const int TemplateIdleMs = 1000;
@@ -130,6 +132,7 @@ internal static class Finder
         if (Results.TryGetValue(from, out var r)) Results[to] = r;
         if (Tracks.TryGetValue(from, out var tr)) Tracks[to] = tr;
         if (Boxes.TryGetValue(from, out var b)) Boxes[to] = b;
+        if (UiaBoxes.TryGetValue(from, out var ub)) UiaBoxes[to] = ub;
         if (TextSearchedAt.TryGetValue(from, out var at)) TextSearchedAt[to] = at;
     }
 
@@ -276,6 +279,60 @@ internal static class Finder
         return new FindResult(false, default, 1, mine.Count > 0 ? last : null, DateTime.UtcNow, Root: mine.Count > 0 ? prev?.Root ?? IntPtr.Zero : IntPtr.Zero,
                               Closed: mine.Count == 0 ? f.InTitle ?? "" : null);
     }
+
+    /// <summary>Controls a caption names and the user clicks as a whole: a menu item, a button, a tab, a list row.</summary>
+    private static readonly HashSet<string> ClickableRoles = new(StringComparer.Ordinal)
+    {
+        "MenuItem", "Button", "SplitButton", "TabItem", "ListItem", "TreeItem", "CheckBox", "RadioButton", "Hyperlink", "ComboBox", "DataItem",
+    };
+
+    /// <summary>
+    /// The UIA control of the app under the words (screen coordinates), when it is a clickable one that holds them
+    /// and is not much bigger — a menu item, a tab; not the page or the list they are in. Null for apps without UIA
+    /// names (FL Studio, games): their box is measured from pixels.
+    /// </summary>
+    private static RectangleF? UiaControlAt(PointF p, RectangleF words, IntPtr root)
+    {
+        try
+        {
+            int pid = Native.ProcessId(root);
+            var el = System.Windows.Automation.AutomationElement.FromPoint(new System.Windows.Point(p.X, p.Y));
+            var walker = System.Windows.Automation.TreeWalker.ControlViewWalker;
+            for (int i = 0; i < 3 && el != null; i++)
+            {
+                // our own card or mascot over the words, or another app: nothing to learn here
+                if (el.Current.ProcessId != pid) { if (Log.Verbose) Log.Debug($"  uia box: the element at the words is another process's ({el.Current.ProcessId})"); return null; }
+                var info = Resolver.Read(el, cached: false);
+                if (info?.Rect is not RectangleF er) return null;
+                if (Log.Verbose) Log.Debug($"  uia box: {info.Role} \"{info.Name}\" {Rectangle.Round(er)} around the words {Rectangle.Round(words)}");
+                var held = RectangleF.Inflate(er, 2, 2);
+                if (!held.Contains(words)) return null;
+                if (ClickableRoles.Contains(info.Role))
+                    return er.Width <= Math.Max(words.Width * 8, words.Width + 400) && er.Height <= words.Height * 5 ? er : null;
+                // hit-testing stops at some hosts (a WinUI 3 popup answers only its PopupHost pane): in a small one,
+                // the clickable item that holds the words is looked for among its descendants — a menu is a short list
+                if (er.Width * er.Height <= 700_000)
+                {
+                    RectangleF? best = null;
+                    foreach (System.Windows.Automation.AutomationElement d in el.FindAll(System.Windows.Automation.TreeScope.Descendants, System.Windows.Automation.Condition.TrueCondition))
+                    {
+                        var di = Resolver.Read(d, cached: false);
+                        if (di?.Rect is not RectangleF dr || !ClickableRoles.Contains(di.Role) || !RectangleF.Inflate(dr, 2, 2).Contains(words)) continue;
+                        if (dr.Width > Math.Max(words.Width * 8, words.Width + 400) || dr.Height > words.Height * 5) continue;
+                        if (best is not RectangleF b || dr.Width * dr.Height < b.Width * b.Height) best = dr;
+                    }
+                    if (Log.Verbose) Log.Debug($"  uia box: in {info.Role} \"{info.Name}\": {(best is RectangleF bb ? Rectangle.Round(bb).ToString() : "no clickable item holds the words")}");
+                    return best;
+                }
+                el = walker.GetParent(el);
+            }
+        }
+        catch (Exception e) when (Resolver.IsGone(e) || e is InvalidOperationException || e is System.Runtime.InteropServices.COMException) { }
+        return null;
+    }
+
+    /// <summary>A window this young is not read yet: menus slide and fade in for about this long.</summary>
+    private const int OpeningMs = 400;
 
     /// <summary>How long a text found a moment ago stays put through reads that miss it.</summary>
     private const int HoldMs = 1200;
@@ -620,6 +677,11 @@ internal static class Finder
         if (f.Text == null && !TemplateStore.TryGet(f.Template, out tpl)) return Miss();
         var r = Resolver.Get(a.WithoutFind().Key) ?? Resolver.ResolveNow(a.WithoutFind());
         if (!r.Found || Native.IsIconic(r.Root)) return Miss();
+        // a window that has just opened may still be sliding in (WinUI menus): words read there now are where they
+        // pass through, not where they stop — the mark (and the mascot pointing at it) framed them mid-slide, then
+        // jumped. The read after this one (350 ms in a step's first seconds) finds them in place
+        if (Resolver.Since.TryGetValue(r.Root, out var opened) && opened != DateTime.MinValue
+            && (DateTime.UtcNow - opened).TotalMilliseconds < OpeningMs) return Miss();
         var frame = Native.FrameRect(r.Root);
         RectangleF b = r.Rel is RectangleF rel ? new RectangleF(frame.X + rel.X, frame.Y + rel.Y, rel.Width, rel.Height) : frame;
         // search area: the element, or a part of it ("within" is relative to the element's top-left)
@@ -734,6 +796,22 @@ internal static class Finder
                     box = new RectangleF(cb.X - (m.X + m.Width / 2), cb.Y - (m.Y + m.Height / 2), cb.Width, cb.Height);
             }
             catch { }
+            // first found here: ask UI Automation for the control under the words. A flat menu row has no box of its
+            // own until the pointer lights it up, so from pixels the frame first hugged the words and then jumped to
+            // the whole item; UIA knows the item's rectangle at once. Kept like a measured box (below), so it is
+            // asked once per place, not on every read
+            float near0 = Math.Max(4, m.Height * 0.9f);
+            bool Here(PointF at) => Math.Abs(at.X - (c.X - frame.X)) <= near0 && Math.Abs(at.Y - (c.Y - frame.Y)) <= near0;
+            bool uiaKnown = UiaBoxes.TryGetValue(a.Key, out var asked) && Here(asked.at);
+            if (!uiaKnown)
+            {
+                var words = new RectangleF(readArea.X + m.X, readArea.Y + m.Y, m.Width, m.Height);
+                var ub = UiaControlAt(c, words, r.Root);
+                UiaBoxes[a.Key] = (new PointF(c.X - frame.X, c.Y - frame.Y), ub is RectangleF u ? new RectangleF(u.X - c.X, u.Y - c.Y, u.Width, u.Height) : null);
+                asked = UiaBoxes[a.Key];
+            }
+            // the item UIA names is the control: a pixel measure of a menu still fading in (narrower) never wins over it
+            if (asked.box is RectangleF uiaBox) box = uiaBox;
             // the same place as a moment ago: the frame keeps the biggest control measured there. Hovered, a tab
             // shows its box; left alone it is a flat row — the frame must not jump between the two
             // (remembered per place, so it also outlives a moment the word was not seen)
@@ -744,7 +822,7 @@ internal static class Finder
             float same = Math.Max(4, m.Height * 0.9f);
             if (prev is { Found: true } && Math.Abs(prev.Rel.X - here0.X) <= same && Math.Abs(prev.Rel.Y - here0.Y) <= same)
                 here0 = prev.Rel;
-            if (Boxes.TryGetValue(a.Key, out var kept) && Math.Abs(kept.at.X - here0.X) <= same && Math.Abs(kept.at.Y - here0.Y) <= same
+            if (asked.box == null && Boxes.TryGetValue(a.Key, out var kept) && Math.Abs(kept.at.X - here0.X) <= same && Math.Abs(kept.at.Y - here0.Y) <= same
                 && (box is not RectangleF nb || nb.Width * nb.Height < kept.box.Width * kept.box.Height))
                 box = kept.box;
             if (box is RectangleF keep) Boxes[a.Key] = (here0, keep);
