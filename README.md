@@ -110,8 +110,9 @@ In Claude Desktop open **Settings → Developer → Edit Config** and add the se
 }
 ```
 
-Use the full path to the exe: Claude Desktop may not see a `PATH` you changed while it was running. Restart Claude
-Desktop, and the tools appear in a new chat. Then just ask: *“Show me how to turn on word wrap in Notepad.”*
+Use the full path to the exe: Claude Desktop may not see a `PATH` you changed while it was running. Quit Claude
+Desktop completely (closing the window may leave it running in the tray) and open it again: the tools appear in a
+new chat. Then just ask: *“Show me how to turn on word wrap in Notepad.”*
 
 </details>
 
