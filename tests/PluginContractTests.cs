@@ -143,6 +143,21 @@ public static class PluginContractTests
     }
 
     /// <summary>
+    /// Agents without the plugin read the skill through the guide tool: the exe serves this very SKILL.md (no stale
+    /// copy), without the front matter, and the server's instructions and tools/list point them to it.
+    /// </summary>
+    public static void TestGuideServesTheSkill()
+    {
+        var skill = Skill().Replace("\r\n", "\n");
+        var guide = Tools.Guide();
+        A.Check(!guide.StartsWith("---") && !guide.Contains("\nname: tutorial-overlay\n"), "guide() still carries the skill's front matter");
+        A.Check(guide.StartsWith("# Teaching with TutorialOverlay"), "guide() does not start with the skill's title: " + guide[..Math.Min(60, guide.Length)]);
+        A.Check(skill.EndsWith(guide, StringComparison.Ordinal), "guide() differs from plugin/skills/tutorial-overlay/SKILL.md: the exe was built from another text");
+        A.Check(Tools.Instructions.Contains("guide()"), "the server instructions do not tell agents without the skill to call guide()");
+        A.Check(ToolArgs().ContainsKey("guide"), "tools/list has no guide tool");
+    }
+
+    /// <summary>
     /// The Stop hook decides from lesson.json and the transcript: the fields and states it reads are the ones the
     /// program writes, and the tools it looks for in the transcript exist.
     /// </summary>

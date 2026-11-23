@@ -13,8 +13,8 @@ instead of asking "done?".
 
 The program is not installed. Tell the user to download the zip from
 https://github.com/kizrum/tutorial_overlay/releases/latest (Windows 10/11), put it on PATH as tutorial-overlay as the
-Installation section of the project's README shows, and restart Claude Code. Do not try to install or download it
-yourself.
+Installation section of the project's README shows, and restart the agent's app (Claude Code, Claude Desktop, …).
+Do not try to install or download it yourself.
 
 ## How to build a tutorial
 
@@ -101,7 +101,8 @@ yourself.
    you — help, a miss, a target not found, no more steps — and brings the lesson's progress (hits, steps, windows)
    along with it, none dropped; an older TutorialOverlay ignores `wake` and returns on any event; an older server
    cuts the poll to 60 s, and Claude Code moves a call longer than 120 s to the background) and do nothing slow in between (no builds, no restarts, no long reading): the user
-   is waiting on you. **Do not end your turn while the lesson runs** — the card's buttons ("Help", "Keep learning")
+   is waiting on you. **Do not end your turn while the lesson runs** (in Claude Code the plugin's Stop hook holds
+   you to it; any other agent must keep to it on its own) — the card's buttons ("Help", "Keep learning")
    reach you only through `events`, and the user's chat messages still arrive between your calls. If your turn did
    end, on the user's next message call `events` first: a `help` or `continue_requested` may be waiting
    (`heard: false`: the card showed you as away — its assistant icon grey, "Something else" and "Keep learning"

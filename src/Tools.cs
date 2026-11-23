@@ -22,7 +22,27 @@ internal static class Tools
         "wait_for_turn (never start a second TutorialOverlay). Call release when you are done. " +
         "Use keepOpen + append_steps to feed steps incrementally. Marks auto-hide when the app is minimised, covered or " +
         "not in the foreground and come back on the same step. For apps that draw their own UI, call pick(anchor) and ask " +
-        "the user to click the spot: you get the exact offset (and with count=2 on neighbouring cells, a grid step).";
+        "the user to click the spot: you get the exact offset (and with count=2 on neighbouring cells, a grid step). " +
+        "Unless the tutorial-overlay skill is already loaded (the Claude Code plugin), call guide() once before your first " +
+        "lesson: the full guide to building lessons, answering help and keeping a lesson going.";
+
+    /// <summary>
+    /// The guide tool's text: the plugin's SKILL.md, built into the exe, without its front matter (name and
+    /// description are for the plugin's skill loader).
+    /// </summary>
+    public static string Guide()
+    {
+        using var s = typeof(Tools).Assembly.GetManifestResourceStream("SKILL.md")
+            ?? throw new InvalidOperationException("the guide is missing from this build");
+        using var r = new System.IO.StreamReader(s);
+        var text = r.ReadToEnd().Replace("\r\n", "\n");
+        if (text.StartsWith("---\n"))
+        {
+            int end = text.IndexOf("\n---\n", 4, StringComparison.Ordinal);
+            if (end > 0) text = text[(end + 5)..];
+        }
+        return text.TrimStart('\n');
+    }
 
     private static JsonObject Obj(params (string k, JsonNode? v)[] props)
     {
@@ -135,6 +155,7 @@ internal static class Tools
         Tool("wait_for_turn", "The overlay serves ONE agent at a time. If a call answered 'busy', wait here until the other agent is done; you then hold it. Never start another TutorialOverlay instead.",
             Obj(("timeoutMs", T("integer", "default 600000, max 1800000")))),
         Tool("release", "Done with the overlay: let another agent use it (a running tutorial keeps running for the user).", new JsonObject()),
+        Tool("guide", "How to build and run good lessons with these tools (the tutorial-overlay skill). Call once before your first lesson unless that skill is loaded. Does not take the overlay from another agent.", new JsonObject()),
         Tool("events", "Events after seq: hit, miss, step_*, tutorial_*, window_opened/closed, anchor_found/lost, target_not_found (a window opened, the target is not in it: its numbered contents attached → retarget), opened, no_effect, blocked, prepare_started/done (step 0: a dialog to answer before step 1), button, pick, " +
             "help (reason cant_find|dont_understand|other; other: user text + optional pencil sketch with image path → answer with hint), " +
             "continue_requested (append the next lesson), outro, …. timeoutMs long-polls. During a lesson pass wake: 'decisions': only events you must act on " +
@@ -181,6 +202,7 @@ internal static class Tools
         ["delete_tutorial"] = ("Delete a saved tutorial", false, true, true),
         ["wait_for_turn"] = ("Wait for the overlay", false, false, true),
         ["release"] = ("Release the overlay", false, false, true),
+        ["guide"] = ("Read the lesson guide", true, false, true),
         ["events"] = ("Read events", true, false, true),
     };
 
@@ -248,6 +270,7 @@ internal static class Tools
                 "retarget" => Text(Engine.Retarget(args)),
                 "ask" => Text(await Engine.Ask(args, ct)),
                 "ask_area" => AreaResult(await Engine.AskArea(args, ct)),
+                "guide" => TextRaw(Guide()),
                 _ => Fail("unknown tool: " + name),
             };
         }

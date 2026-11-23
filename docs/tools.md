@@ -27,6 +27,7 @@
 | `validate(spec?)` | check a tutorial before it starts (or the current one): for each step, whether its target is visible now, and if not, why; `repeated` — a text target without `index` that is on screen more than once (the mark goes to the first) |
 | `wait_for_turn(timeoutMs)` | wait until another agent frees the server (after a `busy` answer) and take it |
 | `release()` | finish: the server is free for another agent, a running tutorial carries on |
+| `guide()` | the guide to building and running lessons — the plugin's skill (`plugin/skills/tutorial-overlay/SKILL.md`, built into the exe), for agents without the Claude Code plugin; the server's instructions tell them to call it once before the first lesson. It never takes the server from the agent that holds it |
 | `ask(question, options, input)` | ask the user in a panel above the card and wait for the answer: a button (`{choice, label}`) or text (`{text}`) |
 | `ask_area(prompt)` | ask the user to circle a spot on screen with the pencil and wait: bounds, strokes, the UIA element at the centre and a picture of the area |
 | `list_tutorials`, `save_tutorial(name?, spec?)`, `delete_tutorial(name)` | the tutorial library (see [Tutorials](tutorials.md#end-of-a-tutorial-and-the-library)) |

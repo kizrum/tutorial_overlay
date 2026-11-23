@@ -34,6 +34,11 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
+  <!-- the plugin's skill, served to agents without the plugin by the guide tool: one text for both -->
+  <ItemGroup>
+    <EmbeddedResource Include="plugin/skills/tutorial-overlay/SKILL.md" LogicalName="SKILL.md" />
+  </ItemGroup>
+
   <!-- the test project lives beside the sources: keep it out of the exe -->
   <ItemGroup>
     <Compile Remove="tests/**" />

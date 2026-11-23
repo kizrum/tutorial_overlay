@@ -254,6 +254,8 @@ internal sealed class McpServer
         {
             var tool = J.Str(p, "name") ?? "";
             if (tool == "wait_for_turn") return Result(id, await WaitForTurn(session, J.Unwrap(J.Get(p, "arguments")), ctx.RequestAborted));
+            // reading the guide changes nothing: it must not take the overlay from the agent that holds it
+            if (tool == "guide") return Result(id, ToolText(Tools.Guide()));
             if (!Lease.TryUse(session, out var busy)) return Result(id, Busy(busy!));
             if (tool == "release") return Result(id, ReleaseTool(session));
         }

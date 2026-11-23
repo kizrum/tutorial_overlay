@@ -6,6 +6,10 @@ only fixes things.
 
 ## [Unreleased]
 
+- A new tool, `guide`: the plugin's skill, built into the exe, for agents without the Claude Code plugin (Claude
+  Desktop, Codex, Cursor, …). The server's instructions tell them to call it once before the first lesson. Reading
+  it never takes the overlay from the agent that holds it. The skill no longer speaks only to Claude Code.
+
 - The release zip is built by GitHub Actions on the release tag (`.github/workflows/release.yml`), ready to sign the
   exe through SignPath Foundation once the project is accepted; until then it is unsigned as before. Tests stay
   local; `release.ps1 -Winget` writes the winget manifest from the published zip.

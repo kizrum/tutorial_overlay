@@ -79,8 +79,9 @@ That's all: no key, no port. The agent starts the overlay when it needs it, and 
 quit it from the tray menu.
 
 > [!TIP]
-> Claude Code with the plugin works best. Other agents get the same tools and the server's short instructions, but
-> not the skill.
+> Claude Code with the plugin works best. Other agents get the same tools and read the same skill through the
+> `guide` tool (from the version after 0.6.0), but without the plugin's hook that keeps the agent listening while a
+> lesson runs.
 
 <details>
 <summary>Codex</summary>
