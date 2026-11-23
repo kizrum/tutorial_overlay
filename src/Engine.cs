@@ -2310,6 +2310,10 @@ internal static partial class Engine
             "scroll-left" => string.Format(t.ScrollIssue, t.ScrollLeft.ToLowerInvariant()),
             "scroll-right" => string.Format(t.ScrollIssue, t.ScrollRight.ToLowerInvariant()),
             "scroll-unknown" => t.ScrollFind,
+            // the first reads of a step come while the menu the previous step opened is still fading in: "I can't see
+            // it, open View again" over an open View menu sends the user wrong. As long as the agent is not told
+            // either (MissingAfterMs), the card says nothing
+            "template not visible" or "text not visible" when (DateTime.UtcNow - s.EnteredAt).TotalMilliseconds < MissingAfterMs => null,
             // not seen: "scroll" only where there is something to scroll, otherwise it is just not on screen
             "template not visible" or "text not visible" => open[0].ScrollHint != null ? t.ScrollFind
                 : PreviousTargetName(s) is string prev ? string.Format(t.IssueOpenPrevious, open[0].Label ?? open[0].Id, prev) : t.IssueMissing,
@@ -2560,6 +2564,7 @@ internal static partial class Engine
             {
                 ["id"] = s.Id, ["title"] = s.Title, ["text"] = s.Text, ["checking"] = s.Checking ? true : null,
                 ["hint"] = s.Hint,   // what the card answers now (the agent's hint, or the overlay's own)
+                ["issue"] = TargetIssue(s),   // what the card tells the user is wrong with the targets ("I can't see …")
                 ["targets"] = new JsonArray(s.Targets.Select(m => (JsonNode)MarkJson(m)).ToArray()),
                 ["until"] = new JsonArray(s.Until.Select(c => (JsonNode)c.ToJson()).ToArray()),
                 ["undoDepth"] = s.History.Count,

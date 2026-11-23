@@ -404,6 +404,10 @@ internal static class Autopilot
         int targetCount = J.Items(J.Get(J.Get(J.Get(status, "tutorial"), "step"), "targets")).Count();
         int maxActions = kind is "drag" or "trace" ? 2 : Math.Max(6, targetCount + 3);
         long stepTimeout = StepTimeoutMs + 3000L * Math.Max(0, targetCount - 3);
+        // what the card told the user was wrong while the robot waited for the target ("I can't see …"): if the
+        // target then shows up where it was, that was a false alarm the user read
+        string? cardSaid = null;
+        bool cardSaidNoted = false;
         while (sw.ElapsedMilliseconds < stepTimeout)
         {
             // what went wrong is in the events: a target that is not where it should be, a click that did nothing
@@ -428,6 +432,12 @@ internal static class Autopilot
             var step = J.Get(tut, "step");
             var targets = J.Items(J.Get(step, "targets")).Where(t => J.Get(t, "satisfied")?.GetValue<bool>() != true).ToList();
             var visible = targets.FirstOrDefault(t => J.Str(t, "visibility") is "visible");
+            if (J.Str(step, "issue") is string said) cardSaid ??= said;
+            if (visible != null && cardSaid != null && !cardSaidNoted)
+            {
+                cardSaidNoted = true;
+                r.Warnings.Add($"the card said \"{cardSaid}\", then the target showed up where it was (a false alarm the user read)");
+            }
 
             if (kind == "click" && targets.Count > 0 && visible == null)
             {

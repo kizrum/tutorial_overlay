@@ -146,6 +146,8 @@ internal static class Finder
                     var g = Get(a.Key);
                     int every = Tracks.ContainsKey(a.Key) && g is { Found: true } ? TextConfirmMs
                               : g is { Found: false } && (now - g.LastSeenAt).TotalSeconds < 4 ? 350   // just lost: look again soon
+                              // a step just began: its menu may still be fading in — the read after that finds it
+                              : g is not { Found: true } && now >= StepSince && (now - StepSince).TotalSeconds < 3 ? 350
                               : TextIntervalMs;
                     if (TextSearchedAt.TryGetValue(a.Key, out var at) && (now - at).TotalMilliseconds < every) continue;
                     // the app is not in front: its marks are hidden anyway — no reading until it is
