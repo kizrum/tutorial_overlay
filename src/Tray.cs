@@ -109,6 +109,13 @@ internal sealed class TrayIcon : IDisposable
     private void Refresh()
     {
         var t = Settings.Global.Text;
+        // the menu speaks the settings' language, in Windows' UI font for it (Chinese needs its own)
+        var family = Theme.FamilyFor(Settings.Global.Lang);
+        if (_menu.Font.FontFamily.Name != family.Name)
+        {
+            _menu.Font = new Font(family, _menu.Font.Size, _menu.Font.Style, _menu.Font.Unit);
+            _settings.Font = new Font(_menu.Font, FontStyle.Bold);
+        }
         var since = SinceAgent();
         var tut = Engine.Tutorial;
         bool active = tut is { Active: true };

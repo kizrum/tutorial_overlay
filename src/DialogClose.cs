@@ -102,7 +102,7 @@ internal static class DialogClose
 
     // ---- UI Automation's Close button
 
-    private static readonly string[] CloseNames = { "close", "закрыть", "×", "✕", "x" };
+    private static readonly string[] CloseNames = { "close", "закрыть", "cerrar", "schließen", "关闭", "關閉", "fermer", "fechar", "閉じる", "닫기", "×", "✕", "x" };
 
     private static RectangleF? ByUia(IntPtr hwnd, Rectangle frame, float k)
     {

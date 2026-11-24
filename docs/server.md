@@ -170,9 +170,18 @@ next to it as `config.json.broken-<date>` rather than lost.
 
 `autoColor` (default `true`): the marks' colour is matched to the app. The overlay samples the pixels around the
 step's first target and picks, out of bright colours (magenta, orange, yellow, cyan, red, violet), the one least like
-the interface. An explicit `color` on a shape wins. `lang`: `ru` or `en` (the card's and hints' text); a
-tutorial without its own `lang` gets the card in the language its steps are written in, so English steps never sit
-between Russian buttons. `"none"`
+the interface. An explicit `color` on a shape wins. `lang`: the language of the overlay's own words — the card, the hints, the
+tray menu and this window (the "Look" tab lists them by their own names); by default the language of Windows, or
+English when there are no words for it. A tutorial's own `lang` sets the card's words while it runs, and one without
+it gets the card in the language its steps are written in (told by the script, then by common short words), so
+Spanish steps never sit between English buttons. Chinese, Japanese and Korean are drawn in Windows' own UI font for
+them (Microsoft YaHei UI and the like): Segoe UI has no such characters.
+
+Built in: English, Русский, Español, Deutsch, 简体中文. Each is a file in `src/lang/<code>.json`. To add a language
+or change words, put a file of the same shape in `%LOCALAPPDATA%\TutorialOverlay\lang\<code>.json` ("Your own
+translation…" on the "Look" tab opens the folder and puts English there as `_example.en.json` to start from). A key
+the file lacks shows in English; `{0}`, `{1}` are values put in and must stay. The file is read at the next start.
+What cannot be undone is recognised in all these languages at once, whatever language the overlay speaks. `"none"`
 turns a hotkey off. The hint line at the bottom of the card is built from the hotkeys in effect.
 
 Default hotkeys (active while the card is shown): **Ctrl+Alt+→** done, **←** back, **↓** skip, **Z** undo a hit,

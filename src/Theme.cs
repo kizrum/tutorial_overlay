@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using System.Linq;
 
 namespace TutorialOverlay;
 
@@ -80,13 +81,52 @@ internal static class Contrast
 
 internal static class Theme
 {
-    private static readonly Dictionary<(int, bool), Font> Fonts = new();
+    private static readonly Dictionary<(string, int, bool), Font> Fonts = new();
     private static readonly Bitmap MeasureBmp = new(1, 1);
     private static readonly Graphics MeasureG = MakeMeasure();
     private static FontFamily? _family;
+    private static readonly Dictionary<string, FontFamily?> Families = new();
 
     /// <summary>The OS UI font family (used through the system, never shipped with the app).</summary>
-    public static FontFamily Family => _family ??= SystemFonts.MessageBoxFont?.FontFamily ?? FontFamily.GenericSansSerif;
+    public static FontFamily SystemFamily => _family ??= SystemFonts.MessageBoxFont?.FontFamily ?? FontFamily.GenericSansSerif;
+
+    /// <summary>
+    /// The family our words are drawn in: Windows' own UI font for the language of the lesson, else of the settings.
+    /// Segoe UI has no Chinese, Japanese or Korean: Windows borrows those characters from several fonts, and they
+    /// come out uneven in weight, so these languages get the UI font Windows itself uses for them (it draws Latin
+    /// letters too). Nothing is shipped with the app.
+    /// </summary>
+    public static FontFamily Family => FamilyFor(Settings.Current.Lang, Settings.Global.Lang);
+
+    /// <summary>The first of these languages that needs a font of its own decides; else the system's UI font.</summary>
+    public static FontFamily FamilyFor(params string?[] langs)
+    {
+        foreach (var lang in langs)
+            if (OwnFont(lang) is string name)
+                lock (Families)
+                {
+                    if (!Families.TryGetValue(name, out var f))
+                        Families[name] = f = FontFamily.Families.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+                    if (f != null) return f;
+                }
+        return SystemFamily;
+    }
+
+    /// <summary>Windows' UI font for a language whose characters Segoe UI lacks; null for the rest.</summary>
+    internal static string? OwnFont(string? lang)
+    {
+        if (string.IsNullOrEmpty(lang)) return null;
+        var parts = lang.Replace('_', '-').Split('-');
+        switch (parts[0].ToLowerInvariant())
+        {
+            case "zh":
+                bool trad = parts.Skip(1).Any(x => x.Equals("Hant", StringComparison.OrdinalIgnoreCase) || x.ToUpperInvariant() is "TW" or "HK" or "MO");
+                return trad ? "Microsoft JhengHei UI" : "Microsoft YaHei UI";
+            case "ja": return "Yu Gothic UI";
+            case "ko": return "Malgun Gothic";
+            default: return null;
+        }
+    }
 
     private static Graphics MakeMeasure()
     {
@@ -97,11 +137,12 @@ internal static class Theme
 
     public static Font Font(float px, bool bold = false)
     {
-        var key = ((int)Math.Round(px * 4), bold);
+        var family = Family;
+        var key = (family.Name, (int)Math.Round(px * 4), bold);
         lock (Fonts)
         {
             if (!Fonts.TryGetValue(key, out var f))
-                Fonts[key] = f = new Font(Family, Math.Max(6, px), bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
+                Fonts[key] = f = new Font(family, Math.Max(6, px), bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
             return f;
         }
     }

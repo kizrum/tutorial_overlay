@@ -1,6 +1,6 @@
 <img alt="TutorialOverlay — lessons drawn on top of any Windows app" src="docs/media/logo.webp" width="100%">
 
-<b>English</b> · <a href="README.ru.md">Русский</a>
+<b>English</b> · <a href="README.ru.md">Русский</a> · <a href="README.es.md">Español</a> · <a href="README.de.md">Deutsch</a> · <a href="README.zh-CN.md">简体中文</a>
 
 [![kizrum/tutorial_overlay MCP server](https://glama.ai/mcp/servers/kizrum/tutorial_overlay/badges/score.svg)](https://glama.ai/mcp/servers/kizrum/tutorial_overlay)
 
@@ -54,6 +54,9 @@ Want to see it done first? **Do this step** (or **Do them all**) on the card han
 moves the real pointer and presses what the marks frame while you watch, and a blue **AUTO** at the head of the card
 says it is at work. Touch the mouse and the controls are yours again at once. What cannot be undone — pay, order,
 delete for good, send — it never presses: that button is red with a padlock, and yours to press.
+
+The card, the tray and the settings speak English, Russian, Spanish, German and Chinese, and you can add a language
+of your own ([how](docs/server.md)).
 
 For the full spec format see [`docs/tutorials.md`](docs/tutorials.md).
 

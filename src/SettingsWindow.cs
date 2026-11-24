@@ -24,7 +24,7 @@ internal sealed class SettingsWindow : Form
     private readonly DarkField _key;
     private DarkField _port = null!;          // built by ServerPage
     private Label _portStatus = null!;
-    private readonly DarkButton _ru, _en;
+    private readonly DarkButton _langButton;
     private readonly List<DarkSwatch> _swatches = new();
     private readonly DarkToggle _autoColor, _animate, _hideInactive, _hideCapture, _mascot, _cursorBadge;
     private readonly Dictionary<string, DarkField> _keyBoxes = new();
@@ -32,7 +32,7 @@ internal sealed class SettingsWindow : Form
     private readonly List<(DarkButton tab, Panel page)> _tabs = new();
     private readonly Panel _pages;
     private Color _accent;
-    private bool _english;
+    private string _lang;
 
     /// <param name="tab">server | look | keys</param>
     public static void Open(string tab = "server")
@@ -70,7 +70,7 @@ internal sealed class SettingsWindow : Form
 
         var g = Settings.Global;
         _accent = g.Accent;
-        _english = g.Lang.StartsWith("en", StringComparison.OrdinalIgnoreCase);
+        _lang = Loc.Resolve(g.Lang);
         int pad = (int)(24 * s), inner = (int)(20 * s), W = (int)(640 * s);
         _pageW = W - 2 * pad - 2 * inner;
 
@@ -122,8 +122,7 @@ internal sealed class SettingsWindow : Form
         var work = Native.WorkAreaAt(at);
         Location = new Point(work.X + (work.Width - Width) / 2, work.Y + Math.Max(0, (work.Height - Height) / 2));
         _key = (DarkField)FindByTag("key");
-        _ru = (DarkButton)FindByTag("ru");
-        _en = (DarkButton)FindByTag("en");
+        _langButton = (DarkButton)FindByTag("lang");
         _autoColor = (DarkToggle)FindByTag("autoColor");
         _animate = (DarkToggle)FindByTag("animate");
         _mascot = (DarkToggle)FindByTag("mascot");
@@ -251,11 +250,10 @@ internal sealed class SettingsWindow : Form
     {
         var g = Settings.Global;
         var (p, add) = Page();
-        var ru = new DarkButton("Русский", "secondary", _s) { Tag = "ru" };
-        var en = new DarkButton("English", "secondary", _s) { Tag = "en" };
-        ru.Click += (_, _) => { _english = false; ShowLang(); };
-        en.Click += (_, _) => { _english = true; ShowLang(); };
-        add(_t.SetLang, Row(ru, en));
+        // the languages there are words for, each by its own name; one's own translation goes into the folder
+        var lb = new DarkButton(Loc.For(g.Lang).Name + "  ▾", "secondary", _s) { Tag = "lang" };
+        lb.Click += (_, _) => PickLang(lb);
+        add(_t.SetLang, Row(lb, Button(_t.SetLangOwn, OpenLangFolder)));
 
         // the default accent first, then the named mark colours
         var colors = new[] { Palette.DefaultAccent }.Concat(new[] { "orange", "yellow", "green", "teal", "blue", "purple", "white" }
@@ -432,10 +430,43 @@ internal sealed class SettingsWindow : Form
         }
     }
 
-    private void ShowLang()
+    private void ShowLang() => _langButton.Text = Loc.For(_lang).Name + "  ▾";
+
+    private void PickLang(Control under)
     {
-        _ru.Selected = !_english; _en.Selected = _english;
-        _ru.Invalidate(); _en.Invalidate();
+        var menu = new ContextMenuStrip { ShowImageMargin = false, Renderer = new DarkMenuRenderer(), BackColor = Palette.Ink, ForeColor = Palette.Text };
+        foreach (var (code, name) in Loc.Available())
+        {
+            // each name in the font its own script needs ("中文" in Microsoft YaHei UI)
+            var item = new ToolStripMenuItem(name, null, (_, _) => { _lang = code; ShowLang(); })
+            {
+                Checked = code.Equals(_lang, StringComparison.OrdinalIgnoreCase),
+                Font = new Font(Theme.FamilyFor(code), 13f * _s, code.Equals(_lang, StringComparison.OrdinalIgnoreCase) ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel),
+            };
+            menu.Items.Add(item);
+        }
+        menu.Closed += (_, _) => BeginInvoke(new Action(menu.Dispose));
+        menu.Show(under, new Point(0, under.Height));
+    }
+
+    /// <summary>
+    /// The folder for one's own words: a file named by the language's code ("fr.json", "pt-BR.json") adds a language
+    /// or changes a built-in one. English is put there as a start ("_example.en.json": a file whose name starts with
+    /// "_" is not a language).
+    /// </summary>
+    private void OpenLangFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(Loc.UserDir);
+            var example = Path.Combine(Loc.UserDir, "_example.en.json");
+            if (!File.Exists(example))
+                using (var st = typeof(Loc).Assembly.GetManifestResourceStream("lang.en.json"))
+                using (var f = File.Create(example))
+                    st?.CopyTo(f);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Loc.UserDir) { UseShellExecute = true });
+        }
+        catch (Exception e) { Log.Warn("language folder: " + e.Message); }
     }
 
     private void ShowAccent()
@@ -489,7 +520,7 @@ internal sealed class SettingsWindow : Form
     private void ResetDefaults()
     {
         _port.Box.Text = DefaultPort.ToString();
-        _english = false; ShowLang();
+        _lang = Loc.SystemLang(); ShowLang();
         _accent = Palette.DefaultAccent; ShowAccent();
         _autoColor.Checked = true;
         _animate.Checked = true;
@@ -528,7 +559,7 @@ internal sealed class SettingsWindow : Form
                 root = new JsonObject();
             }
             root["port"] = port;
-            root["lang"] = _english ? "en" : "ru";
+            root["lang"] = _lang;
             root["accent"] = $"#{_accent.R:X2}{_accent.G:X2}{_accent.B:X2}";
             root["autoColor"] = _autoColor.Checked;
             root["animate"] = _animate.Checked;

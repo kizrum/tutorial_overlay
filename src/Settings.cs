@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -94,298 +95,301 @@ internal static class Keys
     }
 }
 
-/// <summary>User-visible strings of the card and helpers (ru / en).</summary>
+/// <summary>
+/// TutorialOverlay's own words (the card, the tray, the settings) in one language. They live in language files, not
+/// in the code: <c>src/lang/&lt;code&gt;.json</c> built into the exe, and the user's own in
+/// <c>%LOCALAPPDATA%\TutorialOverlay\lang\&lt;code&gt;.json</c> (a new language, or changes to a built-in one). Each
+/// field is filled from English first, then from the language's file, so a key a file lacks shows in English.
+/// </summary>
 internal sealed class Loc
 {
-    public string Step = "ШАГ", Waiting = "ОЖИДАНИЕ", Tutorial = "Туториал", Preparing = "Готовлю следующий шаг…";
-    public string Back = "Назад", Skip = "Пропустить", Done = "Готово", Got = "Есть!", Undo = "Отменить", Help = "Помощь";
-    public string Marked = "Отмечено {0} из {1}", Target = "Цель {0}";
-    public string HintDone = "готово", HintBack = "назад", HintSkip = "пропустить", HintUndo = "отменить", HintStop = "завершить";
-    public string PickTitle = "Укажите точку", PickText = "Кликните в нужное место. Esc — отмена.", PickCount = "Точка {0} из {1}";
-    public string Review = "Повтор шага — нажмите «Готово», чтобы продолжить.";
-    public string Why = "Почему так";
-    public string HeadStep = "Шаг {0}", HeadOf = "из {0}", HeadWaiting = "Ожидание", HeadOutro = "Готово";
-    public string ScrollUp = "Прокрутите вверх", ScrollDown = "Прокрутите вниз", ScrollLeft = "Прокрутите влево", ScrollRight = "Прокрутите вправо";
-    public string ScrollIssue = "Нужное место за краем окна — {0}.", ScrollFind = "Прокрутите окно, чтобы показать нужное место.",
-        ScrollHere = "Покрутите здесь — я найду «{0}»", ScrollHereAny = "Покрутите здесь — я найду нужное место",
-        ScrollOver = "Крутите над «{0}» — там, где рамка", ScrollOverAny = "Крутите внутри рамки";
-    public string IssueDialog = "Сначала закройте окно «{0}» — пока оно открыто, программа не принимает клики.";
-    public string PrepareTitle = "Подготовимся к началу туториала", DialogTitle = "Сначала закроем окно",
-        PrepareText = "В программе открыто окно «{0}». Ответьте на него или закройте — пока оно открыто, программа не принимает клики. Потом продолжим.";
-    public string DialogMark = "Сначала ответьте на это окно или закройте его";
-    public string DialogCloseMark = "Закройте это окно здесь";
-    public string PrepareTextCover = "Окно «{0}» открыто поверх программы. Закройте его — потом начнём.",
-        CoverText = "Окно «{0}» закрывает то, что нужно на этом шаге. Закройте или сдвиньте его — потом продолжим.",
-        IssueCover = "Окно «{0}» закрывает нужное место — закройте или сдвиньте его.";
-    public string CantFind = "Не вижу, куда жать", DontGet = "Не понимаю, что делать", Cancel = "Отмена", HintHelp = "помощь";
-    public string Other = "Другое — опишу сам", OtherTitle = "Опишите, что не получается", Send = "Отправить",
-        OtherHint = "Enter — отправить · Shift+Enter — новая строка · Esc — отмена";
-    public string Sketch = "Обвести", Sketched = "Обведено: {0}", SketchTitle = "Обведите на экране, о чём речь",
-        SketchFrozen = "Экран остановлен", SketchPen = "Карандаш", SketchCircle = "Круг", SketchRect = "Рамка",
-        SketchUndo = "Отменить фигуру", SketchCancel = "Отмена", SketchCancelTip = "Не отправлять снимок",
-        SketchDoneTip = "Готово: снимок уйдёт с вопросом", SketchMove = "Перетащите панель";
-    public string ChatHello = "Что не получается на этом шаге? Напишите или обведите на экране.", ChatAgent = "Ассистент",
-        ChatHint = "Enter — отправить · Esc — вернуться к шагу", ChatAsk = "Опишите, что не получается…", ChatReply = "Уточнить…",
-        ChatRow = "Разговор по шагу", ChatLooking = "Ассистент смотрит…", ChatSketchOnly = "Обвёл на снимке",
-        ChatShapes = "фигур на снимке: {0}", ChatBack = "Шаг {0}", ChatRemoveSketch = "Убрать снимок",
-        ReplyElsewhere = "Ответ ассистента ждёт на шаге {0} — вернитесь туда кнопкой «Назад»";
+    public string Step = "", Waiting = "", Tutorial = "", Preparing = "";
+    public string Back = "", Skip = "", Done = "", Got = "", Undo = "", Help = "";
+    public string Marked = "", Target = "";
+    public string HintDone = "", HintBack = "", HintSkip = "", HintUndo = "", HintStop = "";
+    public string PickTitle = "", PickText = "", PickCount = "";
+    public string Review = "";
+    public string Why = "";
+    public string HeadStep = "", HeadOf = "", HeadWaiting = "", HeadOutro = "";
+    public string ScrollUp = "", ScrollDown = "", ScrollLeft = "", ScrollRight = "";
+    public string ScrollIssue = "", ScrollFind = "",
+        ScrollHere = "", ScrollHereAny = "",
+        ScrollOver = "", ScrollOverAny = "";
+    public string IssueDialog = "";
+    public string PrepareTitle = "", DialogTitle = "",
+        PrepareText = "";
+    public string DialogMark = "";
+    public string DialogCloseMark = "";
+    public string PrepareTextCover = "",
+        CoverText = "",
+        IssueCover = "";
+    public string CantFind = "", DontGet = "", Cancel = "", HintHelp = "";
+    public string Other = "", OtherTitle = "", Send = "",
+        OtherHint = "";
+    public string Sketch = "", Sketched = "", SketchTitle = "",
+        SketchFrozen = "", SketchPen = "", SketchCircle = "", SketchRect = "",
+        SketchUndo = "", SketchCancel = "", SketchCancelTip = "",
+        SketchDoneTip = "", SketchMove = "";
+    public string ChatHello = "", ChatAgent = "",
+        ChatHint = "", ChatAsk = "", ChatReply = "",
+        ChatRow = "", ChatLooking = "", ChatSketchOnly = "",
+        ChatShapes = "", ChatBack = "", ChatRemoveSketch = "",
+        ReplyElsewhere = "";
 
-    public string OutroHead = "ГОТОВО", OutroTitle = "Туториал пройден!", OutroText = "Вы прошли «{0}» — шагов: {1}. Что дальше?",
-        OutroSave = "Сохранить туториал", OutroRepeat = "Пройти ещё раз", OutroContinue = "Продолжить обучение", OutroClose = "Закрыть", WaitFinish = "Завершить",
-        OutroSavedTitle = "Сохранено", OutroSavedText = "Туториал в вашей библиотеке: его можно пройти снова из меню значка в трее (Туториалы).",
-        OutroChangedTitle = "Урок исправлен", OutroChangedText = "По ходу урок поправлен под то, что было на экране. Сохраните, чтобы в следующий раз он шёл уже так.",
-        OutroOverwriteTitle = "Перезаписать урок?", OutroOverwriteText = "Старый урок «{0}» в библиотеке будет перезаписан исправленным.",
-        OutroOverwrite = "Перезаписать", OutroKeep = "Отмена",
-        TrayTutorials = "Туториалы", TrayTutorialsEmpty = "Пока нет сохранённых", TrayTutorialsFolder = "Открыть папку туториалов";
-    public string HoldKeys = "Держите {0}";
-    public string AskTitle = "Вопрос от ассистента", AskHint = "Enter — отправить · Shift+Enter — новая строка · Esc — закрыть";
+    public string OutroHead = "", OutroTitle = "", OutroText = "",
+        OutroSave = "", OutroRepeat = "", OutroContinue = "", OutroClose = "", WaitFinish = "",
+        OutroSavedTitle = "", OutroSavedText = "",
+        OutroChangedTitle = "", OutroChangedText = "",
+        OutroOverwriteTitle = "", OutroOverwriteText = "",
+        OutroOverwrite = "", OutroKeep = "",
+        TrayTutorials = "", TrayTutorialsEmpty = "", TrayTutorialsFolder = "";
+    public string HoldKeys = "";
+    public string AskTitle = "", AskHint = "";
 
     // tray icon
-    public string TrayRunning = "Работает · 127.0.0.1:{0}", TrayAgentNever = "Агент ещё не обращался", TrayAgentAgo = "Агент обращался {0} назад",
-        TrayTutorial = "Туториал «{0}» · шаг {1} из {2}", TrayNoTutorial = "Туториал не запущен",
-        TraySettings = "Настройки…", TrayCopyKey = "Скопировать ключ", TrayCopyUrl = "Скопировать адрес MCP",
-        TrayCopyCommand = "Скопировать команду для агента",
-        AlreadyRunning = "TutorialOverlay уже запущен: 127.0.0.1:{0} (PID {1}).\n\nЕго значок — в области уведомлений, второй сервер не нужен.",
-        TrayOpenFolder = "Открыть папку настроек", TrayStopTutorial = "Остановить туториал", TrayExit = "Закрыть TutorialOverlay",
-        TrayExitConfirm = "Сейчас идёт туториал. Всё равно закрыть TutorialOverlay?", Sec = "с", Min = "мин", Hour = "ч";
+    public string TrayRunning = "", TrayAgentNever = "", TrayAgentAgo = "",
+        TrayTutorial = "", TrayNoTutorial = "",
+        TraySettings = "", TrayCopyKey = "", TrayCopyUrl = "",
+        TrayCopyCommand = "",
+        AlreadyRunning = "",
+        TrayOpenFolder = "", TrayStopTutorial = "", TrayExit = "",
+        TrayExitConfirm = "", Sec = "", Min = "", Hour = "";
 
     // settings window
-    public string SetTitle = "Настройки TutorialOverlay", SetTabServer = "Сервер", SetTabLook = "Вид", SetTabKeys = "Горячие клавиши",
-        SetPort = "Порт", SetPortArg = "сейчас задан параметром --port {0}",
-        SetPortNote = "Новый порт начнёт работать после сохранения и перезапуска. Потом нажмите «Для агента» и отдайте команду агенту — он переподключится сам.",
-        SetPortFree = "свободен ✓", SetPortBusy = "занят: {0}", SetPortBusyUnknown = "занят другой программой", SetPortHere = "на нём работает этот сервер",
-        SetPortBad = "порт — число от 1024 до 65535", SetPortPick = "Подобрать", SetPortNone = "нет свободных портов {0}–{1}",
-        SetForAgent = "Для агента", SetForAgentBtn = "Скопировать команду подключения", Copied = "Скопировано ✓",
-        SetForAgentNote = "Команда claude mcp add для всех проектов. Порт и ключ агент найдёт сам, так что после смены порта команда остаётся верной. Выполните её в терминале (или вставьте в чат агенту).",
-        RestartBusy = "Порт {0} уже занят ({1}). Сервер не перезапущен и продолжает работать на {2}.",
-        SetUrl = "Адрес MCP", SetKey = "Ключ", SetKeySource = "Откуда взят: {0}", Show = "Показать", Hide = "Скрыть", Copy = "Копировать",
-        SetLang = "Язык", SetAccent = "Цвет отметок", SetPickColor = "Выбрать…", SetReset = "Сбросить",
-        SetAutoColor = "Подбирать цвет отметок под приложение", SetAnimate = "Анимация", SetMascot = "Маскот «Шажок» показывает, куда нажать",
-        SetHideInactive = "Прятать отметки, когда приложение не на переднем плане",
-        SetHideCapture = "Скрывать оверлей от скриншотов и записи экрана",
-        SetAutoSpeed = "Скорость «Покажи»", SetSpeedSlow = "Медленно", SetSpeedNormal = "Обычно", SetSpeedFast = "Быстро",
-        SetCursorBadge = "Метка «авто» у курсора, пока его двигает автопрохождение",
-        SetAutoSpeedNote = "Как быстро автопрохождение двигает мышь и переходит к следующему шагу. Ответа программы оно ждёт всегда столько, сколько нужно.",
-        SetKeysNote = "Щёлкните в поле и нажмите сочетание (с Ctrl, Alt или Win). Backspace или Delete — отключить.",
-        KeyStop = "Завершить туториал", KeyNone = "нет", SetSave = "Сохранить", SetDefaults = "По умолчанию",
-        SetRestartAsk = "Порт изменён на {0}. Перезапустить сервер сейчас?\n\nАгенту придётся подключиться заново по новому адресу.",
-        SetAfterTutorial = "Сохранено. Цвет и язык применятся после текущего туториала.", SetSaveFailed = "Не удалось сохранить настройки: {0}";
-    public string HelpTitle = "Подсказка", HelpVisible = "Нажмите «{0}» — он обведён рамкой, сейчас подсвечиваю.",
-        HelpHidden = "Нужно нажать «{0}». {1}", HelpAgentToo = "Ассистент тоже посмотрит и подскажет подробнее.",
-        HelpAgentIdle = "Ассистент сейчас не следит за уроком: чтобы он ответил, напишите ему в чат «помоги» — шаг и ваш вопрос он увидит.";
-    public string ContinueUnheard = "Ассистент сейчас не следит за уроком. Напишите ему в чат «продолжай» — он увидит, что вы нажали эту кнопку, и подготовит следующий урок.";
-    public string AgentOn = "Ассистент на связи: «Помощь» дойдёт до него сразу",
-        AgentOff = "Ассистент не на связи — напишите ему в чат",
-        AgentOffFor = "Ассистент не на связи {0} мин — напишите ему в чат",
-        AgentOffContinue = "Чтобы продолжить, напишите ассистенту в чат «продолжай»";
-    public string HelpSent = "Передал ассистенту — сейчас подскажу.", Highlighting = "Подсвечиваю, куда нажать…", Checking = "Уточняю, где этот пункт…";
-    public string IssueMinimized = "Окно свёрнуто — разверните его.", IssueOccluded = "Нужное место закрыто другим окном.",
-        IssueInactive = "Переключитесь в нужное приложение.", IssueMissing = "Не нахожу нужный элемент на экране.",
-        IssueClosed = "Это было в меню или окне, которое сейчас закрыто, — откройте его снова.",
-        IssueClosedIn = "Это в окне «{0}» — сначала откройте его.",
-        IssueOpenPrevious = "Не вижу «{0}». Если это пункт меню или окна — сначала снова откройте «{1}».",
-        ReopenTitle = "Меню закрылось", ReopenText = "«{0}» было в меню или окне, которое закрылось. Откройте его снова: нажмите «{1}».",
-        IssueOffscreen = "Нужное место за пределами экрана.", IssueNotRunning = "Приложение не запущено.",
-        IssueNotAnswering = "Приложение сейчас не отвечает — закройте открытое меню (Esc), я найду нужное место.",
-        IssueElevated = "Программа запущена от имени администратора — запустите TutorialOverlay так же, иначе я не вижу ваших кликов в ней.";
+    public string SetTitle = "", SetTabServer = "", SetTabLook = "", SetTabKeys = "",
+        SetPort = "", SetPortArg = "",
+        SetPortNote = "",
+        SetPortFree = "", SetPortBusy = "", SetPortBusyUnknown = "", SetPortHere = "",
+        SetPortBad = "", SetPortPick = "", SetPortNone = "",
+        SetForAgent = "", SetForAgentBtn = "", Copied = "",
+        SetForAgentNote = "",
+        RestartBusy = "",
+        SetUrl = "", SetKey = "", SetKeySource = "", Show = "", Hide = "", Copy = "",
+        SetLang = "", SetLangOwn = "", SetAccent = "", SetPickColor = "", SetReset = "",
+        SetAutoColor = "", SetAnimate = "", SetMascot = "",
+        SetHideInactive = "",
+        SetHideCapture = "",
+        SetAutoSpeed = "", SetSpeedSlow = "", SetSpeedNormal = "", SetSpeedFast = "",
+        SetCursorBadge = "",
+        SetAutoSpeedNote = "",
+        SetKeysNote = "",
+        KeyStop = "", KeyNone = "", SetSave = "", SetDefaults = "",
+        SetRestartAsk = "",
+        SetAfterTutorial = "", SetSaveFailed = "";
+    public string HelpTitle = "", HelpVisible = "",
+        HelpHidden = "", HelpAgentToo = "",
+        HelpAgentIdle = "";
+    public string ContinueUnheard = "";
+    public string AgentOn = "",
+        AgentOff = "",
+        AgentOffFor = "",
+        AgentOffContinue = "";
+    public string HelpSent = "", Highlighting = "", Checking = "";
+    public string IssueMinimized = "", IssueOccluded = "",
+        IssueInactive = "", IssueMissing = "",
+        IssueClosed = "",
+        IssueClosedIn = "",
+        IssueOpenPrevious = "",
+        ReopenTitle = "", ReopenText = "",
+        IssueOffscreen = "", IssueNotRunning = "",
+        IssueNotAnswering = "",
+        IssueElevated = "";
 
-    public string ForbidTag = "не нажимать", OffscreenTag = "за краем экрана";
+    public string ForbidTag = "", OffscreenTag = "";
 
     // autoplay ("Show me") and what cannot be undone
-    public string ShowMe = "Сделай шаг", ShowStep = "Только этот шаг", ShowAll = "Сделай всё", AutoStop = "Стоп",
-        AutoResume = "Продолжить автоматически", KeyAutoplay = "Сделай шаг (за вас)", HintAuto = "сделай шаг",
-        HeadAuto = "АВТО", CursorAuto = "авто",
-        AutoIntroTitle = "Покажу сам", AutoIntro = "Я буду двигать вашу мышь. Двиньте её — и управление снова у вас. Необратимые кнопки (оплата, удаление) нажимаете только вы.",
-        AutoIntroGo = "Понятно, начать",
-        AutoStarting = "Начинаю через {0}… уберите руку с мыши",
-        AutoActing = "Показываю шаг {0} из {1} · двиньте мышь — остановлюсь",
-        AutoActingAgent = "Ассистент показывает по вашей просьбе · двиньте мышь — остановлюсь",
-        AutoStepDone = "Шаг сделан. Дальше сами или нажмите «Сделай шаг».",
-        AutoLooking = "Ищу «{0}»… · двиньте мышь — остановлюсь",
-        AutoAskedAgent = "Не вижу «{0}» — спросил ассистента, жду ответа · двиньте мышь — остановлюсь",
-        AutoFinished = "Показал до конца. Пройдите урок сами — так запомнится.",
-        AutoPausedTitle = "Управление у вас", AutoRepeatSelf = "Пройти самому с начала",
-        MascotPress = "Нажимаю «{0}»", MascotHandBack = "Управление у вас",
-        DangerTag = "Нажмите сами", DangerCard = "Это необратимо — {0}. Проверьте, прежде чем нажать.",
-        DangerPayment = "оплата", DangerIrreversible = "это нельзя отменить", DangerSend = "отправка от вашего имени", DangerUser = "из вашего списка опасного";
-    public Dictionary<string, string> AutoReasons = new()
-    {
-        ["user_took_over"] = "Вы двинули мышь, пока я вёл курсор.",
-        ["user_active"] = "Вы работали мышью или клавиатурой — я не стал перехватывать.",
-        ["danger"] = "Этот шаг — {0}. Я его не нажимаю: проверьте и нажмите сами, потом можно продолжить автоматически.",
-        ["choice"] = "Здесь выбор за вами — потом можно продолжить автоматически.",
-        ["cant_do"] = "Этот шаг сделайте сами — потом можно продолжить автоматически.",
-        ["password"] = "Пароль вводите сами — я его не трогаю.",
-        ["app_inactive"] = "Окно урока ушло на задний план.",
-        ["modal"] = "Появилось окно «{0}» — решите, что в нём нажать.",
-        ["no_close"] = "Окно «{0}» мешает, а его крестик я не нашёл.",
-        ["windows_keep_opening"] = "Программа открывает окно за окном.",
-        ["target_missing"] = "Не нашёл «{0}».",
-        ["target_missing_asked"] = "Не нашёл «{0}», и ассистент пока не помог. Сделайте шаг сами или нажмите «Не могу найти».",
-        ["target_moving"] = "«{0}» всё время двигается.",
-        ["wrong_window"] = "На месте «{0}» оказалось другое окно.",
-        ["missed"] = "Я нажал мимо «{0}».",
-        ["no_effect"] = "Нажал, но программа не ответила.",
-        ["not_completed"] = "Нажал, но программа не ответила.",
-        ["loop"] = "Урок возвращает меня назад.",
-        ["elevated"] = "Это окно запущено от администратора — Windows не даёт мне нажимать в нём. Нажмите сами.",
-        ["input_blocked"] = "Windows не пропустила мой ввод (экран блокировки или запрос прав).",
-    };
-    public static readonly Loc Ru = new();
+    public string ShowMe = "", ShowStep = "", ShowAll = "", AutoStop = "",
+        AutoResume = "", KeyAutoplay = "", HintAuto = "",
+        HeadAuto = "", CursorAuto = "",
+        AutoIntroTitle = "", AutoIntro = "",
+        AutoIntroGo = "",
+        AutoStarting = "",
+        AutoActing = "",
+        AutoActingAgent = "",
+        AutoStepDone = "",
+        AutoLooking = "",
+        AutoAskedAgent = "",
+        AutoFinished = "",
+        AutoPausedTitle = "", AutoRepeatSelf = "",
+        MascotPress = "", MascotHandBack = "",
+        DangerTag = "", DangerCard = "",
+        DangerPayment = "", DangerIrreversible = "", DangerSend = "", DangerUser = "";
+    public Dictionary<string, string> AutoReasons = new();
+    /// <summary>The language's code ("es", "zh-Hans") and its own name ("Español"), for the settings' list.</summary>
+    public string Code = "en", Name = "English";
 
-    public static readonly Loc En = new()
+    private static readonly Dictionary<string, Loc> Cache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Reflection.Assembly Asm = typeof(Loc).Assembly;
+
+    /// <summary>The user's own language files: a new language, or changes to a built-in one.</summary>
+    public static string UserDir => Path.Combine(Files.AppDir, "lang");
+
+    public static Loc En => For("en");
+    public static Loc Ru => For("ru");
+
+    /// <summary>The words for a language code (any form: "es", "es-MX", "zh", "zh-CN", "zh-TW"); English if there are none.</summary>
+    public static Loc For(string? lang)
     {
-        Step = "STEP", Waiting = "WAITING", Tutorial = "Tutorial", Preparing = "Preparing the next step…",
-        ForbidTag = "don't click", OffscreenTag = "off screen",
-        ShowMe = "Do this step", ShowStep = "Just this step", ShowAll = "Do them all", AutoStop = "Stop",
-        AutoResume = "Continue automatically", KeyAutoplay = "Do this step (for you)", HintAuto = "do step",
-        HeadAuto = "AUTO", CursorAuto = "auto",
-        AutoIntroTitle = "I'll show you", AutoIntro = "I will move your mouse. Move it yourself and control is yours again. Buttons that cannot be undone (paying, deleting) are only ever pressed by you.",
-        AutoIntroGo = "Got it, start",
-        AutoStarting = "Starting in {0}… take your hand off the mouse",
-        AutoActing = "Showing step {0} of {1} · move the mouse and I stop",
-        AutoActingAgent = "The assistant is showing you, as you asked · move the mouse and I stop",
-        AutoStepDone = "Step done. Carry on yourself, or press Do this step.",
-        AutoLooking = "Looking for “{0}”… · move the mouse and I stop",
-        AutoAskedAgent = "I can't see “{0}”, so I asked the assistant and am waiting for an answer · move the mouse and I stop",
-        AutoFinished = "Shown to the end. Go through it yourself now — that's how it sticks.",
-        AutoPausedTitle = "You have control", AutoRepeatSelf = "Do it myself from the start",
-        MascotPress = "Pressing “{0}”", MascotHandBack = "You have control",
-        DangerTag = "Press it yourself", DangerCard = "This cannot be undone — {0}. Check before you press it.",
-        DangerPayment = "a payment", DangerIrreversible = "it cannot be undone", DangerSend = "it sends in your name", DangerUser = "on your own danger list",
-        AutoReasons = new()
+        string code = Resolve(lang);
+        lock (Cache)
         {
-            ["user_took_over"] = "You moved the mouse while I was moving the pointer.",
-            ["user_active"] = "You were using the mouse or keyboard, so I didn't take over.",
-            ["danger"] = "This step is {0}. I don't press it: check and press it yourself, then I can carry on.",
-            ["choice"] = "This choice is yours — then I can carry on.",
-            ["cant_do"] = "Do this step yourself — then I can carry on.",
-            ["password"] = "Type the password yourself — I never touch it.",
-            ["app_inactive"] = "The lesson's window went to the background.",
-            ["modal"] = "The “{0}” window opened — decide what to press in it.",
-            ["no_close"] = "The “{0}” window is in the way and I can't find its close button.",
-            ["windows_keep_opening"] = "The app keeps opening windows.",
-            ["target_missing"] = "I can't find “{0}”.",
-            ["target_missing_asked"] = "I can't find “{0}” and the assistant hasn't helped yet. Do the step yourself or press “I can't find it”.",
-            ["target_moving"] = "“{0}” keeps moving.",
-            ["wrong_window"] = "Another window is where “{0}” should be.",
-            ["missed"] = "I missed “{0}”.",
-            ["no_effect"] = "I pressed it, but the app didn't respond.",
-            ["not_completed"] = "I pressed it, but the app didn't respond.",
-            ["loop"] = "The lesson keeps taking me back.",
-            ["elevated"] = "This window runs as administrator — Windows doesn't let me press anything in it. Press it yourself.",
-            ["input_blocked"] = "Windows blocked my input (the lock screen or a permission prompt).",
-        },
-        Back = "Back", Skip = "Skip", Done = "Done", Got = "Got it!", Undo = "Undo", Help = "Help",
-        Marked = "{0} of {1} done", Target = "Target {0}",
-        HintDone = "done", HintBack = "back", HintSkip = "skip", HintUndo = "undo", HintStop = "finish",
-        PickTitle = "Pick a point", PickText = "Click the spot. Esc cancels.", PickCount = "Point {0} of {1}",
-        Review = "Repeating this step — press Done to continue.",
-        Why = "Why",
-        HeadStep = "Step {0}", HeadOf = "of {0}", HeadWaiting = "Waiting", HeadOutro = "Done",
-        ScrollUp = "Scroll up", ScrollDown = "Scroll down", ScrollLeft = "Scroll left", ScrollRight = "Scroll right",
-        ScrollIssue = "The spot is outside the window — {0}.", ScrollFind = "Scroll the window to bring the spot into view.",
-        ScrollHere = "Scroll here — I'll spot “{0}”", ScrollHereAny = "Scroll here — I'll spot the place",
-        ScrollOver = "Scroll over “{0}” — inside the frame", ScrollOverAny = "Scroll inside the frame",
+            if (!Cache.TryGetValue(code, out var l)) Cache[code] = l = Load(code);
+            return l;
+        }
+    }
 
-        IssueDialog = "Close the \"{0}\" window first — the app ignores clicks while it is open.",
-        PrepareTitle = "Let's get ready to start", DialogTitle = "First, close this window",
-        PrepareText = "The app has the \"{0}\" window open. Answer or close it — the app ignores clicks while it is open. Then we carry on.",
-        DialogMark = "Answer or close this window first", DialogCloseMark = "Close this window here",
-        PrepareTextCover = "The \"{0}\" window is open over the app. Close it — then we start.",
-        CoverText = "The \"{0}\" window covers what this step needs. Close or move it — then we carry on.",
-        IssueCover = "The \"{0}\" window covers the spot — close or move it.",
-        CantFind = "I can't find where to click", DontGet = "I don't get what to do", Cancel = "Cancel", HintHelp = "help",
-        Other = "Something else — I'll describe it", OtherTitle = "Describe what isn't working", Send = "Send",
-        OtherHint = "Enter — send · Shift+Enter — new line · Esc — cancel",
-        Sketch = "Circle it", Sketched = "Circled: {0}", SketchTitle = "Circle the part of the screen you mean",
-        SketchFrozen = "Screen paused", SketchPen = "Pencil", SketchCircle = "Circle", SketchRect = "Frame",
-        SketchUndo = "Undo shape", SketchCancel = "Cancel", SketchCancelTip = "Don't send a picture",
-        SketchDoneTip = "Done: the picture goes with the question", SketchMove = "Drag the toolbar",
-        ChatHello = "What isn't working on this step? Write, or mark it on the screen.", ChatAgent = "Assistant",
-        ChatHint = "Enter — send · Esc — back to the step", ChatAsk = "Describe what isn't working…", ChatReply = "Ask more…",
-        ChatRow = "About this step", ChatLooking = "The assistant is looking…", ChatSketchOnly = "Marked on the picture",
-        ChatShapes = "shapes on the picture: {0}", ChatBack = "Step {0}", ChatRemoveSketch = "Remove the picture",
-        ReplyElsewhere = "The assistant's answer waits on step {0} — go back there with Back",
-        OutroHead = "DONE", OutroTitle = "Tutorial complete!", OutroText = "You finished \"{0}\" — {1} steps. What next?",
-        OutroSave = "Save tutorial", OutroRepeat = "Go through again", OutroContinue = "Keep learning", OutroClose = "Close", WaitFinish = "Finish",
-        OutroSavedTitle = "Saved", OutroSavedText = "It is in your library: replay it any time from the tray icon menu (Tutorials).",
-        OutroChangedTitle = "Lesson repaired", OutroChangedText = "The lesson was fixed on the way to match your screen. Save it so it runs this way next time.",
-        OutroOverwriteTitle = "Overwrite the lesson?", OutroOverwriteText = "The old “{0}” in your library will be replaced by the repaired one.",
-        OutroOverwrite = "Overwrite", OutroKeep = "Cancel",
-        TrayTutorials = "Tutorials", TrayTutorialsEmpty = "Nothing saved yet", TrayTutorialsFolder = "Open tutorials folder",
-        HoldKeys = "Hold {0}",
-        AskTitle = "The assistant asks", AskHint = "Enter — send · Shift+Enter — new line · Esc — close",
-        TrayRunning = "Running · 127.0.0.1:{0}", TrayAgentNever = "No requests from the agent yet", TrayAgentAgo = "Agent's last request {0} ago",
-        TrayTutorial = "Tutorial \"{0}\" · step {1} of {2}", TrayNoTutorial = "No tutorial running",
-        TraySettings = "Settings…", TrayCopyKey = "Copy key", TrayCopyUrl = "Copy MCP address",
-        TrayCopyCommand = "Copy the command for the agent",
-        AlreadyRunning = "TutorialOverlay is already running: 127.0.0.1:{0} (PID {1}).\n\nIts icon is in the notification area; a second server is not needed.",
-        TrayOpenFolder = "Open settings folder", TrayStopTutorial = "Stop tutorial", TrayExit = "Quit TutorialOverlay",
-        TrayExitConfirm = "A tutorial is running. Quit TutorialOverlay anyway?", Sec = "s", Min = "min", Hour = "h",
-        SetTitle = "TutorialOverlay settings", SetTabServer = "Server", SetTabLook = "Look", SetTabKeys = "Hotkeys",
-        SetPort = "Port", SetPortArg = "currently set by --port {0}",
-        SetPortNote = "A new port takes effect after Save and a restart. Then press \"For the agent\" and give the command to the agent — it reconnects by itself.",
-        SetPortFree = "free ✓", SetPortBusy = "in use: {0}", SetPortBusyUnknown = "in use by another program", SetPortHere = "this server runs on it",
-        SetPortBad = "a port is a number 1024–65535", SetPortPick = "Pick a free one", SetPortNone = "no free ports {0}–{1}",
-        SetForAgent = "For the agent", SetForAgentBtn = "Copy the connect command", Copied = "Copied ✓",
-        SetForAgentNote = "A claude mcp add command for all projects. The agent finds the port and the key itself, so the command stays right after a port change. Run it in a terminal (or paste it to the agent in chat).",
-        RestartBusy = "Port {0} is already in use ({1}). The server was not restarted and keeps running on {2}.",
-        SetUrl = "MCP address", SetKey = "Key", SetKeySource = "Taken from: {0}", Show = "Show", Hide = "Hide", Copy = "Copy",
-        SetLang = "Language", SetAccent = "Mark colour", SetPickColor = "Choose…", SetReset = "Reset",
-        SetAutoColor = "Match mark colour to the app", SetAnimate = "Animation", SetMascot = "Mascot \"Shazhok\" shows where to click",
-        SetHideInactive = "Hide marks while the app is not in front",
-        SetHideCapture = "Hide the overlay from screenshots and screen recording",
-        SetAutoSpeed = "“Show me” speed", SetSpeedSlow = "Slow", SetSpeedNormal = "Normal", SetSpeedFast = "Fast",
-        SetCursorBadge = "An “auto” tag beside the pointer while autoplay moves it",
-        SetAutoSpeedNote = "How fast autoplay moves the mouse and goes on to the next step. It always waits as long as the app needs to answer.",
-        SetKeysNote = "Click a field and press a chord (with Ctrl, Alt or Win). Backspace or Delete turns it off.",
-        KeyStop = "Stop tutorial", KeyNone = "none", SetSave = "Save", SetDefaults = "Defaults",
-        SetRestartAsk = "The port is now {0}. Restart the server now?\n\nThe agent will have to reconnect to the new address.",
-        SetAfterTutorial = "Saved. Colour and language apply after the current tutorial.", SetSaveFailed = "Could not save settings: {0}",
-        HelpTitle = "Hint", HelpVisible = "Click «{0}» — it is framed, highlighting it now.",
-        HelpHidden = "Click «{0}». {1}", HelpAgentToo = "The assistant will look too and say more.",
-        HelpAgentIdle = "The assistant isn't following the lesson right now: to get its answer, write \"help\" to it in the chat — it will see the step and your question.",
-        ContinueUnheard = "The assistant isn't following the lesson right now. Write \"continue\" to it in the chat: it will see you pressed this button and prepare the next lesson.",
-        AgentOn = "The assistant is here: Help reaches it at once",
-        AgentOff = "The assistant is away — write to it in the chat",
-        AgentOffFor = "The assistant has been away {0} min — write to it in the chat",
-        AgentOffContinue = "To keep learning, write \"continue\" to the assistant in the chat",
-        HelpSent = "Told the assistant — a hint is coming.", Highlighting = "Highlighting where to click…", Checking = "Checking where this item is…",
-        IssueMinimized = "The window is minimized — restore it.", IssueOccluded = "Another window covers the spot.",
-        IssueInactive = "Switch to the app.", IssueMissing = "Can't find the element on screen.",
-        IssueClosed = "It was in a menu or window that is closed now — open it again.",
-        IssueClosedIn = "It is in the \"{0}\" window — open it first.",
-        IssueOpenPrevious = "I can't see \"{0}\". If it is in a menu or window, open \"{1}\" again first.",
-        ReopenTitle = "It closed", ReopenText = "\"{0}\" was in a menu or window that has closed. Open it again: click \"{1}\".",
-        IssueOffscreen = "The spot is off screen.", IssueNotRunning = "The app is not running.",
-        IssueNotAnswering = "The app is not answering right now — close the open menu (Esc) and I'll find the spot.",
-        IssueElevated = "The app runs as administrator — start TutorialOverlay as administrator too, or I can't see your clicks in it.",
-    };
+    /// <summary>Forget what was loaded: the user's language files are read again.</summary>
+    public static void Reload() { lock (Cache) Cache.Clear(); }
 
-    public static Loc For(string? lang) => (lang ?? "ru").StartsWith("en", StringComparison.OrdinalIgnoreCase) ? En : Ru;
+    /// <summary>Every language there are words for — built in and the user's own — as (code, its own name), English first.</summary>
+    public static List<(string Code, string Name)> Available()
+    {
+        var codes = new SortedSet<string>(BuiltinCodes(), StringComparer.OrdinalIgnoreCase);
+        foreach (var c in UserCodes()) codes.Add(c);
+        return codes.Select(c => (c, For(c).Name)).OrderBy(x => x.c == "en" ? 0 : 1).ThenBy(x => x.Name, StringComparer.Ordinal).ToList();
+    }
 
     /// <summary>
-    /// The language a lesson is written in, from the words of its title and steps: "ru" when a good share of the
-    /// letters is Cyrillic, "en" when they are Latin, null when there are too few to tell. A spec without "lang"
-    /// gets its card in that language, so English steps do not sit between Russian buttons. A Russian lesson names
-    /// Latin items ("Mesh", "File") and an English one may quote a Russian button, hence a share, not any letter.
+    /// The code there are words for that best fits <paramref name="lang"/>: the same code, else the same language
+    /// ("es-MX" → "es"; "zh-CN", "zh-SG", "zh" → "zh-Hans"; "zh-TW", "zh-HK", "zh-MO" → "zh-Hant"), else "en".
+    /// </summary>
+    public static string Resolve(string? lang)
+    {
+        if (string.IsNullOrWhiteSpace(lang)) return "en";
+        lang = lang.Trim().Replace('_', '-');
+        var all = BuiltinCodes().Concat(UserCodes()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        string? Pick(string c) => all.FirstOrDefault(x => x.Equals(c, StringComparison.OrdinalIgnoreCase));
+        if (Pick(lang) is string exact) return exact;
+        var parts = lang.Split('-');
+        string head = parts[0].ToLowerInvariant();
+        if (head == "zh")
+        {
+            bool trad = parts.Skip(1).Any(x => x.Equals("Hant", StringComparison.OrdinalIgnoreCase) || x.ToUpperInvariant() is "TW" or "HK" or "MO");
+            if (Pick(trad ? "zh-Hant" : "zh-Hans") is string z) return z;
+        }
+        if (Pick(head) is string same) return same;
+        return all.FirstOrDefault(x => x.Split('-')[0].Equals(head, StringComparison.OrdinalIgnoreCase)) ?? "en";
+    }
+
+    /// <summary>The language of Windows' own interface, if there are words for it; else English.</summary>
+    public static string SystemLang() => Resolve(System.Globalization.CultureInfo.CurrentUICulture.Name);
+
+    private static IEnumerable<string> BuiltinCodes() =>
+        Asm.GetManifestResourceNames().Where(n => n.StartsWith("lang.") && n.EndsWith(".json")).Select(n => n[5..^5]);
+
+    private static IEnumerable<string> UserCodes()
+    {
+        try { return Directory.Exists(UserDir) ? Directory.GetFiles(UserDir, "*.json").Select(f => Path.GetFileNameWithoutExtension(f)!).Where(c => !c.StartsWith('_')).ToList() : new List<string>(); }
+        catch { return new List<string>(); }
+    }
+
+    private static JsonNode? Builtin(string code)
+    {
+        using var st = Asm.GetManifestResourceStream("lang." + code + ".json");
+        if (st == null) return null;
+        using var r = new StreamReader(st);
+        return JsonNode.Parse(r.ReadToEnd());
+    }
+
+    private static JsonNode? UserFile(string code)
+    {
+        try
+        {
+            var f = Path.Combine(UserDir, code + ".json");
+            return File.Exists(f) ? JsonNode.Parse(File.ReadAllText(f)) : null;
+        }
+        catch (Exception e) { Log.Warn($"language file {code}.json: {e.Message}"); return null; }
+    }
+
+    private static Loc Load(string code)
+    {
+        var l = new Loc { Code = code };
+        Apply(l, Builtin("en"));
+        if (!code.Equals("en", StringComparison.OrdinalIgnoreCase)) Apply(l, Builtin(code));
+        Apply(l, UserFile(code));
+        return l;
+    }
+
+    /// <summary>Each field from the key of its name; "_name" is the language's own name. Unknown keys are left alone.</summary>
+    internal static void Apply(Loc l, JsonNode? n)
+    {
+        if (n is not JsonObject o) return;
+        if (J.Str(o, "_name") is string name) l.Name = name;
+        foreach (var f in typeof(Loc).GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+        {
+            if (f.Name is nameof(Code) or nameof(Name) || o[f.Name] is not JsonNode v) continue;
+            if (f.FieldType == typeof(string) && v is JsonValue sv && sv.TryGetValue<string>(out var str))
+                f.SetValue(l, str);
+            else if (f.FieldType == typeof(Dictionary<string, string>) && v is JsonObject d && f.GetValue(l) is Dictionary<string, string> dict)
+                foreach (var (k, x) in d)
+                    if (x is JsonValue xv && xv.TryGetValue<string>(out var xs)) dict[k] = xs;
+        }
+    }
+
+    /// <summary>
+    /// The language a lesson is written in, from the words of its title and steps, or null when there are too few
+    /// letters to tell. The script tells most: Cyrillic "ru", Chinese characters "zh-Hans", kana "ja", Hangul "ko".
+    /// Latin letters are told apart by the most common short words (Spanish, German, French, Portuguese, else English).
+    /// A spec without "lang" gets its card in that language, so its steps do not sit between buttons in another one.
+    /// A lesson names items in other scripts ("Mesh" in a Russian one, «Файл» quoted in an English one), hence a
+    /// share, not any letter.
     /// </summary>
     public static string? LangOf(JsonNode? spec)
     {
-        int cyr = 0, lat = 0;
+        int cyr = 0, lat = 0, han = 0, kana = 0, hangul = 0;
+        var text = new StringBuilder();
         void Count(string? s)
         {
             if (s == null) return;
+            text.Append(' ').Append(s);
             foreach (var ch in s)
                 if (ch is >= 'А' and <= 'я' or 'Ё' or 'ё') cyr++;
-                else if (ch is >= 'A' and <= 'Z' or >= 'a' and <= 'z') lat++;
+                else if (ch is >= 'A' and <= 'Z' or >= 'a' and <= 'z' || ch is >= 'À' and <= 'ž') lat++;
+                else if (ch is >= '\u3040' and <= '\u30FF') kana++;
+                else if (ch is >= '\uAC00' and <= '\uD7AF') hangul++;
+                else if (ch is >= '\u4E00' and <= '\u9FFF') han++;
         }
         Count(J.Str(spec, "title"));
         foreach (var s in J.Items(J.Get(spec, "steps")))
             foreach (var k in new[] { "title", "say", "why", "text" }) Count(J.Str(s, k));
-        if (cyr + lat < 12) return null;
-        return cyr >= (cyr + lat) * 0.3 ? "ru" : "en";
+        // a Chinese or Japanese character says as much as a word: weigh it like one
+        int all = cyr + lat + 3 * (han + kana + hangul);
+        if (all < 12) return null;
+        if (kana * 3 >= all * 0.1) return "ja";
+        if (hangul * 3 >= all * 0.3) return "ko";
+        if ((han + kana) * 3 >= all * 0.3) return "zh-Hans";
+        if (cyr >= (cyr + lat) * 0.3) return "ru";
+        return LatinLang(text.ToString());
+    }
+
+    // the short words that give a Latin-script language away
+    private static readonly (string code, string[] words)[] Common =
+    {
+        ("en", new[] { "the", "and", "to", "of", "click", "on", "is", "it", "you", "your", "then", "this", "with", "open", "press" }),
+        ("es", new[] { "el", "la", "los", "las", "del", "que", "y", "en", "para", "con", "una", "un", "haga", "pulse", "abra", "es" }),
+        ("de", new[] { "der", "die", "das", "und", "mit", "auf", "sie", "ist", "nicht", "ein", "eine", "im", "zu", "klicken", "öffnen" }),
+        ("fr", new[] { "le", "les", "des", "et", "du", "une", "est", "pour", "dans", "cliquez", "ouvrez", "vous", "sur" }),
+        ("pt", new[] { "o", "os", "as", "do", "da", "que", "e", "em", "para", "com", "uma", "um", "clique", "abra", "não" }),
+    };
+
+    private static string LatinLang(string text)
+    {
+        var words = new List<string>();
+        var w = new StringBuilder();
+        foreach (var ch in text.ToLowerInvariant() + " ")
+            if (char.IsLetter(ch)) w.Append(ch);
+            else if (w.Length > 0) { words.Add(w.ToString()); w.Clear(); }
+        string best = "en";
+        int top = 0;
+        foreach (var (code, list) in Common)
+        {
+            int n = words.Count(x => list.Contains(x));
+            if (n > top) { top = n; best = code; }
+        }
+        // a few accents settle what the short words leave open
+        if (text.IndexOfAny(new[] { 'ñ', '¿', '¡' }) >= 0 && best is "en" or "pt") best = "es";
+        if (text.IndexOfAny(new[] { 'ß', 'ä', 'ö', 'ü' }) >= 0 && best == "en") best = "de";
+        return best;
     }
 }
 
@@ -395,7 +399,7 @@ internal sealed class Loc
 /// </summary>
 internal sealed class Settings
 {
-    public string Lang = "ru";
+    public string Lang = Loc.SystemLang();
     public Color Accent = Palette.DefaultAccent;
     public Dictionary<string, Chord> Hotkeys = DefaultHotkeys();
     public bool? Animate, HideWhenInactive;

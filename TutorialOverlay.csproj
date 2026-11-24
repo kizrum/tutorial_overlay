@@ -38,6 +38,10 @@
   <ItemGroup>
     <EmbeddedResource Include="plugin/skills/tutorial-overlay/SKILL.md" LogicalName="SKILL.md" />
   </ItemGroup>
+  <!-- TutorialOverlay's own words, one file per language (lang.<code>.json in the exe) -->
+  <ItemGroup>
+    <EmbeddedResource Include="src/lang/*.json" LogicalName="lang.%(Filename).json" />
+  </ItemGroup>
 
   <!-- the test project lives beside the sources: keep it out of the exe -->
   <ItemGroup>

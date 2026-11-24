@@ -1,6 +1,6 @@
 <img alt="TutorialOverlay — уроки поверх любой программы Windows" src="docs/media/logo.webp" width="100%">
 
-<a href="README.md">English</a> · <b>Русский</b>
+<a href="README.md">English</a> · <b>Русский</b> · <a href="README.es.md">Español</a> · <a href="README.de.md">Deutsch</a> · <a href="README.zh-CN.md">简体中文</a>
 
 [![kizrum/tutorial_overlay MCP server](https://glama.ai/mcp/servers/kizrum/tutorial_overlay/badges/score.svg)](https://glama.ai/mcp/servers/kizrum/tutorial_overlay)
 
@@ -55,6 +55,9 @@
 карточки горит синяя плашка **АВТО**. Стоит тронуть мышь — управление сразу снова у вас. То, что нельзя отменить
 (оплата, заказ, удаление навсегда, отправка), он никогда не нажимает: такая кнопка красная, с замком, и нажимаете её
 вы сами.
+
+Карточка, трей и настройки говорят по-русски, по-английски, по-испански, по-немецки и по-китайски; можно добавить свой
+язык ([как](docs/server.md)).
 
 Полный формат урока — в [`docs/tutorials.md`](docs/tutorials.md).
 

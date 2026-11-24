@@ -11,7 +11,7 @@ What `start_tutorial` takes. Only `steps` is required.
 | `title` | the lesson's name: the card, the end card, the library |
 | `app`, `window` | the default process (and window) for every anchor that names none |
 | `steps` | the steps — see [Steps and conditions](#steps-and-conditions) |
-| `lang` | `ru` or `en` for the card's own words; default: the language the steps are written in |
+| `lang` | the language code of the steps (`en`, `ru`, `es`, `de`, `zh-Hans`, …): the card's own words follow it, English where the overlay has none; default: told from the steps' text |
 | `keepOpen` | after the last step, wait for `append_steps` instead of finishing (a lesson fed step by step) |
 | `advanceDelayMs` | the pause on a completed step before the next one shows (default 450; a step may set its own) |
 | `startAt` | the index of the step to start from |

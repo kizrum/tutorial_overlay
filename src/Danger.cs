@@ -24,6 +24,13 @@ internal static class Danger
             "подтвердить оплату", "заказать", "перевести деньги", "перевести средства", "подписаться", "продлить подписку", "приобрести",
             "buy", "buy now", "pay", "pay now", "checkout", "check out", "place order", "purchase", "subscribe",
             "confirm purchase", "confirm payment", "confirm order", "transfer money", "transfer funds", "complete purchase", "order now",
+            "comprar", "comprar ahora", "pagar", "pagar ahora", "finalizar compra", "realizar pedido", "tramitar pedido",
+            "confirmar pedido", "confirmar compra", "confirmar pago", "suscribirse", "suscribirme", "transferir dinero",
+            "kaufen", "jetzt kaufen", "bezahlen", "jetzt bezahlen", "zur kasse", "bestellen", "jetzt bestellen",
+            "zahlungspflichtig bestellen", "kauf bestätigen", "zahlung bestätigen", "bestellung bestätigen", "abonnieren",
+            "geld überweisen",
+            "购买", "立即购买", "支付", "立即支付", "付款", "结算", "去结算", "提交订单", "确认订单", "确认支付", "确认付款",
+            "订阅", "转账",
         }),
         ("irreversible", new[]
         {
@@ -31,10 +38,16 @@ internal static class Danger
             "стереть все", "сбросить настройки", "сбросить до заводских", "форматировать диск",
             "delete permanently", "permanently delete", "delete forever", "delete account", "empty recycle bin",
             "empty trash", "erase all", "factory reset", "format disk",
+            "eliminar permanentemente", "eliminar definitivamente", "borrar definitivamente", "eliminar cuenta",
+            "vaciar papelera", "borrar todo", "restablecer de fábrica", "formatear disco",
+            "endgültig löschen", "dauerhaft löschen", "konto löschen", "papierkorb leeren", "alles löschen",
+            "auf werkseinstellungen zurücksetzen", "datenträger formatieren",
+            "永久删除", "彻底删除", "删除账户", "删除帐户", "清空回收站", "全部清除", "恢复出厂设置", "格式化磁盘",
         }),
         ("send", new[]
         {
             "отправить", "опубликовать", "send", "publish", "post",
+            "enviar", "publicar", "senden", "absenden", "veröffentlichen", "发送", "发布",
         }),
     };
 
@@ -44,6 +57,9 @@ internal static class Danger
         "в корзину", "добавить в корзину", "купить позже", "в избранное", "в список желаемого", "удалить фильтр",
         "удалить из списка", "отправить отзыв о приложении",
         "add to cart", "add to basket", "buy later", "wishlist", "wish list", "remove filter", "send feedback",
+        "añadir al carrito", "agregar al carrito", "comprar más tarde", "lista de deseos", "eliminar filtro", "enviar comentarios",
+        "in den warenkorb", "zum warenkorb hinzufügen", "später kaufen", "wunschliste", "merkliste", "filter entfernen", "feedback senden",
+        "加入购物车", "添加到购物车", "稍后购买", "愿望单", "删除筛选", "发送反馈",
     };
 
     /// <summary>The user's own words (settings), added to the list.</summary>
@@ -66,7 +82,9 @@ internal static class Danger
         return t.Length == 1 ? " " : t;
     }
 
-    private static bool Has(string norm, string phrase) => norm.Contains(Norm(phrase));
+    // Chinese and Japanese put no spaces between words: there the phrase is looked for anywhere in the name
+    private static bool Has(string norm, string phrase) =>
+        norm.Contains(Norm(phrase)) || (phrase.Any(c => c is >= '\u3040' and <= '\u9FFF') && norm.Contains(Norm(phrase).Trim()));
 
     /// <summary>Does this caption or name say it cannot be undone? null: it does not.</summary>
     public static Hit? Of(string? name)
