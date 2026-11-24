@@ -381,7 +381,7 @@ the card says the mouse will move by itself and waits for "Got it, start".
   never.
 - **The user always wins.** It starts once the mouse has been still for 2 s. Any input of the user's — the mouse
   moved beyond a jitter, a button, the wheel, a key — gives the controls back at once: held buttons and keys are
-  released, and the card says why ("You have control: …"). A window in the way (a welcome screen, a reminder, an
+  released, and the card says why under "You have control" ("you moved the mouse", …). A window in the way (a welcome screen, a reminder, an
   offer) it closes by the cross the card marks, as the user is asked to — at most three in a row; one without a cross
   found gives the controls back. So do the app gone to the background, a click that missed, a step that did not
   react, going round the same step.

@@ -22,6 +22,9 @@ only fixes things.
   and a small blue "auto" pill can ride beside the pointer it moves (off by default; the "Look" tab).
 - The mascot wears a blue pilot's cap while autoplay has the controls, pulls its goggles down while it moves the
   pointer, and throws its hands up as it hands the controls back.
+- README: what autoplay is, and a new card clip (Help, then "Do them all" with the AUTO pill). `make_media.py card`
+  finds the card wherever it stands; `make_media.py join` puts clips one after another. The autopilot's `--autoplay`
+  and `--takeover` are in `docs/development.md`.
 
 - Step 0 comes first: while a window of the app is in the way (a modal dialog, or before the lesson starts a window
   over the app, such as Steam's "Special Offers"), step 1's marks are not shown, a click on them counts neither as a

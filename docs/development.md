@@ -122,7 +122,16 @@ to complete. It moves the real mouse, so nobody may use the computer while it ru
 dotnet run --project tests -- --autopilot examples/autopilot             # every case in the folder
 dotnet run --project tests -- --autopilot examples/autopilot --case calc # only cases whose file name has "calc"
 dotnet run --project tests -- --autopilot examples/autopilot/fl-phonk-minute.json --keep-open   # leave the app open with what it made
+dotnet run --project tests -- --autopilot examples/autopilot --autoplay             # the overlay's autoplay does the steps
+dotnet run --project tests -- --autopilot examples/autopilot --autoplay --takeover  # ... and the robot takes the mouse midway
 ```
+
+With `--autoplay` the robot presses "Do them all" and keeps its hands off: every step must complete with
+`by: autoplay`. Where the autoplay hands the controls back on purpose (a target that cannot be undone, a choice, a step
+with `"autoplay": false`, a password) the robot does that step itself, as the user would, and presses "Continue
+automatically"; any other pause fails the case. A `help` from the autoplay (a target it cannot find) goes into the
+report as a warning: the robot is no agent and does not answer it. `--takeover` moves the mouse while the autoplay is moving it: the controls must come back
+within 1.5 s (`user_took_over` or `user_active`), then the robot resumes it.
 
 A case file is `{name, launch: {exe, args, process, window, readyTimeoutMs, ready, dismiss}, spec}`. An app whose first
 screen varies from start to start (FL Studio: a cloud-folder warning, a welcome window, the panels left open last time)
@@ -180,8 +189,15 @@ dotnet run --project tests -- --autopilot <case.json>
 New-Item $env:TEMP\rec\stop
 python tests/make_media.py clip $env:TEMP\rec docs/media/fl-lesson.webp --from 180 --to 730 --crop 420,0,2140,1500 --width 1600 --quality 90
 
-# the step card alone, cut out of a recording of a lesson (Why, Help and the agent's answer, the end card)
-python tests/make_media.py card $env:TEMP\rec docs/media/card-help.webp
+# the step card alone, cut out of a recording (found wherever it stands): one run asks for help on step 1
+# ("askHelp": [0] in the case), a second is the autoplay's; the README's card is step 1 of the first, then the second
+python tests/make_media.py record $env:TEMP\rec            # in a second terminal, as above
+dotnet run --project tests -- --autopilot <word-wrap case.json>
+dotnet run --project tests -- --autopilot <word-wrap case.json> --autoplay
+New-Item $env:TEMP\rec\stop
+python tests/make_media.py card $env:TEMP\rec $env:TEMP\help.webp --to <last frame of the first run>
+python tests/make_media.py card $env:TEMP\rec $env:TEMP\auto.webp --from <first frame of the second run>
+python tests/make_media.py join docs/media/card-help.webp $env:TEMP\help.webp:0:5 $env:TEMP\auto.webp
 ```
 
 Keep them sharp: frames are recorded nearly lossless, the card and the mascot are encoded lossless, and pictures

@@ -48,7 +48,12 @@ The overlay rings each target on top of the app, the mascot points at it, and a 
 complete by themselves — a click, a pixel, a window, a shortcut, a drag, a scroll. Stuck? Press **Help** and the
 agent answers right in the card. At the end the lesson can be saved and replayed from the tray, no agent needed.
 
-<img width="420" alt="The step card: Why opens, Help offers choices, the agent's answer appears, the end card offers Save tutorial" src="docs/media/card-help.webp" />
+<img width="420" alt="The step card: Help marks the target and explains, then Do them all — a blue AUTO pill leads the header and the steps tick off by themselves" src="docs/media/card-help.webp" />
+
+Want to see it done first? **Do this step** (or **Do them all**) on the card hands the mouse to the overlay: it
+moves the real pointer and presses what the marks frame while you watch, and a blue **AUTO** at the head of the card
+says it is at work. Touch the mouse and the controls are yours again at once. What cannot be undone — pay, order,
+delete for good, send — it never presses: that button is red with a padlock, and yours to press.
 
 For the full spec format see [`docs/tutorials.md`](docs/tutorials.md).
 

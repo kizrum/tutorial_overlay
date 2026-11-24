@@ -5,6 +5,9 @@
                                           frames -> an animated WebP
   card FRAMES OUT.webp [--from N] [--to N] [--left X] [--width W] [--hold S]
                                           the step card alone, cut out of each frame, on a transparent background
+  join OUT.webp PART.webp[:FROM:TO] ... [--hold S]
+                                          animations one after another (frames FROM..TO-1 of each part), the last
+                                          frame held S s (2.5)
   mascot FRAMES OUTDIR [--act NAME] [--width W]
                                           the folders of tests --mascot -> one transparent WebP per act
 
@@ -106,22 +109,34 @@ def clip(args):
 # ------------------------------------------------------------------ card
 
 def card(args):
-    """The card's box in each frame: its left padding column is dark between a light top and bottom border. The
-    card grows upward, so the cut-outs stand on their bottom edge. A still spell longer than --hold s is cut short."""
+    """The card's box in each frame: its left padding column is dark between a light top and bottom border (the
+    longest such run of the card's own near-black in the column). A card that grows upward (bottom edge fixed) stands on its bottom edge in
+    the clip, one that grows downward hangs from its top. A still spell longer than --hold s is cut short."""
     src, out = args[0], args[1]
     files = frames_in(src)
     a, b = int(opt(args, "--from", 0)), int(opt(args, "--to", len(files) - 1))
     left, w = int(opt(args, "--left", 1924)), int(opt(args, "--width", 612))
     hold = int(float(opt(args, "--hold", 1.5)) * 15)
     x = left + 14
-    crops, prev, still = [], None, 0
+    crops, tops, bots, prev, still = [], [], [], None, 0
     for f in files[a:b + 1]:
         im = Image.open(os.path.join(src, f)).convert("RGB")
         px = im.convert("L").load()
-        bot = next((y for y in range(im.height - 200, im.height) if px[x, y] > 45), None)
-        top = next((y for y in range(bot - 10, 200, -1) if px[x, y] > 45), None) if bot else None
-        if top is None or bot - top < 150:
+        top = bot = None
+        last = None                                  # the last light pixel seen going down the column
+        run = True                                   # everything since it is the card's own near-black
+        for y in range(im.height):
+            v = px[x, y]
+            if v > 45:
+                if last is not None and run and y - last - 1 >= 150 and (bot is None or y - last > bot - top):
+                    top, bot = last, y
+                last, run = y, True
+            elif v > 28:
+                run = False                          # another window's dark grey, not the card's padding
+        if top is None:
             continue
+        tops.append(top)
+        bots.append(bot)
         # one pixel in from the border: the card's own edge is half see-through, and what is behind it (another
         # window) would show as a coloured line; the edge is drawn again below
         c = im.crop((left + 1, top + 1, left + w - 1, bot))
@@ -136,6 +151,7 @@ def card(args):
         crops.append(c)
     w -= 2
     h = max(c.height for c in crops)
+    hang = max(tops) - min(tops) < max(bots) - min(bots)     # the top edge stays put: the card grows downward
     frames = []
     for c in crops:
         k = 4
@@ -148,9 +164,40 @@ def card(args):
         c.alpha_composite(edge.resize(c.size, Image.LANCZOS))
         c.putalpha(mask.resize(c.size, Image.LANCZOS))
         fr = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        fr.alpha_composite(c, (0, h - c.height))
+        fr.alpha_composite(c, (0, 0 if hang else h - c.height))
         frames.append(fr)
     save_webp(frames, out, 67, True)
+
+
+# ------------------------------------------------------------------ join
+
+def join(args):
+    """Parts one after another, each frame with its own duration; smaller frames hang from the top left."""
+    hold = float(opt(args, "--hold", 2.5))
+    rest = args[1:args.index("--hold")] + args[args.index("--hold") + 2:] if "--hold" in args else args[1:]
+    out, parts = args[0], rest
+    frames, ms = [], []
+    for part in parts:
+        path, sep, rng = part.partition(".webp:")
+        path = path + ".webp" if sep else path
+        im = Image.open(path)
+        a, b = 0, im.n_frames
+        if rng:
+            lo, _, hi = rng.partition(":")
+            a, b = int(lo or 0), int(hi or im.n_frames)
+        for i in range(a, b):
+            im.seek(i)
+            frames.append(im.convert("RGBA").copy())
+            ms.append(im.info.get("duration", 67))
+    w, h = max(f.width for f in frames), max(f.height for f in frames)
+    canvas = []
+    for f in frames:
+        c = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        c.alpha_composite(f)
+        canvas.append(c)
+    ms[-1] = round(hold * 1000)
+    canvas[0].save(out, save_all=True, append_images=canvas[1:], duration=ms, loop=0, lossless=True, method=6)
+    print(out, len(canvas), "frames", f"{w}x{h}", os.path.getsize(out) // 1024, "KB", f"{sum(ms) / 1000:.1f} s")
 
 
 # ------------------------------------------------------------------ mascot
@@ -183,4 +230,4 @@ def mascot(args):
 
 if __name__ == "__main__":
     cmd, rest = sys.argv[1], sys.argv[2:]
-    {"record": record, "clip": clip, "card": card, "mascot": mascot}[cmd](rest)
+    {"record": record, "clip": clip, "card": card, "join": join, "mascot": mascot}[cmd](rest)
