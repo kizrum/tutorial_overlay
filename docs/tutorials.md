@@ -381,8 +381,10 @@ the card says the mouse will move by itself and waits for "Got it, start".
   never.
 - **The user always wins.** It starts once the mouse has been still for 2 s. Any input of the user's — the mouse
   moved beyond a jitter, a button, the wheel, a key — gives the controls back at once: held buttons and keys are
-  released, and the card says why ("You have control: …"). So do a window of the app it cannot decide about (a modal
-  dialog), the app gone to the background, a click that missed, a step that did not react, going round the same step.
+  released, and the card says why ("You have control: …"). A window in the way (a welcome screen, a reminder, an
+  offer) it closes by the cross the card marks, as the user is asked to — at most three in a row; one without a cross
+  found gives the controls back. So do the app gone to the background, a click that missed, a step that did not
+  react, going round the same step.
 - **A target it cannot find** is looked for as long as the test robot does: 8 s quietly ("Looking for …" on the card),
   then it asks the agent (a `help` event, `source: "autoplay"`) and waits for the answer — 20 s, again after each of
   the agent's calls, up to a minute; the target turning up (a `retarget`) carries on by itself. With no agent there it

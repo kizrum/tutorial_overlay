@@ -55,6 +55,12 @@ internal static class Autopilot
     /// </summary>
     private static bool AutoplayMode;
 
+    /// <summary>
+    /// --takeover (with --autoplay): once, while the autoplay moves the pointer, the robot takes the mouse as a person
+    /// would. The autoplay must give the controls back at once (user_took_over / user_active) — then "Continue".
+    /// </summary>
+    private static bool TakeoverTest;
+
     public static int Run(string[] args)
     {
         Native.SetProcessDpiAwarenessContext(Native.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);   // physical pixels
@@ -63,6 +69,7 @@ internal static class Autopilot
         string? only = Opt(args, "--case");
         KeepOpen = args.Contains("--keep-open");
         AutoplayMode = args.Contains("--autoplay");
+        TakeoverTest = args.Contains("--takeover");
         if (Opt(args, "--speed") is string sp && double.TryParse(sp, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var spd) && spd > 0) Speed = spd;
         var files = Directory.Exists(target) ? Directory.GetFiles(target, "*.json").OrderBy(f => f).ToList()
             : File.Exists(target) ? new List<string> { target } : new List<string>();
@@ -276,8 +283,22 @@ internal static class Autopilot
         int shownIndex = -1;
         var stepSw = Stopwatch.StartNew();
         StepResult? cur = null;
+        long tookAt = 0;          // --takeover: when the robot's hand went on the mouse (sw ms)
+        bool tookBack = false;
         while (sw.ElapsedMilliseconds < limit)
         {
+            if (TakeoverTest && tookAt == 0 && shownIndex >= 1)
+            {
+                var a0 = J.Str(J.Get(mcp.Call("status", new JsonObject()).Json, "autoplay"), "state");
+                if (a0 == "acting")
+                {
+                    // a hand on the mouse while the autoplay drives: a nudge of 40 px, as a person grabbing it
+                    Native.GetCursorPos(out var at);
+                    Input.Hover(at.X + 40, at.Y + 25);
+                    tookAt = sw.ElapsedMilliseconds;
+                    Console.WriteLine($"      the robot takes the mouse while the autoplay moves it (step {shownIndex + 1})");
+                }
+            }
             foreach (var ev in Events(mcp, ref seq))
             {
                 var e = J.Str(ev, "event");
@@ -311,6 +332,18 @@ internal static class Autopilot
             if (astate == "paused")
             {
                 var reason = J.Str(auto, "reason");
+                if (TakeoverTest && tookAt > 0 && !tookBack && reason is "user_took_over" or "user_active")
+                {
+                    tookBack = true;
+                    long ms = sw.ElapsedMilliseconds - tookAt;
+                    Console.WriteLine($"      the controls came back ({reason}) {ms} ms after the hand went on the mouse");
+                    cur?.Warnings.Add($"takeover: the controls came back ({reason}) after {ms} ms");
+                    if (ms > 1500) { res.Verdict = "fail"; res.Note = $"the autoplay gave the controls back only {ms} ms after the user took the mouse"; return; }
+                    Shoot(mcp, cur!, reportDir, res.Name, "takeover");
+                    Thread.Sleep(2500);       // a person reads the card, then presses "Continue automatically"
+                    mcp.Call("autoplay", new JsonObject { ["action"] = "resume" });
+                    continue;
+                }
                 if (reason is "danger" or "choice" or "cant_do" or "password" && cur != null)
                 {
                     // handed back on purpose: the robot does this step itself, as the user would, then "Continue"
@@ -319,6 +352,7 @@ internal static class Autopilot
                     var own = PlayStep(mcp, steps[idx]!.AsObject(), spec, idx > 0 ? steps[idx - 1]!.AsObject() : null, idx, ref seq, reportDir, res.Name);
                     if (own.Verdict == "fail") { cur.Verdict = "fail"; cur.Note = own.Note; res.Verdict = "fail"; res.Note = $"step {idx + 1}: {own.Note}"; return; }
                     cur.Action = "autoplay · handed back · " + own.Action;
+                    by[idx] = "user";   // its step_completed was read by PlayStep: the robot did it, as the user
                     if (idx + 1 < steps.Count)
                     {
                         Thread.Sleep(800);
@@ -346,6 +380,7 @@ internal static class Autopilot
         foreach (var ev in Events(mcp, ref seq))
             if (J.Str(ev, "event") == "step_completed" && J.Num(ev, "index") is double ci) by[(int)ci] = J.Str(ev, "by") ?? "?";
         if (sw.ElapsedMilliseconds >= limit) { res.Verdict = "fail"; res.Note = $"the lesson did not end in {limit / 1000} s"; return; }
+        if (TakeoverTest && !tookBack) { res.Verdict = "fail"; res.Note = tookAt == 0 ? "--takeover: never caught the autoplay moving the pointer" : "--takeover: the autoplay did not give the controls back"; return; }
         for (int i = 0; i < steps.Count; i++)
         {
             var r = res.Steps.FirstOrDefault(x => x.Index == i);

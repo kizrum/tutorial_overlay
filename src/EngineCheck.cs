@@ -300,6 +300,16 @@ internal static partial class Engine
             }
         }
         catch (Exception e) when (Resolver.IsGone(e) || e is InvalidOperationException) { return Bad("element vanished while reading it: " + e.Message); }
+        // UI Automation did not answer in time (Steam just started walks its tree for seconds): the lesson then frames
+        // the element by its caption until UIA answers — the same here, so a slow app is "slow", not "missing"
+        if (!r.Found && r.Reason.StartsWith("the app did not answer UI Automation", StringComparison.Ordinal)
+            && Engine.TextStandIn(a) is { } caption && CheckAnchor(caption) is { } byCaption && J.Bool(byCaption, "ok") == true)
+        {
+            byCaption["anchor"] = a.Describe();
+            byCaption["via"] = "caption";
+            byCaption["slow"] = SlowNote(a, 3000);
+            return byCaption;
+        }
         if (!r.Found) return Bad(r.Reason == "process not running" ? "process not running" : "not found: " + r.Reason, r.Reason == "process not running" ? "error" : "warning");
         if (Native.IsAboveUs(Native.ProcessId(r.Root)))
             return Bad("the app runs as administrator and TutorialOverlay does not: its clicks cannot be seen — start TutorialOverlay as administrator too", "error");

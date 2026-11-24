@@ -411,11 +411,13 @@ internal static partial class Engine
         // a window in the way: a modal one is the user's to answer; another one is closed by its close button
         if (BlockingDialogWindow(s) is { } d)
         {
-            if (d.modal) { Pause("modal", d.title); return null; }
+            // the same rule as the user's: the card asks to close it and marks its close button; that cross is
+            // "cancel" (a welcome screen, a reminder), never anything that cannot be undone. A modal one without a
+            // close button found is the user's to answer
             if (Auto.DialogSince == 0) Auto.DialogSince = now;
             if (CloseSpot(d) is not RectangleF c)
             {
-                if (now - Auto.DialogSince > NoCloseMs) Pause("no_close", d.title);
+                if (now - Auto.DialogSince > NoCloseMs) Pause(d.modal ? "modal" : "no_close", d.title);
                 return null;
             }
             if (Auto.ClosedWindows >= MaxWindowsClosed) { Pause("windows_keep_opening", d.title); return null; }
