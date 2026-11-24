@@ -204,6 +204,7 @@ internal static class Renderer
                 case PrimKind.Marker: Marker(g, p, a); break;
                 case PrimKind.Band: Band(g, p, a); break;
                 case PrimKind.Forbid: Forbid(g, p, a); break;
+                case PrimKind.DangerTag: DangerTag(g, p, a); break;
                 case PrimKind.Hull: Hull(g, p, a); break;
                 case PrimKind.EdgeTab: EdgeTab(g, p, a); break;
             }
@@ -479,6 +480,31 @@ internal static class Renderer
             g.DrawLine(x, cx - k, cy - k, cx + k, cy + k);
             g.DrawLine(x, cx + k, cy - k, cx - k, cy + k);
         }
+        using var tb = new SolidBrush(Palette.WithAlpha(Palette.Text, a));
+        g.DrawString(p.Text, Theme.Font(p.Size), tb, new RectangleF(tag.X + 22 * s, tag.Y, tag.Width - 24 * s, tag.Height), new StringFormat(Theme.Center) { Alignment = StringAlignment.Near });
+    }
+
+    /// <summary>
+    /// The tag on a control that cannot be undone: a lock and "press it yourself" on its top edge, red (the frame
+    /// itself is drawn red by its own shape).
+    /// </summary>
+    private static void DangerTag(Graphics g, Prim p, float a)
+    {
+        float s = p.Scale;
+        var tag = p.ForbidTag();
+        using (var tp = Theme.Rounded(tag, tag.Height / 2))
+        {
+            using (var bg = new SolidBrush(Palette.WithAlpha(Palette.Ink, a * 0.95f))) g.FillPath(bg, tp);
+            using var edge = new Pen(Palette.WithAlpha(p.Color, a), 1.5f * s);
+            g.DrawPath(edge, tp);
+        }
+        // a padlock: the shackle, then the body
+        float cx = tag.X + 12 * s, cy = tag.Y + tag.Height / 2 + 1.5f * s;
+        using (var sh = new Pen(Palette.WithAlpha(p.Color, a), 1.8f * s))
+            g.DrawArc(sh, cx - 3.2f * s, cy - 7.5f * s, 6.4f * s, 7 * s, 180, 180);
+        using (var body = new SolidBrush(Palette.WithAlpha(p.Color, a)))
+        using (var bp = Theme.Rounded(new RectangleF(cx - 4.8f * s, cy - 3.2f * s, 9.6f * s, 7.4f * s), 1.6f * s))
+            g.FillPath(body, bp);
         using var tb = new SolidBrush(Palette.WithAlpha(Palette.Text, a));
         g.DrawString(p.Text, Theme.Font(p.Size), tb, new RectangleF(tag.X + 22 * s, tag.Y, tag.Width - 24 * s, tag.Height), new StringFormat(Theme.Center) { Alignment = StringAlignment.Near });
     }

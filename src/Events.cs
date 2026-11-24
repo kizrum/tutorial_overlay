@@ -66,9 +66,13 @@ internal static class Events
     /// <summary>UTC ticks of the user's last action in a lesson (0: none yet).</summary>
     public static long LastUserTicks;
 
+    /// <summary>Who made the input being handled on this thread (user | autoplay | other): the events it causes say so.</summary>
+    [ThreadStatic] public static string? InputBy;
+
     public static void Emit(string type, JsonObject? data = null)
     {
-        if (UserEvents.Contains(type)) Interlocked.Exchange(ref LastUserTicks, DateTime.UtcNow.Ticks);
+        if (InputBy != null && data != null && !data.ContainsKey("by")) data["by"] = InputBy;
+        if (UserEvents.Contains(type) && InputBy != "autoplay") Interlocked.Exchange(ref LastUserTicks, DateTime.UtcNow.Ticks);
         JsonObject ev;
         TaskCompletionSource pulse;
         lock (Lock)

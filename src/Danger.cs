@@ -1,0 +1,100 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+
+namespace TutorialOverlay;
+
+/// <summary>
+/// What cannot be undone: buying, paying, ordering, deleting for good, sending in the user's name. A control whose
+/// name says so is marked red ("only you press this") in every lesson, and the autoplay never presses it: it stops
+/// and the user decides. Anything may add danger (the spec's danger:true, these words, the user's own words in the
+/// settings); nothing takes it away — a needless stop costs one click of the user's, a missed one costs money.
+/// </summary>
+internal static class Danger
+{
+    internal sealed record Hit(string Kind, string Word);
+
+    // whole words or phrases, matched on the normalised text (lower case, ё → е, punctuation as spaces)
+    private static readonly (string kind, string[] words)[] Words =
+    {
+        ("payment", new[]
+        {
+            "купить", "купить сейчас", "оплатить", "оформить заказ", "подтвердить заказ", "подтвердить покупку",
+            "подтвердить оплату", "заказать", "перевести деньги", "перевести средства", "подписаться", "продлить подписку", "приобрести",
+            "buy", "buy now", "pay", "pay now", "checkout", "check out", "place order", "purchase", "subscribe",
+            "confirm purchase", "confirm payment", "confirm order", "transfer money", "transfer funds", "complete purchase", "order now",
+        }),
+        ("irreversible", new[]
+        {
+            "удалить навсегда", "удалить безвозвратно", "удалить аккаунт", "удалить учетную запись", "очистить корзину",
+            "стереть все", "сбросить настройки", "сбросить до заводских", "форматировать диск",
+            "delete permanently", "permanently delete", "delete forever", "delete account", "empty recycle bin",
+            "empty trash", "erase all", "factory reset", "format disk",
+        }),
+        ("send", new[]
+        {
+            "отправить", "опубликовать", "send", "publish", "post",
+        }),
+    };
+
+    // a name that also says one of these is not the act itself (a cart, a reminder, a list)
+    private static readonly string[] Not =
+    {
+        "в корзину", "добавить в корзину", "купить позже", "в избранное", "в список желаемого", "удалить фильтр",
+        "удалить из списка", "отправить отзыв о приложении",
+        "add to cart", "add to basket", "buy later", "wishlist", "wish list", "remove filter", "send feedback",
+    };
+
+    /// <summary>The user's own words (settings), added to the list.</summary>
+    public static volatile string[] Extra = Array.Empty<string>();
+
+    /// <summary>Names longer than this are a sentence, not a control's caption: not judged by their words.</summary>
+    private const int MaxLength = 60;
+
+    internal static string Norm(string s)
+    {
+        var b = new StringBuilder(s.Length + 2).Append(' ');
+        foreach (var ch0 in s.ToLowerInvariant())
+        {
+            char ch = ch0 == 'ё' ? 'е' : ch0;
+            b.Append(char.IsLetterOrDigit(ch) ? ch : ' ');
+        }
+        b.Append(' ');
+        var t = b.ToString();
+        while (t.Contains("  ")) t = t.Replace("  ", " ");
+        return t.Length == 1 ? " " : t;
+    }
+
+    private static bool Has(string norm, string phrase) => norm.Contains(Norm(phrase));
+
+    /// <summary>Does this caption or name say it cannot be undone? null: it does not.</summary>
+    public static Hit? Of(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Length > MaxLength) return null;
+        var n = Norm(name);
+        if (n.Trim().Length == 0) return null;
+        foreach (var w in Extra)
+            if (!string.IsNullOrWhiteSpace(w) && Has(n, w)) return new Hit("user", w.Trim());
+        if (Not.Any(x => Has(n, x))) return null;
+        foreach (var (kind, words) in Words)
+            foreach (var w in words)
+                if (Has(n, w)) return new Hit(kind, w);
+        return null;
+    }
+
+    /// <summary>Keys that destroy whatever is selected without asking: Shift+Delete.</summary>
+    public static Hit? OfChord(Chord c) =>
+        c.Vk == 0x2E && (c.Mods & Native.MOD_SHIFT) != 0 ? new Hit("irreversible", "Shift+Delete") : null;
+
+    /// <summary>Keys that press the focused or default button (Enter, Space, Ctrl+Enter): it is judged by its name.</summary>
+    public static bool PressesButton(Chord c) => c.Vk is 0x0D or 0x20;
+
+    /// <summary>The first danger among a control's names (the spec's name, UI Automation's name, the found text).</summary>
+    public static Hit? OfAny(IEnumerable<string?> names)
+    {
+        foreach (var n in names)
+            if (Of(n) is Hit h) return h;
+        return null;
+    }
+}

@@ -24,12 +24,12 @@ internal static class SpecLint
         "text", "label", "n", "color", "thickness", "stroke", "lineWidth", "size", "fontSize", "target", "title", "id", "buttonId", "style", "action",
         "width", "pad", "points", "path", "smooth", "radius", "opacity", "from", "dir", "curve", "end", "taper", "route");
     private static readonly HashSet<string> Mark = Set("id", "anchor", "dismissOnClick", "toggle", "button", "optional", "name", "label", "text",
-        "doneStyle", "hideWhenInactive", "opens", "check", "shapes", "number", "hint", "caption", "arrow", "grid", "group");
+        "doneStyle", "hideWhenInactive", "opens", "check", "shapes", "number", "hint", "caption", "arrow", "grid", "group", "danger", "dangerNote");
     private static readonly HashSet<string> Opens = Union(Anchor, Set("anchor", "anyProcess", "timeoutMs"));
     private static readonly HashSet<string> Grid = Set("from", "step", "dx", "dy", "rows", "cols", "cells", "w", "h");
     private static readonly HashSet<string> Step = Union(Mark, Set("id", "title", "text", "description", "body", "why", "explain", "because", "say",
         "untilMode", "toggle", "dim", "advanceDelayMs", "numbered", "anchor", "targets", "marks", "shapes", "buttons", "controls", "checklist",
-        "sequence", "until", "complete", "done", "inMenu"));
+        "sequence", "until", "complete", "done", "inMenu", "autoplay", "autoplayNote"));
     private static readonly HashSet<string> Cond = Union(Anchor, Set("type", "count", "anchor", "at", "expr", "when", "radius", "keys", "key", "from", "to",
         "button", "show", "hold", "holding", "path", "points", "smooth", "ordered", "direction", "tolerance", "coverage", "in", "area", "over", "dir",
         "notches", "until", "untilVisible", "property", "prop", "equals", "is", "contains", "matches", "regex", "not"));
@@ -37,7 +37,7 @@ internal static class SpecLint
     private static readonly HashSet<string> Button = Set("id", "text", "label", "style", "action");
     private static readonly HashSet<string> Spec = Set("title", "app", "process", "window", "anchor", "dim", "toggle", "keepOpen", "advanceDelayMs",
         "hideWhenInactive", "startAt", "outro", "lang", "language", "accent", "hotkeys", "mascot", "steps", "name", "savedAt", "autoColor", "animate",
-        "hideFromCapture", "scale", "templates", "description", "version", "replace");
+        "hideFromCapture", "scale", "templates", "description", "version", "replace", "autoplay");
     private static readonly HashSet<string> Draw = Union(Mark, Set("shapes", "anchor", "dismissOnClick", "id", "toggle", "check", "button",
         "hideWhenInactive", "marks", "replace"));
     private static readonly HashSet<string> ShapeTypes = Set("circle", "rect", "auto", "brackets", "pill", "marker", "band", "forbid", "arrow", "badge", "label", "info", "check", "checkbox", "button", "dim", "path");
@@ -86,7 +86,15 @@ internal static class SpecLint
         Keys(so, Step, at, res);
         if (J.Get(so, "anchor") is JsonNode a) AnchorNode(a, at + "anchor.", res);
         int i = 0;
-        foreach (var t in J.Items(J.Get(so, "targets") ?? J.Get(so, "marks"))) MarkNode(t, $"{at}targets[{i++}].", res);
+        foreach (var t in J.Items(J.Get(so, "targets") ?? J.Get(so, "marks")))
+        {
+            // a target whose name says it cannot be undone, not marked so: the overlay marks it red anyway (and the
+            // autoplay never presses it), but the lesson should say what happens — dangerNote
+            if (J.Unwrap(t) is JsonObject to && J.Bool(to, "danger") != true
+                && Danger.OfAny(new[] { J.Str(to, "name"), J.Str(to, "label"), J.Str(J.Get(to, "anchor"), "text"), J.Str(J.Get(J.Get(to, "anchor"), "find"), "text") }) is { } dh)
+                res.Add($"{at}targets[{i}]: «{dh.Word}» cannot be undone — add danger:true and a dangerNote saying what happens (\"499 ₽ will be charged\"); the overlay marks it red and the autoplay never presses it");
+            MarkNode(t, $"{at}targets[{i++}].", res);
+        }
         if (J.Has(so, "shapes")) MarkNode(so, at, res, skipKeys: true);
         i = 0;
         foreach (var b in J.Items(J.Get(so, "buttons")))

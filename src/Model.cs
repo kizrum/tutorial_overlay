@@ -499,6 +499,9 @@ internal sealed class Mark
 
     public string? Group;                 // targets of a step with the same group are outlined together, the group's name on the outline
     public PointF? OffscreenAt;           // where it is while off every monitor (a tab at the screen's edge points there)
+    public bool Danger;                   // the spec says: it cannot be undone (pay, order, delete for good) — only the user presses it
+    public string? DangerNote;            // what happens if pressed ("499 ₽ will be charged"), for the card
+    public Danger.Hit? DangerSeen;        // runtime: why it counts as dangerous (the spec, or its name / the element under it)
 
     public bool HasHitArea => Shapes.Any(s => s.IsTarget);
     public bool HasButtons => Shapes.Any(s => s.Type == "button");
@@ -519,6 +522,8 @@ internal sealed class Mark
             DoneStyle = (J.Str(n, "doneStyle") ?? "hide").ToLowerInvariant(),
             HideInactive = J.Bool(n, "hideWhenInactive"),
             Group = J.Str(n, "group"),
+            Danger = J.Bool(n, "danger") ?? false,
+            DangerNote = J.Str(n, "dangerNote"),
         };
         if (J.Pt(n, "__cell") is PointF cell) m.Anchor = m.Anchor.With(cell.X, cell.Y);
         if (J.Unwrap(J.Get(n, "opens")) is JsonNode on)
@@ -844,6 +849,8 @@ internal sealed class Step
             Dim = J.Num(n, "dim") is double d ? (float)d : (J.Bool(n, "dim") == true ? 0.45f : null),
             AdvanceDelayMs = J.Int(n, "advanceDelayMs"),
             Numbered = J.Bool(n, "numbered") ?? false,
+            AutoplayOff = J.Bool(n, "autoplay") == false,
+            AutoplayNote = J.Str(n, "autoplayNote"),
         };
         // a step-level "anchor" is the default for all of its targets
         var stepDefaults = J.Has(n, "anchor") ? AnchorSpec.Parse(J.Get(n, "anchor"), defaults) : defaults;
@@ -876,6 +883,9 @@ internal sealed class Step
     }
 
     public bool InMenu;                              // its targets are in a menu / popup the previous step opens
+    public bool AutoplayOff;                         // autoplay:false — the autoplay leaves this step to the user
+    public string? AutoplayNote;                     // and says why
+    public string? CompletedBy;                      // who completed it last: user | autoplay | agent | other | app
     public string? DoneHow;                          // how it was last completed (targets, key, agent, …)
     public bool SeenThisVisit;                       // its target was on screen during this visit
     public DateTime? LostSince;                      // seen, then gone (a menu that closed): since when
@@ -931,6 +941,7 @@ internal sealed class Tutorial
     public bool HideWhenInactive = true;
     public bool Outro = true;            // after the last step: offer save / repeat / continue on the card
     public bool Mascot = true;           // "Шажок" points at the targets (also needs the global setting)
+    public bool AutoplayAllowed = true;  // autoplay:false — a practice lesson: no "Show me" on the card
     public JsonObject Spec = new();      // what it was started from (+ appended steps) — what "save" writes
     public string? SavedAs;              // name in the tutorial library, once saved
     public bool Changed;                 // repaired on the way (retarget, appended steps, a fixed version) since it was saved

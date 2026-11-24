@@ -7,7 +7,19 @@ namespace TutorialOverlay;
 
 internal enum InputKind { MouseDown, MouseUp, KeyDown, Move, Wheel }
 
-internal readonly record struct InputEvent(InputKind Kind, int X, int Y, string Button, uint Vk, uint Mods, bool Injected, bool Swallowed, long Ticks, int Delta = 0);
+internal readonly record struct InputEvent(InputKind Kind, int X, int Y, string Button, uint Vk, uint Mods, bool Injected, bool Swallowed, long Ticks, int Delta = 0,
+                                          InputSource Source = InputSource.User)
+{
+    /// <summary>Who made it, as logs and events say it: user | autoplay | other.</summary>
+    public string By => InputHook.Name(Source);
+}
+
+/// <summary>
+/// Who made an input: the user's own mouse and keyboard; the overlay's autoplay (its SendInput carries
+/// <see cref="InputHook.AutoplayTag"/>); the hook watchdog's probe (<see cref="InputHook.ProbeTag"/>, nobody's
+/// input); or another program's synthetic input (a remote-control app, a test robot, a macro tool).
+/// </summary>
+internal enum InputSource { User, Autoplay, Probe, Other }
 
 /// <summary>
 /// WH_MOUSE_LL + WH_KEYBOARD_LL on a dedicated thread with its own message loop. Callbacks only enqueue:
@@ -46,6 +58,61 @@ internal static class InputHook
     private static int _swallowingButtonUp;                    // WM_*BUTTONUP to eat after a swallowed down
     private static volatile bool _stop;
     public static int Reinstalls { get; private set; }
+
+    /// <summary>dwExtraInfo of the autoplay's own input ("TOAP"): the hook tells it from the user's.</summary>
+    public const long AutoplayTag = 0x544F4150;
+    /// <summary>dwExtraInfo of the watchdog's probe: a 1 px move nobody made, never anyone's activity.</summary>
+    public const long ProbeTag = 0x544F4151;
+
+    public static InputSource SourceOf(bool injected, IntPtr extra) =>
+        (long)extra == AutoplayTag ? InputSource.Autoplay : (long)extra == ProbeTag ? InputSource.Probe : injected ? InputSource.Other : InputSource.User;
+
+    public static string Name(InputSource s) => s switch
+    {
+        InputSource.Autoplay => "autoplay", InputSource.Probe => "probe", InputSource.Other => "other", _ => "user",
+    };
+
+    // ---- someone else's hands on the input (the user's, or another program's): the autoplay gives way to them
+    private static long _foreignAt;                // Environment.TickCount64 of the last foreign input that counts
+    private static volatile int _foreignBy;        // its InputSource
+    private static int _jitterX, _jitterY;         // where a run of small moves began
+    private static long _jitterAt;
+    /// <summary>A move further than this from where a run of moves began is a hand on the mouse, not a jolt of the desk.</summary>
+    public const int JitterPx = 8;
+    private const int JitterWindowMs = 300;
+
+    /// <summary>When someone other than the autoplay last moved (beyond a jolt), clicked, turned the wheel or pressed a key.</summary>
+    public static long ForeignInputAt => Interlocked.Read(ref _foreignAt);
+    public static InputSource ForeignInputBy => (InputSource)_foreignBy;
+
+    private static void NoteForeign(InputSource src)
+    {
+        if (src is InputSource.Autoplay or InputSource.Probe) return;
+        Interlocked.Exchange(ref _foreignAt, Environment.TickCount64);
+        _foreignBy = (int)src;
+    }
+
+    /// <summary>A mouse move by someone else: it counts once it has gone further than a jolt within a moment.</summary>
+    internal static void NoteForeignMove(InputSource src, int x, int y, long now)
+    {
+        if (src is InputSource.Autoplay or InputSource.Probe) return;
+        if (now - _jitterAt > JitterWindowMs) { _jitterX = x; _jitterY = y; _jitterAt = now; return; }
+        _jitterAt = now;
+        int dx = x - _jitterX, dy = y - _jitterY;
+        if (dx * dx + dy * dy > JitterPx * JitterPx)
+        {
+            _jitterX = x; _jitterY = y;
+            Interlocked.Exchange(ref _foreignAt, now);
+            _foreignBy = (int)src;
+        }
+    }
+
+    /// <summary>Tests: as if someone did something at <paramref name="tick"/> (Environment.TickCount64).</summary>
+    internal static void NoteForeignAt(long tick, InputSource src = InputSource.User)
+    {
+        Interlocked.Exchange(ref _foreignAt, tick);
+        _foreignBy = (int)src;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct KBDLLHOOKSTRUCT { public uint vkCode, scanCode, flags, time; public IntPtr dwExtraInfo; }
@@ -176,9 +243,9 @@ internal static class InputHook
         int mouseBefore = _lastMouseTick, keyBefore = _lastKeyTick;
         var input = new[]
         {
-            new INPUT { type = INPUT_MOUSE, u = new InputUnion { mi = new MOUSEINPUT { dx = 1, dwFlags = MOUSEEVENTF_MOVE } } },
-            new INPUT { type = INPUT_MOUSE, u = new InputUnion { mi = new MOUSEINPUT { dx = -1, dwFlags = MOUSEEVENTF_MOVE } } },
-            new INPUT { type = INPUT_KEYBOARD, u = new InputUnion { ki = new KEYBDINPUT { wVk = ProbeVk, dwFlags = KEYEVENTF_KEYUP } } },
+            new INPUT { type = INPUT_MOUSE, u = new InputUnion { mi = new MOUSEINPUT { dx = 1, dwFlags = MOUSEEVENTF_MOVE, dwExtraInfo = (IntPtr)ProbeTag } } },
+            new INPUT { type = INPUT_MOUSE, u = new InputUnion { mi = new MOUSEINPUT { dx = -1, dwFlags = MOUSEEVENTF_MOVE, dwExtraInfo = (IntPtr)ProbeTag } } },
+            new INPUT { type = INPUT_KEYBOARD, u = new InputUnion { ki = new KEYBDINPUT { wVk = ProbeVk, dwFlags = KEYEVENTF_KEYUP, dwExtraInfo = (IntPtr)ProbeTag } } },
         };
         uint sent = SendInput((uint)input.Length, input, Marshal.SizeOf<INPUT>());
         if (sent != input.Length)
@@ -273,14 +340,17 @@ internal static class InputHook
             int msg = (int)wParam;
             var info = (Native.MSLLHOOKSTRUCT*)lParam;
             bool injected = (info->flags & Native.LLMHF_INJECTED) != 0;
+            var src = SourceOf(injected, info->dwExtraInfo);
+            if (msg == WM_MOUSEMOVE) NoteForeignMove(src, info->pt.X, info->pt.Y, Environment.TickCount64);
+            else if (msg is Native.WM_LBUTTONDOWN or Native.WM_RBUTTONDOWN or Native.WM_MBUTTONDOWN or WM_MOUSEWHEEL or WM_MOUSEHWHEEL) NoteForeign(src);
             switch (msg)
             {
                 case Native.WM_LBUTTONDOWN or Native.WM_RBUTTONDOWN or Native.WM_MBUTTONDOWN:
                 {
                     var button = msg == Native.WM_LBUTTONDOWN ? "left" : msg == Native.WM_RBUTTONDOWN ? "right" : "middle";
-                    bool swallow = SwallowNextClick && !injected;
+                    bool swallow = SwallowNextClick && src == InputSource.User;
                     if (!swallow) _buttonsHeld++;
-                    Queue.TryAdd(new InputEvent(InputKind.MouseDown, info->pt.X, info->pt.Y, button, 0, 0, injected, swallow, DateTime.UtcNow.Ticks));
+                    Queue.TryAdd(new InputEvent(InputKind.MouseDown, info->pt.X, info->pt.Y, button, 0, 0, injected, swallow, DateTime.UtcNow.Ticks, 0, src));
                     if (swallow)
                     {
                         SwallowNextClick = false;
@@ -294,7 +364,7 @@ internal static class InputHook
                     var button = msg == WM_LBUTTONUP ? "left" : msg == WM_RBUTTONUP ? "right" : "middle";
                     if (_swallowingButtonUp == msg) { _swallowingButtonUp = 0; return (IntPtr)1; }
                     _buttonsHeld = Math.Max(0, _buttonsHeld - 1);
-                    Queue.TryAdd(new InputEvent(InputKind.MouseUp, info->pt.X, info->pt.Y, button, 0, 0, injected, false, DateTime.UtcNow.Ticks));
+                    Queue.TryAdd(new InputEvent(InputKind.MouseUp, info->pt.X, info->pt.Y, button, 0, 0, injected, false, DateTime.UtcNow.Ticks, 0, src));
                     break;
                 }
                 case WM_MOUSEMOVE when MotionWanted && _buttonsHeld > 0:
@@ -304,13 +374,13 @@ internal static class InputHook
                     if (now - _lastMoveTick >= 8)
                     {
                         _lastMoveTick = now;
-                        Queue.TryAdd(new InputEvent(InputKind.Move, info->pt.X, info->pt.Y, "", 0, 0, injected, false, DateTime.UtcNow.Ticks));
+                        Queue.TryAdd(new InputEvent(InputKind.Move, info->pt.X, info->pt.Y, "", 0, 0, injected, false, DateTime.UtcNow.Ticks, 0, src));
                     }
                     break;
                 }
                 case WM_MOUSEWHEEL or WM_MOUSEHWHEEL when MotionWanted:
                     Queue.TryAdd(new InputEvent(InputKind.Wheel, info->pt.X, info->pt.Y, msg == WM_MOUSEWHEEL ? "v" : "h", 0, 0, injected, false,
-                                                DateTime.UtcNow.Ticks, (short)(info->mouseData >> 16)));
+                                                DateTime.UtcNow.Ticks, (short)(info->mouseData >> 16), src));
                     break;
             }
         }
@@ -353,6 +423,11 @@ internal static class InputHook
     {
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
         _lastKeyTick = Environment.TickCount;
+        if (nCode >= 0 && (int)wParam is WM_KEYDOWN or WM_SYSKEYDOWN)
+        {
+            var kk = (KBDLLHOOKSTRUCT*)lParam;
+            NoteForeign(SourceOf((kk->flags & 0x10) != 0, kk->dwExtraInfo));
+        }
         if (nCode >= 0 && HoldWatched.Length > 0)
         {
             int m = (int)wParam;
@@ -369,7 +444,8 @@ internal static class InputHook
                 uint vk = k->vkCode;
                 bool isModifier = vk is 0x10 or 0x11 or 0x12 or 0xA0 or 0xA1 or 0xA2 or 0xA3 or 0xA4 or 0xA5 or 0x5B or 0x5C;
                 if (!isModifier)
-                    Queue.TryAdd(new InputEvent(InputKind.KeyDown, 0, 0, "", vk, Modifiers(), (k->flags & 0x10) != 0, false, DateTime.UtcNow.Ticks));
+                    Queue.TryAdd(new InputEvent(InputKind.KeyDown, 0, 0, "", vk, Modifiers(), (k->flags & 0x10) != 0, false, DateTime.UtcNow.Ticks, 0,
+                                                SourceOf((k->flags & 0x10) != 0, k->dwExtraInfo)));
             }
         }
         NoteCallback(started);

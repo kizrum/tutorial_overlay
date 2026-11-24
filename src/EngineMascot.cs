@@ -59,6 +59,7 @@ internal static partial class Engine
         if (step == null) return m;
 
         m.Say = step.Say ?? step.Title;
+        AutoMascot(m);
         // the agent is looking into the user's question: until its answer, whatever the card says meanwhile (its own
         // hint for "can't find"), and only while an agent is there to answer
         m.Thinking = step.HelpPending && card.Agent == "on";

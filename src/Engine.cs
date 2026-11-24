@@ -37,6 +37,12 @@ internal sealed class CardModel
     public int ReplyOn = -1;             // an answer came for another step (its index) …
     public long ReplyTick;               // … at this moment: the card says where it waits
     public List<ChatLine> Chat = new();  // the step's conversation with the agent
+    // the autoplay ("Show me")
+    public bool AutoAvailable;           // the lesson allows it and a step is on
+    public string AutoState = "off";     // off | intro | starting | acting | verifying | between | paused | finished
+    public string? AutoTitle, AutoNote;  // what it is doing, or why control is back with the user
+    public bool AutoCanResume, AutoDanger;
+    public string? DangerNote;           // a target of this step cannot be undone: said in red on the card
 }
 
 /// <summary>
@@ -148,6 +154,7 @@ internal static partial class Engine
                 HideWhenInactive = J.Bool(spec, "hideWhenInactive") ?? Settings.Current.HideWhenInactive ?? HideWhenInactiveDefault,
                 Outro = J.Bool(spec, "outro") ?? true,
                 Mascot = J.Bool(spec, "mascot") ?? true,
+                AutoplayAllowed = J.Bool(spec, "autoplay") ?? true,
                 Spec = (JsonObject)spec.DeepClone(),
                 SavedAs = savedAs,
                 Changed = changed,
@@ -168,6 +175,7 @@ internal static partial class Engine
                     ["newTitle"] = t.Title,
                 });
             }
+            AutoLessonGone();
             _tut = t;
             Events.Emit("tutorial_started", new() { ["title"] = t.Title, ["total"] = t.Steps.Count, ["app"] = t.Defaults.Process });
             int start = Math.Clamp(J.Int(spec, "startAt") ?? 0, 0, Math.Max(0, t.Steps.Count - 1));
@@ -305,6 +313,7 @@ internal static partial class Engine
             {
                 RequireOwned();
                 _tut.State = TutorialState.Stopped;
+                AutoLessonGone();
                 ApplySettings(Settings.Global);
                 Events.Emit("tutorial_stopped", new() { ["title"] = _tut.Title, ["index"] = _tut.Index, ["reason"] = "agent" });
             }
@@ -325,6 +334,23 @@ internal static partial class Engine
                 return;
             }
             if (t == null || !t.Active) return;
+            if (action.StartsWith("autoplay"))
+            {
+                try
+                {
+                    AutoplayCommand(action switch
+                    {
+                        "autoplay" => "toggle", "autoplay_step" => "start_step", "autoplay_all" => "start_all",
+                        "autoplay_stop" => "stop", "autoplay_resume" => "resume", "autoplay_intro_ok" => "intro_ok",
+                        "autoplay_intro_cancel" => "intro_cancel", _ => "stop",
+                    }, "user");
+                }
+                catch (Exception e) { Log.Info("autoplay: " + e.Message); }
+                return;
+            }
+            // the user's own move on the card takes the controls back (the autoplay has already paused at their hand)
+            if (Auto.On && action is "done" or "next" or "back" or "skip" or "undo" or "help" or "cant_find" or "dont_understand" or "stop")
+                End(action, "user");
             switch (action)
             {
                 case "done":
@@ -396,6 +422,7 @@ internal static partial class Engine
     {
         Settings.Current = s;
         Palette.Accent = s.Accent;
+        Danger.Extra = s.DangerWords;
     }
 
     private static Tutorial Require() => _tut is { Active: true } t ? t : throw new InvalidOperationException("no active tutorial");
@@ -409,6 +436,7 @@ internal static partial class Engine
         t.CompletedHow = null;
         var s = t.Steps[idx];
         s.ResetRuntime();
+        foreach (var m in s.Targets) m.DangerSeen = DangerOf(m);
         s.EnteredAt = DateTime.UtcNow;
         Finder.StepSince = s.EnteredAt;
         Finder.StepGraceMs = Finder.GraceFor(back);
@@ -429,7 +457,18 @@ internal static partial class Engine
         var s = t.Current!;
         t.CompletedHow = how;
         s.DoneHow = how;
-        Events.Emit("step_completed", new() { ["index"] = t.Index, ["id"] = s.Id, ["title"] = s.Title, ["how"] = how });
+        // who did it: the agent (complete_step), the autoplay, the user on the card (Done / its hotkey), else whoever
+        // acted last — the condition is met on the frame loop, a moment after the click or keys that met it
+        string by = how switch
+        {
+            "agent" => "agent",
+            "autoplay" => "autoplay",
+            "card" or "hotkey" or "button" or "tray" => "user",
+            _ => Events.InputBy ?? RecentInputBy(),
+        };
+        s.CompletedBy = by;
+        Events.Emit("step_completed", new() { ["index"] = t.Index, ["id"] = s.Id, ["title"] = s.Title, ["how"] = how, ["by"] = by });
+        Log.Info($"step {t.Index + 1} completed ({how}) · by {by}");
         int delay = immediate ? 0 : s.AdvanceDelayMs ?? t.AdvanceDelayMs;
         t.AdvanceAt = DateTime.UtcNow.AddMilliseconds(delay);
         _stepVersion++;
@@ -563,6 +602,7 @@ internal static partial class Engine
                     }
                 }
                 Events.Emit("miss", ev);
+                NoteAutoplayInput("miss");
                 step.MissPulseAt = DateTime.UtcNow.AddMilliseconds(830);
                 step.Misses.Add((JsonObject)ev.DeepClone());
                 if (step.Misses.Count > 8) step.Misses.RemoveAt(0);
@@ -625,6 +665,7 @@ internal static partial class Engine
         if (m.Check != null) ev["checkPending"] = true;
         if (m.OpensArmedAt != null) ev["waitingFor"] = m.Opens!.Describe();
         Events.Emit(kind, ev);
+        NoteAutoplayInput(kind);
         if (kind == "hit" && inStep) PinToItsWindow(m, t!, step!, "clicked");
     }
 
@@ -2278,6 +2319,9 @@ internal static partial class Engine
             NotePrep(t, card.Prep ? BlockingDialog(s) : null);
             var firstVisible = s.Targets.FirstOrDefault(m => m.Geo != null);
             if (firstVisible != null) card.Focus = firstVisible.Geo!.Center;
+            AutoCard(card, t, s);
+            if (s.Targets.FirstOrDefault(m => m.DangerSeen != null && !m.Satisfied) is { } dm && !card.AutoDanger)
+                card.DangerNote = string.Format(Settings.Current.Text.DangerCard, dm.DangerNote ?? DangerWhat(dm.DangerSeen!, Settings.Current.Text));
         }
         if (card.Focus == default && appGeo?.Bounds is RectangleF ab) card.Focus = new PointF(ab.X + ab.Width / 2, ab.Y + ab.Height / 2);
     }
@@ -2640,6 +2684,7 @@ internal static partial class Engine
                 ["foreground"] = ForegroundInfo(),
                 ["card"] = CardRect is Rectangle cr ? J.RectJson(cr) : null,
                 ["lastEventSeq"] = Events.LastSeq,
+                ["autoplay"] = AutoplayJson(),
             };
             return o;
         }
@@ -2679,6 +2724,9 @@ internal static partial class Engine
                 ["until"] = new JsonArray(s.Until.Select(c => (JsonNode)c.ToJson()).ToArray()),
                 ["undoDepth"] = s.History.Count,
             };
+        if (t.Active)
+            // who completed each step so far: the user, the autoplay, the agent (complete_step), or the app by itself
+            o["completedBy"] = new JsonArray(t.Steps.Take(Math.Max(0, t.Index + (t.AdvanceAt != null ? 1 : 0))).Select(x => (JsonNode?)x.CompletedBy).ToArray());
         return o;
     }
 

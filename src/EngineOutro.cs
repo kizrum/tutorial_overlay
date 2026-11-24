@@ -58,7 +58,10 @@ internal static partial class Engine
             else if (t.SavedAs != null) { card.HintTitle = loc.OutroSavedTitle; card.Hint = loc.OutroSavedText; }
             if (canSave) buttons.Add(new CardButton("outro_save", loc.OutroSave, "primary", "outro_save"));
             if (AgentConnected()) buttons.Add(new CardButton("outro_continue", loc.OutroContinue, canSave ? "secondary" : "primary", "outro_continue"));
-            buttons.Add(new CardButton("outro_repeat", loc.OutroRepeat, "secondary", "outro_repeat"));
+            // shown by the autoplay (most of it): what sticks is going through it with one's own hands
+            bool shown = t.Steps.Count(x => x.CompletedBy == "autoplay") * 2 >= t.Steps.Count && t.Steps.Count > 0;
+            if (shown && card.Hint == null) card.Hint = loc.AutoFinished;
+            buttons.Add(new CardButton("outro_repeat", shown ? loc.AutoRepeatSelf : loc.OutroRepeat, "secondary", "outro_repeat"));
             buttons.Add(new CardButton("outro_close", loc.OutroClose, "ghost", "outro_close"));
         }
         card.Extra = buttons;

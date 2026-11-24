@@ -160,9 +160,9 @@ spec; they then apply until it ends:
 
 ```json
 { "port": 7788, "lang": "ru", "accent": "#FF4D6D", "animate": true, "hideWhenInactive": true, "autoColor": true,
-  "hideFromCapture": false, "mascot": true,
+  "hideFromCapture": false, "mascot": true, "autoplaySpeed": 1, "dangerWords": ["отправить отчёт"],
   "hotkeys": { "done": "Ctrl+Alt+Right", "back": "Ctrl+Alt+Left", "skip": "Ctrl+Alt+Down", "undo": "Ctrl+Alt+Z",
-               "stop": "none", "help": "Ctrl+Alt+H" } }
+               "stop": "none", "help": "Ctrl+Alt+H", "autoplay": "Ctrl+Alt+P" } }
 ```
 
 The settings window writes the file atomically. If `config.json` cannot be read (a typo made by hand), it is kept
@@ -176,8 +176,15 @@ between Russian buttons. `"none"`
 turns a hotkey off. The hint line at the bottom of the card is built from the hotkeys in effect.
 
 Default hotkeys (active while the card is shown): **Ctrl+Alt+→** done, **←** back, **↓** skip, **Z** undo a hit,
-**X** stop, **H** help. `mascot` (default `true`) turns the mascot off for every lesson; a spec can do the same for
-its own.
+**X** stop, **H** help, **P** "Show me" (autoplay; again — stop). `mascot` (default `true`) turns the mascot off for
+every lesson; a spec can do the same for its own.
+
+`autoplaySpeed` (the "Look" tab: Slow 0.6, Normal 1, Fast 1.6; kept within 0.6–1.6) is the autoplay's own pace only:
+how fast the pointer travels, how long it rests on a target before pressing, how long the card is left to read
+between steps. What it waits for is never scaled — the user's 2 s of stillness, the app's answer to a click, a target
+still loading — so Fast cannot outrun the app, and Slow still moves the pointer all the time (a long move 2 s, the
+card at most 6 s). `dangerWords`: the user's own words for what cannot be undone, added to the overlay's (buy, pay,
+delete permanently, send, …): a target named so is red, "Press it yourself", and never pressed by autoplay.
 
 A guard watches the mouse and keyboard hooks. If the system sees input while the hooks have been silent for more
 than 1.5 s, it is not necessarily broken: some input never reaches the hooks — touchpad scrolling and gestures in

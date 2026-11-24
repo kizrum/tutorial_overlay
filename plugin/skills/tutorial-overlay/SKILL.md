@@ -155,6 +155,20 @@ Do not try to install or download it yourself.
    holds the step and the card asks the user to close it; the step carries on once it is gone. Only if the user asks
    for help about it, say in `hint` that the app opened it by itself and it can simply be closed.
 
+13. **Autoplay ("Show me") and what cannot be undone.** The card offers "Show me" / "To the end": the overlay does
+   the steps itself, moving the user's real pointer, and gives the controls back the moment the user touches the
+   mouse. The user starts it there; call the `autoplay` tool only when the user asks you to ("do it for me", "show
+   me") — never to hurry a lesson along. Mark every target that pays, orders, deletes for good or sends in the user's
+   name `"danger": true` with a short `"dangerNote"` (what happens): it is drawn red with "Press it yourself" and
+   autoplay never presses it (the overlay recognises the usual words itself; `validate` warns about one left
+   unmarked). Never `complete_step` such a step for the user. A step the user must decide or do with their own hands
+   gets `"autoplay": false` and an `"autoplayNote"`. On `autoplay_paused` the card already tells the user why; answer
+   only a `help`. A `help` with `source: "autoplay"` means it cannot find a target: `inspect`, then `retarget` it (it
+   carries on by itself) or `complete_step` if the step is already done — within 20 s, or it hands the controls back.
+   Events and `status` (`tutorial.completedBy`) say who did each step (`by`: `user`, `autoplay`, `agent`); when
+   autoplay showed the whole lesson, offer the user to go through it themselves (the end card does too). An older
+   TutorialOverlay has no `autoplay` tool: there, say you cannot press for them and keep guiding.
+
 For a single "where is X" question, `draw` one mark instead of a whole tutorial.
 
 ## Rules

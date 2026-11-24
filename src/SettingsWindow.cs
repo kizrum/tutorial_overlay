@@ -129,6 +129,7 @@ internal sealed class SettingsWindow : Form
         Select(_tabs[0].tab);
         ShowLang();
         ShowAccent();
+        ShowSpeed();
         ShowChords();
         ShowPortStatus();
     }
@@ -272,7 +273,30 @@ internal sealed class SettingsWindow : Form
         add(null, new DarkToggle(_t.SetMascot, g.Mascot, _s, tw) { Tag = "mascot" }, wide: true);
         add(null, new DarkToggle(_t.SetHideInactive, g.HideWhenInactive ?? true, _s, tw) { Tag = "hideInactive" }, wide: true);
         add(null, new DarkToggle(_t.SetHideCapture, g.HideFromCapture, _s, tw) { Tag = "hideCapture" }, wide: true);
+
+        // the autoplay's pace: three steps inside the safe range (see Settings.AutoplaySpeedMin/Max)
+        _speed = Settings.AutoplaySpeeds.OrderBy(v => Math.Abs(v - g.AutoplaySpeed)).First();
+        var names = new[] { _t.SetSpeedSlow, _t.SetSpeedNormal, _t.SetSpeedFast };
+        var row2 = new List<Control>();
+        for (int i = 0; i < Settings.AutoplaySpeeds.Length; i++)
+        {
+            float v = Settings.AutoplaySpeeds[i];
+            var b = new DarkButton(names[i], "secondary", _s);
+            b.Click += (_, _) => { _speed = v; ShowSpeed(); };
+            _speedButtons.Add((b, v));
+            row2.Add(b);
+        }
+        add(_t.SetAutoSpeed, Row(row2.ToArray()));
+        add(null, Note(_t.SetAutoSpeedNote, _pageW - CaptionW));
         return p;
+    }
+
+    private float _speed = 1f;
+    private readonly List<(DarkButton b, float v)> _speedButtons = new();
+
+    private void ShowSpeed()
+    {
+        foreach (var (b, v) in _speedButtons) { b.Selected = Math.Abs(v - _speed) < 0.01f; b.Invalidate(); }
     }
 
     private Panel KeysPage()
@@ -283,6 +307,7 @@ internal sealed class SettingsWindow : Form
         var names = new Dictionary<string, string>
         {
             ["done"] = _t.Done, ["back"] = _t.Back, ["skip"] = _t.Skip, ["undo"] = _t.Undo, ["stop"] = _t.KeyStop, ["help"] = _t.Help,
+            ["autoplay"] = _t.KeyAutoplay,
         };
         foreach (var a in Settings.Actions)
         {
@@ -466,6 +491,7 @@ internal sealed class SettingsWindow : Form
         _mascot.Checked = true;
         _hideInactive.Checked = true;
         _hideCapture.Checked = false;
+        _speed = 1f; ShowSpeed();
         foreach (var (a, c) in Settings.DefaultHotkeys()) _chords[a] = c;
         ShowChords();
     }
@@ -503,6 +529,7 @@ internal sealed class SettingsWindow : Form
             root["mascot"] = _mascot.Checked;
             root["hideWhenInactive"] = _hideInactive.Checked;
             root["hideFromCapture"] = _hideCapture.Checked;
+            root["autoplaySpeed"] = _speed;
             var hk = new JsonObject();
             foreach (var a in Settings.Actions) hk[a] = _chords[a] is Chord c ? c.ToString() : "none";
             root["hotkeys"] = hk;

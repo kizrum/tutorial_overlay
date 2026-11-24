@@ -21,6 +21,10 @@ internal static class Palette
     public static readonly Color TextDim = Color.FromArgb(255, 156, 162, 178);
     public static readonly Color Success = Color.FromArgb(255, 46, 230, 166);
     public static readonly Color Warn = Color.FromArgb(255, 255, 196, 61);
+    /// <summary>Red: it cannot be undone (pay, order, delete for good) — only the user presses it. One meaning only.</summary>
+    public static readonly Color Danger = Color.FromArgb(255, 255, 59, 59);
+    /// <summary>Blue: not the user acting — the assistant looking into a question, the autoplay at the controls.</summary>
+    public static readonly Color Machine = Color.FromArgb(255, 61, 169, 252);
 
     public static readonly Dictionary<string, Color> Named = new()
     {

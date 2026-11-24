@@ -163,6 +163,8 @@ internal sealed class Loc
         SetAutoColor = "Подбирать цвет отметок под приложение", SetAnimate = "Анимация", SetMascot = "Маскот «Шажок» показывает, куда нажать",
         SetHideInactive = "Прятать отметки, когда приложение не на переднем плане",
         SetHideCapture = "Скрывать оверлей от скриншотов и записи экрана",
+        SetAutoSpeed = "Скорость «Покажи»", SetSpeedSlow = "Медленно", SetSpeedNormal = "Обычно", SetSpeedFast = "Быстро",
+        SetAutoSpeedNote = "Как быстро автопрохождение двигает мышь и переходит к следующему шагу. Ответа программы оно ждёт всегда столько, сколько нужно.",
         SetKeysNote = "Щёлкните в поле и нажмите сочетание (с Ctrl, Alt или Win). Backspace или Delete — отключить.",
         KeyStop = "Завершить туториал", KeyNone = "нет", SetSave = "Сохранить", SetDefaults = "По умолчанию",
         SetRestartAsk = "Порт изменён на {0}. Перезапустить сервер сейчас?\n\nАгенту придётся подключиться заново по новому адресу.",
@@ -187,12 +189,90 @@ internal sealed class Loc
         IssueElevated = "Программа запущена от имени администратора — запустите TutorialOverlay так же, иначе я не вижу ваших кликов в ней.";
 
     public string ForbidTag = "не нажимать", OffscreenTag = "за краем экрана";
+
+    // autoplay ("Show me") and what cannot be undone
+    public string ShowMe = "Покажи", ShowStep = "Только этот шаг", ShowAll = "До конца урока", AutoStop = "Стоп",
+        AutoResume = "Продолжить автоматически", KeyAutoplay = "Покажи (сделать шаг за вас)", HintAuto = "покажи",
+        AutoIntroTitle = "Покажу сам", AutoIntro = "Я буду двигать вашу мышь. Двиньте её — и управление снова у вас. Необратимые кнопки (оплата, удаление) нажимаете только вы.",
+        AutoIntroGo = "Понятно, начать",
+        AutoStarting = "Начинаю через {0}… уберите руку с мыши",
+        AutoActing = "Показываю шаг {0} из {1} · двиньте мышь — остановлюсь",
+        AutoActingAgent = "Ассистент показывает по вашей просьбе · двиньте мышь — остановлюсь",
+        AutoStepDone = "Шаг сделан. Дальше сами или нажмите «Покажи».",
+        AutoLooking = "Ищу «{0}»… · двиньте мышь — остановлюсь",
+        AutoAskedAgent = "Не вижу «{0}» — спросил ассистента, жду ответа · двиньте мышь — остановлюсь",
+        AutoFinished = "Показал до конца. Пройдите урок сами — так запомнится.",
+        AutoPausedTitle = "Управление у вас", AutoRepeatSelf = "Пройти самому с начала",
+        MascotPress = "Нажимаю «{0}»", MascotHandBack = "Управление у вас",
+        DangerTag = "Нажмите сами", DangerCard = "Это необратимо — {0}. Проверьте, прежде чем нажать.",
+        DangerPayment = "оплата", DangerIrreversible = "это нельзя отменить", DangerSend = "отправка от вашего имени", DangerUser = "из вашего списка опасного";
+    public Dictionary<string, string> AutoReasons = new()
+    {
+        ["user_took_over"] = "Управление у вас: вы двинули мышь, пока я вёл курсор.",
+        ["user_active"] = "Управление у вас: вы работали мышью или клавиатурой — я не стал перехватывать.",
+        ["danger"] = "Этот шаг — {0}. Я его не нажимаю: проверьте и нажмите сами, потом можно продолжить автоматически.",
+        ["choice"] = "Здесь выбор за вами — потом можно продолжить автоматически.",
+        ["cant_do"] = "Этот шаг сделайте сами — потом можно продолжить автоматически.",
+        ["password"] = "Пароль вводите сами — я его не трогаю.",
+        ["app_inactive"] = "Управление у вас: окно урока ушло на задний план.",
+        ["modal"] = "Управление у вас: появилось окно «{0}» — решите, что в нём нажать.",
+        ["no_close"] = "Управление у вас: окно «{0}» мешает, а его крестик я не нашёл.",
+        ["windows_keep_opening"] = "Управление у вас: программа открывает окно за окном.",
+        ["target_missing"] = "Управление у вас: не нашёл «{0}».",
+        ["target_missing_asked"] = "Управление у вас: не нашёл «{0}», и ассистент пока не помог. Сделайте шаг сами или нажмите «Не могу найти».",
+        ["target_moving"] = "Управление у вас: «{0}» всё время двигается.",
+        ["wrong_window"] = "Управление у вас: на месте «{0}» оказалось другое окно.",
+        ["missed"] = "Управление у вас: я нажал мимо «{0}».",
+        ["no_effect"] = "Управление у вас: нажал, но программа не ответила.",
+        ["not_completed"] = "Управление у вас: нажал, но программа не ответила.",
+        ["loop"] = "Управление у вас: урок возвращает меня назад.",
+        ["elevated"] = "Это окно запущено от администратора — Windows не даёт мне нажимать в нём. Нажмите сами.",
+        ["input_blocked"] = "Управление у вас: Windows не пропустила мой ввод (экран блокировки или запрос прав).",
+    };
     public static readonly Loc Ru = new();
 
     public static readonly Loc En = new()
     {
         Step = "STEP", Waiting = "WAITING", Tutorial = "Tutorial", Preparing = "Preparing the next step…",
         ForbidTag = "don't click", OffscreenTag = "off screen",
+        ShowMe = "Show me", ShowStep = "Just this step", ShowAll = "To the end", AutoStop = "Stop",
+        AutoResume = "Continue automatically", KeyAutoplay = "Show me (do the step for you)", HintAuto = "show me",
+        AutoIntroTitle = "I'll show you", AutoIntro = "I will move your mouse. Move it yourself and control is yours again. Buttons that cannot be undone (paying, deleting) are only ever pressed by you.",
+        AutoIntroGo = "Got it, start",
+        AutoStarting = "Starting in {0}… take your hand off the mouse",
+        AutoActing = "Showing step {0} of {1} · move the mouse and I stop",
+        AutoActingAgent = "The assistant is showing you, as you asked · move the mouse and I stop",
+        AutoStepDone = "Step done. Carry on yourself, or press Show me.",
+        AutoLooking = "Looking for “{0}”… · move the mouse and I stop",
+        AutoAskedAgent = "I can't see “{0}”, so I asked the assistant and am waiting for an answer · move the mouse and I stop",
+        AutoFinished = "Shown to the end. Go through it yourself now — that's how it sticks.",
+        AutoPausedTitle = "You have control", AutoRepeatSelf = "Do it myself from the start",
+        MascotPress = "Pressing “{0}”", MascotHandBack = "You have control",
+        DangerTag = "Press it yourself", DangerCard = "This cannot be undone — {0}. Check before you press it.",
+        DangerPayment = "a payment", DangerIrreversible = "it cannot be undone", DangerSend = "it sends in your name", DangerUser = "on your own danger list",
+        AutoReasons = new()
+        {
+            ["user_took_over"] = "You have control: you moved the mouse while I was moving the pointer.",
+            ["user_active"] = "You have control: you were using the mouse or keyboard, so I didn't take over.",
+            ["danger"] = "This step is {0}. I don't press it: check and press it yourself, then I can carry on.",
+            ["choice"] = "This choice is yours — then I can carry on.",
+            ["cant_do"] = "Do this step yourself — then I can carry on.",
+            ["password"] = "Type the password yourself — I never touch it.",
+            ["app_inactive"] = "You have control: the lesson's window went to the background.",
+            ["modal"] = "You have control: the “{0}” window opened — decide what to press in it.",
+            ["no_close"] = "You have control: the “{0}” window is in the way and I can't find its close button.",
+            ["windows_keep_opening"] = "You have control: the app keeps opening windows.",
+            ["target_missing"] = "You have control: I can't find “{0}”.",
+            ["target_missing_asked"] = "You have control: I can't find “{0}” and the assistant hasn't helped yet. Do the step yourself or press “I can't find it”.",
+            ["target_moving"] = "You have control: “{0}” keeps moving.",
+            ["wrong_window"] = "You have control: another window is where “{0}” should be.",
+            ["missed"] = "You have control: I missed “{0}”.",
+            ["no_effect"] = "You have control: I pressed it, but the app didn't respond.",
+            ["not_completed"] = "You have control: I pressed it, but the app didn't respond.",
+            ["loop"] = "You have control: the lesson keeps taking me back.",
+            ["elevated"] = "This window runs as administrator — Windows doesn't let me press anything in it. Press it yourself.",
+            ["input_blocked"] = "You have control: Windows blocked my input (the lock screen or a permission prompt).",
+        },
         Back = "Back", Skip = "Skip", Done = "Done", Got = "Got it!", Undo = "Undo", Help = "Help",
         Marked = "{0} of {1} done", Target = "Target {0}",
         HintDone = "done", HintBack = "back", HintSkip = "skip", HintUndo = "undo", HintStop = "finish",
@@ -253,6 +333,8 @@ internal sealed class Loc
         SetAutoColor = "Match mark colour to the app", SetAnimate = "Animation", SetMascot = "Mascot \"Shazhok\" shows where to click",
         SetHideInactive = "Hide marks while the app is not in front",
         SetHideCapture = "Hide the overlay from screenshots and screen recording",
+        SetAutoSpeed = "“Show me” speed", SetSpeedSlow = "Slow", SetSpeedNormal = "Normal", SetSpeedFast = "Fast",
+        SetAutoSpeedNote = "How fast autoplay moves the mouse and goes on to the next step. It always waits as long as the app needs to answer.",
         SetKeysNote = "Click a field and press a chord (with Ctrl, Alt or Win). Backspace or Delete turns it off.",
         KeyStop = "Stop tutorial", KeyNone = "none", SetSave = "Save", SetDefaults = "Defaults",
         SetRestartAsk = "The port is now {0}. Restart the server now?\n\nThe agent will have to reconnect to the new address.",
@@ -325,7 +407,26 @@ internal sealed class Settings
     /// <summary>Server port when --port is not given (read at start-up).</summary>
     public int? Port;
 
-    public static readonly string[] Actions = { "done", "back", "skip", "undo", "stop", "help" };
+    public static readonly string[] Actions = { "done", "back", "skip", "undo", "stop", "help", "autoplay" };
+
+    /// <summary>
+    /// How fast the autoplay acts: a factor on all of its timings (moves, pauses, waits). 1 = a calm person.
+    /// Clamped so it is never so fast that apps miss its input, nor so slow that it seems to hang.
+    /// </summary>
+    public float AutoplaySpeed = 1f;
+    // The autoplay's own pace only: how fast the pointer travels, how long it rests on a target before pressing, how
+    // long the card is left to read between steps. What it waits for from the app is never scaled — the user's 2 s of
+    // stillness, the app's time to answer a click, a target still loading — so a fast pace cannot outrun the app.
+    // 0.6 (slow): a long move 2 s, the rest before a press 0.5 s, the card up to 6 s — still clearly moving, never
+    //   "is it stuck?"; slower than that a person thinks the computer hangs.
+    // 1.6 (fast): a short move 0.2 s, a long one 0.75 s, the rest 0.19 s (hover effects, a menu's highlight still
+    //   show), the card at least 0.75 s; faster than that the eye loses the pointer and apps miss the hover.
+    public const float AutoplaySpeedMin = 0.6f, AutoplaySpeedMax = 1.6f;
+    public static readonly float[] AutoplaySpeeds = { 0.6f, 1f, 1.6f };
+    /// <summary>The user's own words for what cannot be undone (settings): added to the built-in list, never taken from it.</summary>
+    public string[] DangerWords = Array.Empty<string>();
+    /// <summary>The autoplay's first-time note ("I will move your mouse…") has been read.</summary>
+    public bool AutoplayIntroShown;
 
     public static Dictionary<string, Chord> DefaultHotkeys() => new()
     {
@@ -335,6 +436,7 @@ internal sealed class Settings
         ["undo"] = new Chord(Native.MOD_CONTROL | Native.MOD_ALT, 'Z'),
         ["stop"] = new Chord(Native.MOD_CONTROL | Native.MOD_ALT, 'X'),
         ["help"] = new Chord(Native.MOD_CONTROL | Native.MOD_ALT, 'H'),
+        ["autoplay"] = new Chord(Native.MOD_CONTROL | Native.MOD_ALT, 'P'),
     };
 
     public static string FilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TutorialOverlay", "config.json");
@@ -361,6 +463,7 @@ internal sealed class Settings
     {
         Lang = Lang, Accent = Accent, Hotkeys = new Dictionary<string, Chord>(Hotkeys), Animate = Animate, HideWhenInactive = HideWhenInactive,
         HideFromCapture = HideFromCapture, AutoColor = AutoColor, Port = Port, Mascot = Mascot,
+        AutoplaySpeed = AutoplaySpeed, DangerWords = DangerWords, AutoplayIntroShown = AutoplayIntroShown,
     };
 
     /// <summary>Overlay the fields present in <paramref name="n"/>.</summary>
@@ -375,6 +478,9 @@ internal sealed class Settings
         if (J.Bool(n, "autoColor") is bool ac) AutoColor = ac;
         if (J.Bool(n, "mascot") is bool ms) Mascot = ms;
         if (J.Int(n, "port") is int port && port is > 0 and < 65536) Port = port;
+        if (J.Num(n, "autoplaySpeed") is double sp) AutoplaySpeed = (float)Math.Clamp(sp, AutoplaySpeedMin, AutoplaySpeedMax);
+        if (J.Get(n, "dangerWords") is JsonArray dw) DangerWords = dw.Select(x => J.AsStr(x) ?? "").Where(x => x.Trim().Length > 0).ToArray();
+        if (J.Bool(n, "autoplayIntroShown") is bool ai) AutoplayIntroShown = ai;
         if (J.Get(n, "hotkeys") is JsonObject hk)
             foreach (var a in Actions)
             {
@@ -405,6 +511,19 @@ internal sealed class Settings
             return Keys.FormatMods(mods) + ":  " + string.Join(" · ", used.Select(o => $"{Keys.KeyName(Hotkeys[o.Item1].Vk)} {o.Item2}"));
         }
         return string.Join(" · ", used.Select(o => $"{Hotkeys[o.Item1]} {o.Item2}"));
+    }
+
+    /// <summary>Writes one field into config.json, keeping everything else in it (a flag such as "the note was read").</summary>
+    public static void SaveField(string key, JsonNode? value)
+    {
+        try
+        {
+            JsonObject root = File.Exists(FilePath) ? JsonNode.Parse(File.ReadAllText(FilePath)) as JsonObject ?? new() : new();
+            root[key] = value;
+            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+            Files.WriteAtomic(FilePath, root.ToJsonString(J.Pretty));
+        }
+        catch (Exception e) { Log.Warn($"config.json: {key} not saved: {e.Message}"); }
     }
 
     public string HotkeySignature => string.Join(",", Hotkeys.OrderBy(k => k.Key).Select(k => $"{k.Key}={k.Value.Mods}:{k.Value.Vk}"));

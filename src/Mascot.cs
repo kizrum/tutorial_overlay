@@ -27,6 +27,7 @@ internal sealed class MascotInput
     public string TargetKey = "";          // which of the step's targets: the next one of a checklist is a new spot, not a ride-along
     public List<RectangleF> Avoid = new(); // marks, captions, popups
     public float Scale = 1;
+    public string Autoplay = "off";        // off | on (dressed for it) | drive (it has the pointer now): its outfit
 }
 
 /// <summary>
@@ -98,6 +99,11 @@ internal sealed class MascotWindow : Form
     private int _hitN;                           // hits so far: the reactions take turns
     private DateTime _idleSince = DateTime.UtcNow;
     private Point _lastCursor;
+    // the autoplay's outfit: a pilot's cap (on while it has the controls) and goggles (down while it moves the pointer);
+    // handing the controls back it throws its hands up ("all yours") and the cap comes off
+    private float _dress, _goggles, _handback;
+    private bool _wasAuto;
+    internal const float HandbackTime = 1.1f;
 
     public MascotWindow()
     {
@@ -165,6 +171,12 @@ internal sealed class MascotWindow : Form
             return;
         }
         _lastInput = inp;
+        bool dressed = inp.Autoplay != "off";
+        if (_wasAuto && !dressed) _handback = HandbackTime;
+        _wasAuto = dressed;
+        _dress = Approach(_dress, dressed ? 1 : 0, dt * (dressed ? 2.4f : 1.6f));
+        _goggles = Approach(_goggles, inp.Autoplay == "drive" ? 1 : 0, dt * 4);
+        if (_handback > 0) _handback = Math.Max(0, _handback - dt);
 
         Steer(inp);
         Advance(dt, inp.Scale);
@@ -632,8 +644,13 @@ internal sealed class MascotWindow : Form
     {
         _pos = pos; _time = time; _alpha = 1; _blink = 0; _bubble = 1; _faceLeft = false;
         _move = Motion.None; _moveT = p; _mood = Mood.Normal; _idleSince = DateTime.UtcNow;
+        _dress = inp.Autoplay != "off" ? 1 : 0;
+        _goggles = inp.Autoplay == "drive" ? 1 : 0;
+        _handback = 0;
         switch (act)
         {
+            case "dress": _dress = p; _goggles = 0; break;
+            case "handback": _handback = (1 - p) * HandbackTime; _dress = 1 - p; _goggles = Math.Max(0, 1 - 3 * p); break;
             case "appear": _move = Motion.Appear; break;
             case "walk": _move = Motion.Walk; _walkPhase = time * 2.6f * MathF.PI * 2; break;
             case "miss": _mood = Mood.Miss; _moodLeft = (1 - p) * MissTime; break;
@@ -765,6 +782,7 @@ internal sealed class MascotWindow : Form
             P.Rot = 9 * MathF.Sin(b); P.Hop = -14 * MathF.Abs(MathF.Sin(b)); P.Sy = 1 - 0.05f * MathF.Abs(MathF.Cos(b));
             P.DanceArm = MathF.Sin(b); P.Confetti = t;
         }
+        else if (_handback > 0) Handback(P, 1 - _handback / HandbackTime);
         else if (_mood == Mood.Happy) Hit(P, 1 - _moodLeft / HitTime, _hitN);
         else if (_mood == Mood.Miss) Miss(P, 1 - _moodLeft / MissTime);
         else if (inp.Thinking)
@@ -788,6 +806,19 @@ internal sealed class MascotWindow : Form
         else if (inp.Target != null && (DateTime.UtcNow - _idleSince).TotalSeconds > IdleAfter)
             Idle(P, (float)((DateTime.UtcNow - _idleSince).TotalSeconds - IdleAfter));
         return P;
+    }
+
+    /// <summary>
+    /// Handing the controls back: a start (wide eyes, a small hop) and both hands up — "it's all yours" — then it
+    /// points again. Meanwhile the cap lifts off (the outfit fades on its own).
+    /// </summary>
+    internal static void Handback(Pose P, float p)
+    {
+        P.Point = false;
+        P.ArmsUp = p > 0.12f && p < 0.85f;
+        P.Eyes = p < 0.45f ? Eyes.Wide : Eyes.Open;
+        P.Mouth = p < 0.45f ? Mouth.O : Mouth.Smile;
+        if (p < 0.3f) { float q = p / 0.3f; P.Hop = -16 * MathF.Sin(q * MathF.PI); P.Sy = 1.05f; P.Sx = 0.96f; }
     }
 
     /// <summary>Drops in: falls stretched, wide-eyed; squashes on landing with dust; bounces back to its shape.</summary>
@@ -1002,7 +1033,7 @@ internal sealed class MascotWindow : Form
         // progress bar on the forehead; a glint runs along it on a hit
         using (var tb = new SolidBrush(C(Track))) using (var p = Theme.Rounded(new RectangleF(84, 82, 92, 9), 4.5f)) g.FillPath(tb, p);
         float prog = Math.Clamp(P.Prog, 0.06f, 1);
-        var barColor = P.BarOk ? Palette.Success : Palette.Accent;
+        var barColor = P.BarOk ? Palette.Success : _dress > 0.5f ? Palette.Machine : Palette.Accent;
         using (var fb = new SolidBrush(C(barColor))) using (var p = Theme.Rounded(new RectangleF(84, 82, 92 * prog, 9), 4.5f)) g.FillPath(fb, p);
         if (P.Glint is float gl && gl < 1)
         {
@@ -1087,6 +1118,7 @@ internal sealed class MascotWindow : Form
             }
         }
         g.TranslateTransform(-P.FaceX, -P.FaceY);
+        if (_dress > 0.01f) DrawOutfit(g, _dress, _goggles, t);
 
         // arms
         var SL = new PointF(64, 150); var SR = new PointF(196, 134);
@@ -1216,6 +1248,66 @@ internal sealed class MascotWindow : Form
             }
         }
         g.Restore(state);
+    }
+
+    /// <summary>
+    /// The autoplay's outfit, in design units: a blue pilot's cap over the top of the head (it drops on as
+    /// <paramref name="dress"/> goes to 1) with ear flaps, and goggles that sit on the cap and come down over the eyes
+    /// as <paramref name="goggles"/> goes to 1 (it moves the pointer now). Blue: not the user acting.
+    /// </summary>
+    private void DrawOutfit(Graphics g, float dress, float goggles, float t)
+    {
+        float e = 1 - (1 - dress) * (1 - dress) * (1 - dress);
+        int a = (int)(255 * _alpha * Math.Clamp(dress * 1.6f, 0, 1));
+        var st = g.Save();
+        g.TranslateTransform(0, -70 * (1 - e));
+        var blue = Palette.Machine;
+        var dark = Color.FromArgb(a, 22, 74, 128);
+        using (var cap = new GraphicsPath())
+        {
+            cap.AddBezier(62, 80, 60, 42, 94, 26, 130, 26);
+            cap.AddBezier(130, 26, 166, 26, 200, 42, 198, 80);
+            cap.AddBezier(198, 80, 170, 84, 90, 84, 62, 80);
+            cap.CloseFigure();
+            using (var fb = new SolidBrush(dark)) g.FillPath(fb, cap);
+            using (var hl = new LinearGradientBrush(new PointF(0, 26), new PointF(0, 84), Color.FromArgb(a * 90 / 255, 255, 255, 255), Color.FromArgb(0, 255, 255, 255)))
+                g.FillPath(hl, cap);
+            using var ep = new Pen(Color.FromArgb(a, blue), 3);
+            g.DrawPath(ep, cap);
+        }
+        // the seam over the top, the ear flaps
+        using (var seam = new Pen(Color.FromArgb(a * 160 / 255, blue), 2)) g.DrawBezier(seam, 130, 28, 128, 46, 128, 64, 130, 82);
+        foreach (var fx in new[] { 50f, 190f })
+            using (var flap = Theme.Rounded(new RectangleF(fx, 70, 20, 44), 10))
+            {
+                using (var fb = new SolidBrush(dark)) g.FillPath(fb, flap);
+                using var ep = new Pen(Color.FromArgb(a, blue), 2.5f);
+                g.DrawPath(ep, flap);
+            }
+        g.Restore(st);
+
+        // goggles: up on the cap, down over the eyes while it drives
+        float ge = goggles < 0.5f ? 2 * goggles * goggles : 1 - (-2 * goggles + 2) * (-2 * goggles + 2) / 2;
+        float gy = 58 + (126 - 58) * ge - 70 * (1 - e);
+        using (var strap = new Pen(Color.FromArgb(a, 40, 44, 56), 6) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+        {
+            g.DrawLine(strap, 58, gy, 92, gy);
+            g.DrawLine(strap, 168, gy, 202, gy);
+        }
+        foreach (var gx in new[] { 110f, 150f })
+        {
+            float r = 17;
+            // lenses: clear enough to see the eyes behind them when down; a glint runs across while it drives
+            using (var lens = new SolidBrush(Color.FromArgb((int)(a * (0.55f - 0.25f * ge)), blue))) g.FillEllipse(lens, gx - r, gy - r, 2 * r, 2 * r);
+            using (var rim = new Pen(Color.FromArgb(a, 210, 216, 228), 5)) g.DrawEllipse(rim, gx - r, gy - r, 2 * r, 2 * r);
+            if (ge > 0.9f)
+            {
+                float q = t * 0.8f % 1;
+                using var gl = new Pen(Color.FromArgb((int)(a * 0.7f * MathF.Sin(q * MathF.PI)), 255, 255, 255), 3) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                g.DrawLine(gl, gx - 9 + 10 * q, gy - 8, gx - 13 + 10 * q, gy + 2);
+            }
+        }
+        using (var bridge = new Pen(Color.FromArgb(a, 210, 216, 228), 4)) g.DrawLine(bridge, 127, gy, 133, gy);
     }
 
     private static readonly Font KeyFont = new("Consolas", 25, FontStyle.Bold, GraphicsUnit.Pixel);

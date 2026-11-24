@@ -20,7 +20,7 @@ internal sealed class AnchorGeo
     public RectangleF? Visible;       // the visible thing itself (a template's icon, the caption at a spot): what "auto" frames
 }
 
-internal enum PrimKind { Circle, Rect, Arrow, Badge, Label, Info, Check, Checkbox, Stroke, Path, Wheel, Brackets, Pill, Marker, Band, Forbid, Hull, EdgeTab }
+internal enum PrimKind { Circle, Rect, Arrow, Badge, Label, Info, Check, Checkbox, Stroke, Path, Wheel, Brackets, Pill, Marker, Band, Forbid, Hull, EdgeTab, DangerTag }
 
 internal sealed class Prim
 {
@@ -204,7 +204,7 @@ internal sealed class Prim
         };
         r.Inflate(g, g);
         if (Kind == PrimKind.Pill) r.Height += 8 * Scale;    // the dot under the capsule
-        if (Kind == PrimKind.Forbid && Text is { Length: > 0 }) r = RectangleF.Union(r, RectangleF.Inflate(ForbidTag(), 4 * Scale, 4 * Scale));
+        if (Kind is PrimKind.Forbid or PrimKind.DangerTag && Text is { Length: > 0 }) r = RectangleF.Union(r, RectangleF.Inflate(ForbidTag(), 4 * Scale, 4 * Scale));
         if (Kind == PrimKind.EdgeTab && Text is { Length: > 0 }) r = RectangleF.Union(r, RectangleF.Inflate(EdgeTabLabel(), 4 * Scale, 4 * Scale));
         if (Kind == PrimKind.Hull && Text is { Length: > 0 }) r = RectangleF.Union(r, RectangleF.Inflate(HullTag(), 4 * Scale, 4 * Scale));
         return r;
@@ -283,7 +283,8 @@ internal static class Layout
         // shapes without coordinates wrap what the anchor names: the element, or the text / template found in it (the
         // element is then only where it is searched for) — unless the anchor points at a spot (an offset)
         RectangleF? Wrap() => m.Anchor.HasPoint ? null : m.Anchor.Find != null ? ag.Found : ag.Bounds;
-        Color ColorOf(ShapeSpec sp, Color fallback) => sp.Color ?? m.AutoColor ?? fallback;
+        // what cannot be undone is red whatever the spec or the app's colours say: its meaning, not a look
+        Color ColorOf(ShapeSpec sp, Color fallback) => m.DangerSeen != null && sp.IsTarget ? Palette.Danger : sp.Color ?? m.AutoColor ?? fallback;
         bool Thin(ShapeSpec sp) => sp.Style == "thin";
         float Stroke(ShapeSpec sp) => (sp.Width ?? (Thin(sp) ? 2f : 3.5f)) * s;
 
@@ -543,6 +544,10 @@ internal static class Layout
         // satisfied marks can leave a green tick behind instead of vanishing
         if (m.DoneStyle == "check" && !hasCheckbox)
             geo.DonePrims.Add(new Prim { Kind = PrimKind.Check, A = tc, R = Math.Clamp(Math.Min(tb.Width, tb.Height) / 2, 11 * s, 18 * s), Color = m.AutoColor ?? Palette.Success, Width = 3.5f * s, Scale = s });
+
+        // a control that cannot be undone: a lock and "press it yourself" on its top edge, in every lesson
+        if (m.DangerSeen != null && !satisfied)
+            geo.Prims.Add(new Prim { Kind = PrimKind.DangerTag, Rect = tb, Color = Palette.Danger, Scale = s, Size = 12 * s, Text = Settings.Current.Text.DangerTag });
 
         geo.TargetBounds = tb;
         geo.Center = geo.Hits.Count > 0 ? (geo.Hits[0].Circle ? geo.Hits[0].C : new PointF(geo.Hits[0].Rect.X + geo.Hits[0].Rect.Width / 2, geo.Hits[0].Rect.Y + geo.Hits[0].Rect.Height / 2)) : tc;

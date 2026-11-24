@@ -6,6 +6,21 @@ only fixes things.
 
 ## [Unreleased]
 
+- Autoplay: "Show me" and "To the end" on the card (Ctrl+Alt+P), or the agent's new `autoplay` tool at the user's
+  request — the overlay does the steps itself with the real pointer, by the same targets and conditions the user
+  sees. The user always wins: their own mouse or keys give the controls back at once (held buttons and keys
+  released), and the card says why. A target it cannot find is looked for 8 s, then the agent is asked (`help`,
+  `source: "autoplay"`) and given 20 s to answer; with no agent the controls come back after 20 s. A lesson or a step
+  can turn it off (`autoplay: false`, `autoplayNote`).
+- What cannot be undone — paying, ordering, deleting for good, sending in the user's name — is drawn red with a
+  padlock and "Press it yourself", in every lesson; the overlay recognises the usual words itself, a spec marks more
+  with `danger` / `dangerNote`, the user adds words of their own (`dangerWords`). Autoplay never presses it: it stops,
+  the user presses, then "Continue automatically". `validate` warns about such a target left unmarked.
+- Who did it: events caused by input carry `by` (`user`, `autoplay`, `agent`, `app`, `other`), the log says it for
+  every completed step, and `status` gives `tutorial.completedBy` and `autoplay`.
+- The mascot wears a blue pilot's cap while autoplay has the controls, pulls its goggles down while it moves the
+  pointer, and throws its hands up as it hands the controls back.
+
 - Step 0 comes first: while a window of the app is in the way (a modal dialog, or before the lesson starts a window
   over the app, such as Steam's "Special Offers"), step 1's marks are not shown, a click on them counts neither as a
   hit nor as a miss, and step 1 begins (its timers, the mascot's walk) only once the window is gone. The overlay finds

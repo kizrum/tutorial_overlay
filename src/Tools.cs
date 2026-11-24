@@ -106,6 +106,11 @@ internal static class Tools
             Obj(("index", T("integer", "0-based")), ("id", T("string", "step id")), ("relative", T("string", "'next'|'back'")))),
         Tool("complete_step", "Complete the current step as if Done was pressed.",
             Obj(("expectIndex", T("integer", "only if still this step")), ("immediate", T("boolean", "skip the ✓ pause")))),
+        Tool("autoplay", "Do the lesson's steps for the user while they watch (the card's \"Show me\") — ONLY when the user asks you to. " +
+            "It moves the real pointer and presses what the marks frame; the user's own hand on the mouse takes control back at once. " +
+            "It never presses what cannot be undone (pay, order, delete for good: mark such targets danger:true), and stops when it cannot go on — " +
+            "autoplay_paused says why. Returns its state.",
+            Obj(("action", T("string", "start (default) | stop | resume")), ("steps", T("string", "1 (default: the current step) or 'all' (to the end)")))),
         Tool("stop_tutorial", "End the tutorial. After its last step (keepOpen waiting): the end card tells the user it is done. Midway: the card is hidden.",
             Obj(("outro", T("boolean", "end card: default only when every step is done")))),
         Tool("status", "Tutorial state, step targets with screen rects and visibility (visible/occluded/minimized/inactive/dismissed…), free marks, foreground window.", new JsonObject()),
@@ -183,6 +188,7 @@ internal static class Tools
         ["append_steps"] = ("Add tutorial steps", false, false, false),
         ["goto_step"] = ("Go to a step", false, false, true),
         ["complete_step"] = ("Complete the step", false, false, false),
+        ["autoplay"] = ("Do the steps for the user", false, false, false),
         ["stop_tutorial"] = ("Stop the tutorial", false, false, true),
         ["status"] = ("Tutorial status", true, false, true),
         ["describe"] = ("Describe an app's UI", true, false, true),
@@ -252,6 +258,7 @@ internal static class Tools
                 "append_steps" => Text(Engine.AppendSteps(args)),
                 "goto_step" => Text(Engine.GotoStep(args)),
                 "complete_step" => Text(Engine.CompleteStep(args)),
+                "autoplay" => Text(Engine.AutoplayTool(args)),
                 "stop_tutorial" => Text(Engine.StopTutorial(args)),
                 "status" => Text(Engine.Status()),
                 "describe" => TextRaw(await Task.Run(() => Describe.Run(args, ct), ct)),

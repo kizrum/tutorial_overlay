@@ -47,6 +47,14 @@ internal static class Autopilot
     /// </summary>
     private static bool KeepOpen;
 
+    /// <summary>
+    /// --autoplay: the robot presses nothing itself — it starts the lesson's autoplay ("Show me", to the end) and
+    /// watches it do every step. Where the autoplay hands the controls back on purpose (what cannot be undone, the
+    /// user's choice, a step it leaves to the user) the robot does that step as a person would, then presses
+    /// "Continue". Any other pause, or a step completed by someone else than the autoplay, fails the case.
+    /// </summary>
+    private static bool AutoplayMode;
+
     public static int Run(string[] args)
     {
         Native.SetProcessDpiAwarenessContext(Native.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);   // physical pixels
@@ -54,6 +62,7 @@ internal static class Autopilot
         var target = Path.GetFullPath(args[0]);
         string? only = Opt(args, "--case");
         KeepOpen = args.Contains("--keep-open");
+        AutoplayMode = args.Contains("--autoplay");
         if (Opt(args, "--speed") is string sp && double.TryParse(sp, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var spd) && spd > 0) Speed = spd;
         var files = Directory.Exists(target) ? Directory.GetFiles(target, "*.json").OrderBy(f => f).ToList()
             : File.Exists(target) ? new List<string> { target } : new List<string>();
@@ -232,6 +241,7 @@ internal static class Autopilot
             var steps = J.Items(spec["steps"]).ToList();
             // askHelp: [step indices] — on those steps the robot first asks for help, as a person who is stuck does
             var askHelp = J.Items(J.Get(c, "askHelp")).Select(n => (int?)J.AsNum(n)).Where(n => n != null).Select(n => n!.Value).ToHashSet();
+            if (AutoplayMode) { WatchAutoplay(mcp, spec, steps, ref seq, reportDir, res); return res; }
             for (int i = 0; i < steps.Count; i++)
             {
                 var sr = PlayStep(mcp, steps[i]!.AsObject(), spec, i > 0 ? steps[i - 1]!.AsObject() : null, i, ref seq, reportDir, res.Name, askHelp.Contains(i));
@@ -252,6 +262,103 @@ internal static class Autopilot
             res.Ms = sw.ElapsedMilliseconds;
         }
         return res;
+    }
+
+    /// <summary>The robot's hands stay off: the autoplay does the lesson; the robot only steps in where it is asked to.</summary>
+    private static void WatchAutoplay(Mcp mcp, JsonObject spec, List<JsonNode?> steps, ref long seq, string reportDir, CaseResult res)
+    {
+        var start = mcp.Call("autoplay", new JsonObject { ["action"] = "start", ["steps"] = "all" });
+        if (start.IsError) { res.Verdict = "fail"; res.Note = "autoplay: " + Short(start.Text, 200); return; }
+        Console.WriteLine("      the autoplay does the lesson; the robot's hands are off");
+        var sw = Stopwatch.StartNew();
+        long limit = 60000L + StepTimeoutMs * (long)steps.Count;
+        var by = new Dictionary<int, string>();
+        int shownIndex = -1;
+        var stepSw = Stopwatch.StartNew();
+        StepResult? cur = null;
+        while (sw.ElapsedMilliseconds < limit)
+        {
+            foreach (var ev in Events(mcp, ref seq))
+            {
+                var e = J.Str(ev, "event");
+                if (e == "step_completed" && J.Num(ev, "index") is double ci) by[(int)ci] = J.Str(ev, "by") ?? "?";
+                else if (e == "autoplay_action") Console.WriteLine($"      step {(int)(J.Num(ev, "step") ?? -1) + 1}: autoplay {J.Str(ev, "kind")} «{J.Str(ev, "target")}» at {J.Num(ev, "x")},{J.Num(ev, "y")}");
+                else if (e == "autoplay_paused") Console.WriteLine($"      step {(int)(J.Num(ev, "step") ?? -1) + 1}: autoplay paused — {J.Str(ev, "reason")} {J.Str(ev, "target")}");
+                else if (e == "help" && J.Str(ev, "source") == "autoplay")
+                {
+                    Console.WriteLine($"      step {(int)(J.Num(ev, "step") ?? -1) + 1}: the autoplay can't find «{J.Str(J.Get(ev, "target"), "label")}» and asked the agent");
+                    cur?.Warnings.Add("the autoplay asked the agent: can't find the target");
+                }
+                else if (e == "target_not_found" && cur != null) cur.Warnings.Add($"target_not_found: {J.Str(ev, "anchor")}");
+            }
+            var st = mcp.Call("status", new JsonObject()).Json;
+            var tut = J.Get(st, "tutorial");
+            var state = J.Str(tut, "state");
+            int idx = (int)(J.Num(tut, "index") ?? -1);
+            if (idx != shownIndex && idx >= 0 && idx < steps.Count && state == "running")
+            {
+                if (cur != null) { cur.Ms = stepSw.ElapsedMilliseconds; }
+                cur = new StepResult { Index = idx, Title = J.Str(steps[idx], "title") ?? $"step {idx + 1}", Action = "autoplay" };
+                res.Steps.Add(cur);
+                stepSw.Restart();
+                shownIndex = idx;
+                Thread.Sleep(SettleMs);
+                Shoot(mcp, cur, reportDir, res.Name);
+            }
+            if (state is not "running" and not "waiting") break;
+            var auto = J.Get(st, "autoplay");
+            var astate = J.Str(auto, "state");
+            if (astate == "paused")
+            {
+                var reason = J.Str(auto, "reason");
+                if (reason is "danger" or "choice" or "cant_do" or "password" && cur != null)
+                {
+                    // handed back on purpose: the robot does this step itself, as the user would, then "Continue"
+                    cur.Warnings.Add($"the autoplay handed the controls back ({reason}{(J.Str(auto, "target") is string tg ? ": " + tg : "")}); the robot did the step");
+                    Shoot(mcp, cur, reportDir, res.Name, "handback");
+                    var own = PlayStep(mcp, steps[idx]!.AsObject(), spec, idx > 0 ? steps[idx - 1]!.AsObject() : null, idx, ref seq, reportDir, res.Name);
+                    if (own.Verdict == "fail") { cur.Verdict = "fail"; cur.Note = own.Note; res.Verdict = "fail"; res.Note = $"step {idx + 1}: {own.Note}"; return; }
+                    cur.Action = "autoplay · handed back · " + own.Action;
+                    if (idx + 1 < steps.Count)
+                    {
+                        Thread.Sleep(800);
+                        mcp.Call("autoplay", new JsonObject { ["action"] = "resume" });
+                    }
+                    continue;
+                }
+                cur ??= new StepResult { Index = idx, Title = "?" };
+                cur.Verdict = "fail";
+                cur.Note = $"the autoplay stopped: {reason} {J.Str(auto, "target")}";
+                Shoot(mcp, cur, reportDir, res.Name);
+                res.Verdict = "fail";
+                res.Note = $"step {idx + 1}: {cur.Note}";
+                return;
+            }
+            if (astate is "off" or "finished" && state == "running")
+            {
+                res.Verdict = "fail";
+                res.Note = $"step {idx + 1}: the autoplay ended ({astate}) while the lesson still runs";
+                return;
+            }
+            Thread.Sleep(250);
+        }
+        if (cur != null) cur.Ms = stepSw.ElapsedMilliseconds;
+        foreach (var ev in Events(mcp, ref seq))
+            if (J.Str(ev, "event") == "step_completed" && J.Num(ev, "index") is double ci) by[(int)ci] = J.Str(ev, "by") ?? "?";
+        if (sw.ElapsedMilliseconds >= limit) { res.Verdict = "fail"; res.Note = $"the lesson did not end in {limit / 1000} s"; return; }
+        for (int i = 0; i < steps.Count; i++)
+        {
+            var r = res.Steps.FirstOrDefault(x => x.Index == i);
+            string who = by.TryGetValue(i, out var b) ? b : "nobody";
+            if (r != null) r.Warnings.Add("completed by " + who);
+            bool handed = r?.Action.Contains("handed back") == true;
+            if (who != "autoplay" && !handed)
+            {
+                res.Verdict = "fail";
+                res.Note ??= $"step {i + 1} was completed by {who}, not the autoplay";
+            }
+        }
+        Console.WriteLine("      completed by: " + string.Join(", ", Enumerable.Range(0, steps.Count).Select(i => $"{i + 1}={(by.TryGetValue(i, out var w) ? w : "-")}")));
     }
 
     private static bool FirstStepOk(JsonNode? step) =>

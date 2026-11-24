@@ -21,6 +21,7 @@ What `start_tutorial` takes. Only `steps` is required.
 | `hideWhenInactive` | hide the marks while the app is not in front (default `true`) |
 | `accent`, `autoColor`, `animate`, `hotkeys`, `hideFromCapture` | the [settings](server.md#settings), for this lesson only |
 | `replace` | take over a lesson another agent runs (after asking the user); that agent gets `tutorial_stopped`, reason `replaced` |
+| `autoplay` | `false`: a lesson for practice — no "Show me", the steps are the user's to do (see [Autoplay](#autoplay-show-me)) |
 | `name` | instead of a spec: replay a saved lesson from the library (with `startAt`) |
 
 A saved lesson also carries `scale` (see [Display scale](#end-of-a-tutorial-and-the-library)) and `templates` (the
@@ -102,6 +103,8 @@ Each colour means one thing, so the user can tell what a mark wants without read
 | accent (pink by default, `accent` changes it) | **do this now** | the current step's targets; a window in the way, framed whole, and its close button |
 | green | **done** | a ticked target, a checkbox's tick, a drop that landed, scrolling that counted |
 | yellow | **careful, not that** | `forbid`, a missed or taken-back click, a path the drag left, the card's warning about a problem |
+| red | **cannot be undone — only you press it** | a target that pays, orders, deletes for good or sends in the user's name (`danger`), with a padlock tag "Press it yourself" |
+| blue | **not you acting** | the autoplay at work: the card's note, the mascot's cap and forehead bar |
 
 Yellow is never what to press. A colour a spec gives a shape (`color`) overrides the accent only for that shape.
 
@@ -364,6 +367,46 @@ window is closed (or, if it is not a dialog, brought behind the app) the card go
 window the app opens by itself that covers nothing the step needs is left alone. The agent gets `prepare_started`
 and `prepare_done`; `status` gives the window as `step.dialog` (`close` is the close button). While a screenshot tool (Snipping Tool, ShareX and the like) is open,
 the tutorial still treats the program's window that was in front before it as active.
+
+## Autoplay ("Show me")
+
+The card has **"Show me"** (this step) and **"To the end"** (hotkey **Ctrl+Alt+P**): the overlay does the steps
+itself while the user watches — it moves the real pointer along the way a person would, presses what the marks frame,
+types, scrolls and drags. The agent can start it with the `autoplay` tool, only when the user asks. The first time,
+the card says the mouse will move by itself and waits for "Got it, start".
+
+- **The same rules as the user.** It acts on the targets and conditions the user sees, through the app's own input:
+  a step it does completes exactly as if the user did it. Before each action it checks the window under the point is
+  the app's, the target stands still and is on screen; a click the overlay never heard is sent once more, a heard one
+  never.
+- **The user always wins.** It starts once the mouse has been still for 2 s. Any input of the user's — the mouse
+  moved beyond a jitter, a button, the wheel, a key — gives the controls back at once: held buttons and keys are
+  released, and the card says why ("You have control: …"). So do a window of the app it cannot decide about (a modal
+  dialog), the app gone to the background, a click that missed, a step that did not react, going round the same step.
+- **A target it cannot find** is looked for as long as the test robot does: 8 s quietly ("Looking for …" on the card),
+  then it asks the agent (a `help` event, `source: "autoplay"`) and waits for the answer — 20 s, again after each of
+  the agent's calls, up to a minute; the target turning up (a `retarget`) carries on by itself. With no agent there it
+  hands the controls back after 20 s.
+- **What cannot be undone is never pressed by it.** A target that pays, orders, deletes for good or sends in the
+  user's name is red with a padlock tag "Press it yourself" — in every lesson, autoplay or not. The overlay recognises
+  such words itself (buy, pay, checkout, place order, subscribe, delete permanently, empty trash, send, publish, …;
+  "add to cart", "wishlist", "remove filter" are not dangerous) and the user can add words of their own in the
+  settings (`dangerWords`); a spec marks a target `"danger": true` with an optional `"dangerNote"` for the card. Neither
+  the agent nor the spec can take danger off. Autoplay stops in front of it; once the user has pressed it, "Continue
+  automatically" goes on.
+- **Steps it leaves to the user:** a choice (`buttons`), the step's `"autoplay": false` (with `"autoplayNote"`, what
+  to say), a password field, a lesson with `"autoplay": false`.
+- **Who did it** is in the log and on the events: `step_completed`, `hit`, `miss` and others carry `by` — `user`,
+  `autoplay`, `agent` (complete_step) or `app`/`other` (input from another program) — and `tutorial.completedBy` in
+  `status` lists it per step.
+- **The mascot** puts on a blue pilot's cap while autoplay has the controls and pulls its goggles down while it moves
+  the pointer; handing the controls back it throws its hands up and the cap comes off.
+
+| Field | Where | What it does |
+|---|---|---|
+| `autoplay` | spec | `false`: no autoplay in this lesson |
+| `autoplay`, `autoplayNote` | step | `false`: this step is the user's to do; the note says why |
+| `danger`, `dangerNote` | target | cannot be undone: red, "Press it yourself", never pressed by autoplay; the note says what happens |
 
 ## The mascot "Shazhok"
 

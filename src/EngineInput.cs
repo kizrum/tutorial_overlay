@@ -19,6 +19,27 @@ internal static partial class Engine
 
     public static void HandleInput(InputEvent e)
     {
+        if (e.Source == InputSource.Probe) return;   // the hook watchdog's 1 px probe: nobody's input
+        Events.InputBy = e.By;
+        try { Dispatch(e); }
+        finally { Events.InputBy = null; }
+        if (e.Kind is InputKind.MouseDown or InputKind.KeyDown or InputKind.Wheel)
+        {
+            _lastInputBy = e.By;
+            System.Threading.Interlocked.Exchange(ref _lastInputTick, Environment.TickCount64);
+        }
+    }
+
+    // who pressed last (for "step_completed": the condition that met is checked on the frame loop, after the input)
+    private static volatile string _lastInputBy = "user";
+    private static long _lastInputTick;
+
+    /// <summary>Who completed a step that completed "by itself" on the frame loop: whoever acted in the last few seconds.</summary>
+    private static string RecentInputBy() =>
+        Environment.TickCount64 - System.Threading.Interlocked.Read(ref _lastInputTick) < 5000 ? _lastInputBy : "app";
+
+    private static void Dispatch(InputEvent e)
+    {
         switch (e.Kind)
         {
             case InputKind.MouseDown:

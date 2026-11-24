@@ -270,7 +270,8 @@ internal sealed class CardWindow : NoActivateForm
     private static string Signature(CardModel m, float s) =>
         string.Join("\u0001", Settings.Current.Lang, Settings.Current.Accent.ToArgb(), Settings.Current.HotkeySignature, m.State, m.Index, m.Prep, m.Total, m.Title, m.Text, m.Done, m.Required, m.Completed, m.CanBack, m.CanUndo,
             string.Join(",", m.Checklist.Select(c => c.label + c.done)), string.Join(",", m.Extra.Select(b => b.Id + b.Text)),
-            string.Join(",", m.Controls), m.Why, m.Hint, m.HintTitle, m.Issue, m.HelpPending, m.Highlighting, m.Review, m.Checking, m.Agent, s);
+            string.Join(",", m.Controls), m.Why, m.Hint, m.HintTitle, m.Issue, m.HelpPending, m.Highlighting, m.Review, m.Checking, m.Agent, s,
+            m.AutoAvailable, m.AutoState, m.AutoTitle, m.AutoNote, m.AutoCanResume, m.AutoDanger, m.DangerNote);
 
     /// <summary>Moves the "why" height a frame's worth toward open or closed (the UI tick calls us every ~30 ms).</summary>
     private void StepWhy()
@@ -410,6 +411,7 @@ internal sealed class CardWindow : NoActivateForm
 
         if (m.State is "waiting" or "outro") return;
         var loc = Settings.Current.Text;
+        if (!_helpOpen && m.AutoAvailable) AutoButtons(ref y);
         if (_helpOpen)
         {
             // the kinds of trouble, one per line, then a way out
@@ -462,6 +464,47 @@ internal sealed class CardWindow : NoActivateForm
             b.Rect = new RectangleF(rx - bw, y, bw, h);
             _buttons.Add(b);
             rx -= bw + gap;
+        }
+        y += h;
+    }
+
+    /// <summary>
+    /// "Show me" (this step) and "To the end"; while it runs, Stop; once it handed the controls back, "Continue
+    /// automatically"; the first time, "Got it, start" under the note about the mouse moving by itself.
+    /// </summary>
+    private void AutoButtons(ref float y)
+    {
+        var m = _model;
+        var loc = Settings.Current.Text;
+        float s = _s, h = 32 * s, gap = 8 * s, x = Pad;
+        var row = new List<Btn>();
+        switch (m.AutoState)
+        {
+            case "intro":
+                row.Add(new Btn { Id = "auto_go", Action = "autoplay_intro_ok", Icon = "play", Text = loc.AutoIntroGo, Style = "primary" });
+                row.Add(new Btn { Id = "auto_cancel", Action = "autoplay_intro_cancel", Text = loc.Cancel, Style = "ghost" });
+                break;
+            case "starting" or "acting" or "verifying" or "between":
+                row.Add(new Btn { Id = "auto_stop", Action = "autoplay_stop", Icon = "stop", Text = loc.AutoStop, Style = "active" });
+                break;
+            case "paused":
+                if (m.AutoCanResume) row.Add(new Btn { Id = "auto_resume", Action = "autoplay_resume", Icon = "play", Text = loc.AutoResume, Style = "secondary" });
+                break;
+            default:
+                if (m.Completed || m.Prep) return;
+                row.Add(new Btn { Id = "auto_step", Action = "autoplay_step", Icon = "play", Text = loc.ShowMe, Style = "ghost" });
+                row.Add(new Btn { Id = "auto_all", Action = "autoplay_all", Icon = "fast", Text = loc.ShowAll, Style = "ghost" });
+                break;
+        }
+        if (row.Count == 0) return;
+        y += 12 * s;
+        foreach (var b in row)
+        {
+            float bw = Math.Min(ContentWidth, TextW(b.Text) + (b.Icon.Length > 0 ? 30 * s : 0) + 26 * s);
+            if (x + bw > Pad + ContentWidth && x > Pad) { x = Pad; y += h + gap; }
+            b.Rect = new RectangleF(x, y, bw, h);
+            _buttons.Add(b);
+            x += bw + gap;
         }
         y += h;
     }
@@ -539,10 +582,14 @@ internal sealed class CardWindow : NoActivateForm
     {
         var loc = Settings.Current.Text;
         if (m.State == "waiting") return (m.HintTitle, m.Hint ?? loc.Preparing, Palette.Named["blue"], false);
+        // the autoplay: blue while it has the controls (not the user acting), red when it stopped in front of what
+        // cannot be undone; on top — it is what the user must read first
+        if (m.AutoNote != null) return (m.AutoTitle, m.AutoNote, m.AutoDanger ? Palette.Danger : Palette.Machine, true);
         if (m.Hint != null) return (m.HintTitle, m.Hint, Palette.Named["blue"], false);
         if (m.Checking) return (null, loc.Checking, Palette.Named["blue"], false);
         if (m.HelpPending && m.Chat.Count == 0) return (null, m.Highlighting ? loc.Highlighting + " " + loc.HelpSent : loc.HelpSent, Palette.Named["blue"], false);
         if (m.Issue != null) return (null, m.Issue, Palette.Warn, true);
+        if (m.DangerNote != null) return (null, m.DangerNote, Palette.Danger, true);
         if (m.Review) return (null, loc.Review, Palette.Named["blue"], false);
         return null;
     }
@@ -850,6 +897,26 @@ internal sealed class CardWindow : NoActivateForm
             case "search": Theme.IconSearch(g, c, 16 * s, color, 1.9f * s); break;
             case "bulb": Theme.IconBulb(g, c, 16 * s, color, 1.8f * s); break;
             case "message": Theme.IconMessage(g, c, 16 * s, color, 1.8f * s); break;
+            case "play":
+            case "fast":
+            {
+                // a triangle (two for "to the end")
+                using var b = new SolidBrush(color);
+                float k = 5.5f * s;
+                if (icon == "play") g.FillPolygon(b, new[] { new PointF(c.X - k * 0.8f, c.Y - k), new PointF(c.X + k, c.Y), new PointF(c.X - k * 0.8f, c.Y + k) });
+                else
+                    foreach (float dx in new[] { -k * 0.85f, k * 0.55f })
+                        g.FillPolygon(b, new[] { new PointF(c.X + dx - k * 0.7f, c.Y - k * 0.9f), new PointF(c.X + dx + k * 0.7f, c.Y), new PointF(c.X + dx - k * 0.7f, c.Y + k * 0.9f) });
+                break;
+            }
+            case "stop":
+            {
+                using var b = new SolidBrush(color);
+                float k = 4.5f * s;
+                using var p = Theme.Rounded(new RectangleF(c.X - k, c.Y - k, 2 * k, 2 * k), 1.5f * s);
+                g.FillPath(b, p);
+                break;
+            }
         }
     }
 

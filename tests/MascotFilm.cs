@@ -36,6 +36,11 @@ internal static class MascotFilm
         new("drag", 3.6f, (i, t) => i.Gesture = "drag", Target: false),
         new("outro", 2.2f, (i, t) => { i.Outro = true; i.Progress = 1; }, Target: false),
         new("walk", 1.6f, (i, t) => { }, Target: false, Stage: t => "walk"),
+        // the autoplay: the cap drops on, the goggles come down while it moves the pointer, the hands go up as it gives
+        // the controls back
+        new("auto-dress", 1.4f, (i, t) => i.Autoplay = "on", Stage: t => t < 1 ? "dress" : "point"),
+        new("auto-drive", 2.4f, (i, t) => i.Autoplay = "drive", Say: "Pressing “Save”"),
+        new("auto-handback", 1.6f, (i, t) => i.Autoplay = t < 1.1f ? "on" : "off", Stage: t => t < 1.1f ? "handback" : "point"),
     };
 
     public static int Run(string[] args)
@@ -62,6 +67,8 @@ internal static class MascotFilm
                     "hit1" or "hit2" => t / 0.9f,
                     "miss" => t / 1.5f,
                     "walk" => 0.12f + 0.68f * (t / act.Seconds),   // the steps, without the lean in and the stop
+                    "dress" => t / 1.0f,
+                    "handback" => t / 1.1f,
                     _ => 0,
                 };
                 var inp = new MascotInput { Scale = Scale, Progress = 0.6f };

@@ -12,6 +12,7 @@
 | `append_steps(steps)` | add steps (with `keepOpen` the tutorial waits for them after the last one) |
 | `goto_step(index\|id\|relative)` | go to a step; its targets are shown again |
 | `complete_step(expectIndex?)` | complete the step on the agent's behalf |
+| `autoplay(action, steps?)` | only when the user asks: do the steps for them while they watch (`start` with `steps` 1 or `all`, `stop`, `resume`). The user's own hand on the mouse takes the controls back; it never presses a `danger` target; `autoplay_paused` says why it stopped. Its state is `autoplay` in `status` |
 | `stop_tutorial(outro?)` | end the tutorial: after its last step (a `keepOpen` tutorial waiting for more) it finishes with the end card, so the user is told it is done; midway the card is hidden (`outro` overrides) |
 | `status()` | the state, the targets' rectangles and why each is or is not visible (`visible/occluded/minimized/inactive/…`), what the card tells the user is wrong with them now (`step.issue`), and a window in the way (`step.dialog`: `title`, `modal`, `frame`, and `close` — its close button, found by the overlay) |
 | `inspect(anchor\|app, within?, ocr?)` | the best first look: a picture of the window or element with **numbered frames** on its UI Automation elements, and for every number an anchor that finds exactly that element (`match: exact`, `index` among look-alikes; window-handle ids are never used). Elements that draw nothing right now (hover-only buttons), wrappers and stacked look-alikes get no number and are counted in `blank` / `overlapping`; over `maxItems` the numbers spread over the area and the rest is listed in `omitted`. When UIA names next to nothing (FL Studio, games), OCR text gets numbers too, with a `find: {text}` anchor inside the smallest named panel around it — each one checked first against the read the text search itself will make there; `debug: true` lists the lines left out and why. Icons with no text and no UIA name (FL's Play / Stop / Record) get numbers as well, with a template anchor cut from the picture (`role: "icon"`, `template`); only icons that occur once do — marks repeated across the window (step buttons, knobs) are counted in `repeatedIcons` instead, since a template would find any of them. One call instead of `describe` + `screenshot` + `find_text`; the answer has `ms` with the time UIA and OCR took |
@@ -39,7 +40,9 @@
 `button`, `help`, `sequence_reset`, `pick_started`, `pick`, `pick_finished`, `ask`, `answer`, `ask_area`, `area`,
 `window_opened/closed`, `anchor_found/lost`, `target_not_found`, `target_changed`, `target_pinned`, `blocked`,
 `scroll_done`, `trace_done`, `trace_off`, `prepare_started/done`, `outro`, `continue_requested`,
-`tutorial_saved`, `tutorial_save_failed`, `hook_reinstalled`, `already_running`, `exit`. `miss` carries
+`tutorial_saved`, `tutorial_save_failed`, `autoplay_started/resumed/paused/action/finished/stopped`,
+`hook_reinstalled`, `already_running`, `exit`. Events caused by input carry `by`: `user`, `autoplay`, `agent`,
+`app` or `other` (another program's input). `miss` carries
 `wrongButton` / `expectedButton` when the click hit the target with the wrong mouse button.
 
 Some of them in a few words:
@@ -55,6 +58,9 @@ Some of them in a few words:
 | `continue_requested` | “Keep learning” on the end card: the agent should append the next lesson |
 | `tutorial_saved` / `tutorial_save_failed` | saving the lesson to the library worked / failed (`error`) |
 | `already_running` | a second start found the server already running (`port`, `pid`): connect to that one |
+| `autoplay_paused` | the autoplay gave the controls back (`reason`: `user_took_over`, `danger`, `choice`, `cant_do`, `password`, `target_missing`, `target_missing_asked`, `modal`, `missed`, `no_effect`, `loop`, …; `step`, `target`) — the card tells the user why |
+| `autoplay_action` | the autoplay pressed, typed, scrolled or dragged (`kind`, `target`, `x`, `y`, `step`) |
+| `help` with `source: "autoplay"` | the autoplay cannot find a target (8 s): `retarget` it — it carries on by itself — or `complete_step` if the step is done; it waits 20 s, again after each of your calls |
 
 `target_not_found`: a target of the current step does not resolve where it should be. `where: "new window"` — a
 window of the app opened around the step (a menu, a dialog) and the target is still not in it 1.5 s later.
