@@ -143,6 +143,14 @@ Do not try to install or download it yourself.
    Save only steps the user has gone through or `validate` resolved, never a guess. This is for lessons real users
    take; not for test runs (an autopilot, a developer checking the overlay), whose lessons stay as they were.
 
+12. **The app opens a window on its own.** Apps pop up windows by themselves at any moment: offers and ads
+   (Steam's "Special Offers"), a friends list, an update or a reminder. It is not the user's mistake and the lesson
+   is not broken: do not repair, retarget, restart or stop it for that. A `window_opened` for a window your lesson did
+   not lead to is not a step: ignore it while the step's target is still found. When such a window is in the way
+   (it covers the target, or the app before step 1 — `prepare_started`, `step.issue` in `status`), the overlay itself
+   holds the step and the card asks the user to close it; the step carries on once it is gone. Only if the user asks
+   for help about it, say in `hint` that the app opened it by itself and it can simply be closed.
+
 For a single "where is X" question, `draw` one mark instead of a whole tutorial.
 
 ## Rules

@@ -18,6 +18,16 @@ only fixes things.
 - Fixed: "It was in a window that is closed now — open it again" while the window the previous step opened was still
   opening (Steam's settings take over 6 s on a Steam just started). The card waits 12 s for a window the previous
   step opens, 4 s for "not answering".
+- Fixed: a target was "closed" for seconds while the window it is in stood open — the slow app's (Steam's) last
+  answer still named a window gone since (the previous lesson's settings, the main window of a Steam restarted). Until
+  the fresh answer comes the target is now still being looked for, framed by its caption meanwhile.
+- Fixed: an element "not found" by a UIA walk begun before the step, or before the menu that opened around it, kept
+  the target missing and made the card say "can't find the element" over the open menu; such a miss now counts as
+  still looking.
+- Fixed: a mark framed by its caption while UI Automation was slow jumped to the element's whole box when the element
+  answered (Steam's "Interface" tab); it stays on the caption.
+- The skill: a window the app opens on its own (offers, a friends list, a reminder) is not a broken lesson — no
+  repair, restart or stop for it; the overlay holds the step and asks to close it when it is in the way.
 
 - Fixed: the frame on a menu item found by its text (and the mascot pointing at it) jumped — it first hugged the
   words, then grew to the whole item once the pointer lit it up, or was read while the menu still slid in. The item's

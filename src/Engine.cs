@@ -1527,10 +1527,34 @@ internal static partial class Engine
     /// <summary>Math.Clamp that takes an area narrower than its margins (a thin strip): its middle, never a throw.</summary>
     internal static float ClampIn(float v, float lo, float hi) => lo > hi ? (lo + hi) / 2 : Math.Clamp(v, lo, hi);
 
+    /// <summary>
+    /// An element "not found" by a UIA walk begun before the step, or before the app's window that opened around it
+    /// (a menu): it says nothing about that window yet. Steam's walk takes seconds and its menu opened in the middle
+    /// of one: the mark was "not found" for the whole step, and the card said "can't find the element" over it.
+    /// Such a miss is still looking: the card says nothing and the caption frames the target meanwhile.
+    /// </summary>
+    private static bool StaleMiss(AnchorSpec a, Tutorial? t, Step? s)
+    {
+        if (t == null || s == null || a.Find != null || a.Path.Count == 0 || Resolver.Get(a.Key) is not { Found: false } r) return false;
+        if (r.At < s.EnteredAt) return true;
+        if ((a.Process ?? t.Defaults.Process) is not string proc) return false;
+        var pids = Resolver.Pids(proc);
+        var newest = Resolver.Since.Where(kv => kv.Value != DateTime.MinValue && kv.Value >= s.EnteredAt.AddMilliseconds(-Finder.OpenedBeforeStepMs)
+                                                && Native.IsWindow(kv.Key) && pids.Contains(Native.ProcessId(kv.Key)))
+                                   .Select(kv => kv.Value).DefaultIfEmpty(DateTime.MinValue).Max();
+        return r.At < newest.AddMilliseconds(400);
+    }
+
     private static void ComputeMark(Mark m, Tutorial? t, int fgPid, DateTime now)
     {
         var ag = AnchorNow(m.Anchor, out var reason);
-        if (ag == null && ViaCaption(m, reason, now) is AnchorGeo cg)
+        if (ag == null && IsMissing(reason) && t?.Current is { } cs && cs.Targets.Contains(m) && StaleMiss(m.Anchor, t, cs)) reason = "resolving";
+        // the element answered after its caption had framed it (UIA slow): the mark stays on the caption, which lies
+        // on the element — growing to the element's whole box was a jump the user saw (Steam's "Interface" tab)
+        if (ag != null && m.ViaStandIn && m.StandIn != null && AnchorNow(m.StandIn, out _) is { FromLastKnown: false } cap
+            && ag.Bounds is RectangleF eb && eb.Contains(cap.P))
+            ag = cap;
+        else if (ag == null && ViaCaption(m, reason, now) is AnchorGeo cg)
         {
             if (!m.ViaStandIn) Log.Info($"mark {m.Id}: UI Automation is slow, framed by its caption \"{m.StandIn!.Find!.Text}\" meanwhile");
             m.ViaStandIn = true;
@@ -2374,6 +2398,7 @@ internal static partial class Engine
         // "I can't see it" / "can't find the element" over an open menu sends the user wrong. As long as the agent
         // is not told either (MissingAfterMs), the card says nothing about a target that is not found yet
         if (IsMissing(v) && (DateTime.UtcNow - s.EnteredAt).TotalMilliseconds < MissingAfterMs) return null;
+
         // a window the previous step opened that is not there yet ("closed"), or an app whose UI Automation is busy
         // while it opens one ("not answering": Steam's settings, drawn by Chromium, take seconds): only after a while
         // When the previous step's click was to open a window (opens), it may well take longer: Steam's settings,

@@ -124,7 +124,13 @@ internal static class Resolver
         if (job.task.Wait(CycleWaitMs))
         {
             InFlight.TryRemove(a.Key, out _);
-            return job.task.IsFaulted ? AnchorResult.Missing("error: " + job.task.Exception?.InnerException?.Message, Array.Empty<int>()) : job.task.Result;
+            if (job.task.IsFaulted) return AnchorResult.Missing("error: " + job.task.Exception?.InnerException?.Message, Array.Empty<int>());
+            // a "not found" is as old as the walk that gave it: Steam's walk takes seconds, and one begun before its
+            // menu opened ended after, looking fresh — the card said "can't find the element" over the open menu
+            var res = job.task.Result;
+            // (a miss repeated from the last walk, while searches back off, keeps that walk's older time)
+            var began = DateTime.UtcNow.AddMilliseconds(job.since - Environment.TickCount64);
+            return res.Found || res.At <= began ? res : res with { At = began };
         }
         // a slow app (Steam takes 2-4 s per walk) is not a silent one: what was found last stays until the answer
         // comes; only an anchor never answered for that long is "not answering"
@@ -145,7 +151,12 @@ internal static class Resolver
             AnchorResult? got;
             try { got = a.Path.Count == 0 ? Resolve(a, windows, pidCache, useCache: true) : ResolveInCycle(a, windows); }
             catch (Exception e) { got = AnchorResult.Missing("error: " + e.Message, Array.Empty<int>()); }
-            if (got == null) continue;   // still waiting on the app: keep what was known
+            // still waiting on the app: keep what was known — unless that was a window gone since (the settings window
+            // of the previous lesson, the main window of a Steam restarted): "closed" made the target missing for as
+            // long as Steam's walk took, while the window it is in stood open. Until the answer: still looking
+            if (got == null && Get(a.Key) is { Found: true } known && !Native.IsWindow(known.Root))
+                got = AnchorResult.Missing("resolving", known.Pids);
+            if (got == null) continue;
             var r = got;
             var prev = Get(a.Key);
             Results[a.Key] = r;
