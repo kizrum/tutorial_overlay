@@ -44,6 +44,10 @@ internal static partial class Engine
         {
             if (!sp.IsTarget) continue;
             float aspect = Math.Max(tw, th) / Math.Min(tw, th);
+            // something with edges was measured at the target: it is a control (a close cross counted from a window's
+            // corner), not a spot in a 3D view — framed at its own size like every control, never ringed
+            if (sp.Type == "circle" && sp.R != null && !(m.Anchor.Find != null && m.Anchor.HasPoint))
+                return $"a ring around a control ({size}): a ring is for a spot with no edges (an offset in a 3D view); a button, icon or close cross gets 'auto' — framed at its own size like every control";
             if (sp.Type == "circle" && aspect > 1.8f)
                 return $"a ring around a target {size} (tall or wide): leave shapes out (or type 'auto') and it is framed at its own size";
             float area = tw * th;
@@ -70,6 +74,11 @@ internal static partial class Engine
             return el?.Role is string r2
                 ? $"a marker on a {r2}: the marker is for a phrase in text (anchor it with find.text in the document or help); a control gets 'auto', 'brackets' or 'pill'"
                 : "a marker on something that is not found as text: the marker is for a phrase in text (anchor it with find.text); a control gets 'auto', 'brackets' or 'pill'";
+        // a ring is for a spot with no edges (a place in a 3D view, counted from a caption): a control has its own
+        // box, and every control is framed by it — a ring round one close button and a frame round the next one
+        // tell the user two different things about the same kind of button
+        if (m.Shapes.Any(sp => sp.Type == "circle" && sp.IsTarget) && !m.Anchor.HasPoint && !m.Anchor.IsScreen)
+            return "a ring around a control: a ring is for a spot with no edges (an offset in a 3D view); a button, icon, close cross or tab gets 'auto' — framed at its own size like every control";
         if (m.Shapes.Any(sp => sp.Type == "arrow") && !m.Shapes.Any(sp => Outlines.Contains(sp.Type)))
             return "an arrow is the only mark here: on its own it does not say which thing at its tip is meant — add the outline ({type:'auto'}) and keep the arrow for a direction, a path or a far area";
         return null;

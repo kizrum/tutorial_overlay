@@ -380,6 +380,7 @@ internal static partial class Engine
 
     private static void HandleKey(InputEvent e)
     {
+        NoteInput();
         if (e.Vk == 0x1B && _pick is PickSession ps) { EndPick(ps, "esc"); return; }
         lock (Sync)
         {

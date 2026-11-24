@@ -48,7 +48,8 @@ Do not try to install or download it yourself.
    `{type: 'auto'}`): it is framed at its own size — the element, the found text, the icon, the caption at a spot,
    measured live. Your own shapes add to the outline; `validate` warns when a hand-made ring or frame does not fit
    the target, a marker sits on a control, or an arrow is a target's only mark. Choose by the thing, not by looks:
-   - a button, icon, menu item, tab, checkbox — `auto` (the default);
+   - a button, icon, close cross, menu item, tab, checkbox — `auto` (the default): every control is framed at its
+     own size, so the same kind of button always looks the same;
    - a field, a panel, a big area whose inside must stay readable — `{type: 'brackets'}` (corners only);
    - one segment or button in a row of alike ones (Day | Week | Month, a toolbar) — `{type: 'pill'}`;
    - a phrase *in text* (a line in a document, a help page, a dialog's message), anchored with `find.text` —
@@ -56,6 +57,9 @@ Do not try to install or download it yourself.
    - a whole row or column of a list or table — `{type: 'band'}`;
    - several targets of one step ticked as one (three checkboxes) — the same `group: 'name'` on each;
    - a dangerous control right next to the target — a mark of its own `{type: 'forbid'}` (never waited for).
+   - a spot with no edges (a place in a 3D view, an offset from a caption) — a ring (`circle`); never round a control.
+   Leave colours alone: each means one thing — the accent "do this now", green "done", yellow "careful, not that"
+   (`forbid`, misses). A target is never yellow.
    **Arrows are not for pointing at a control** — on their own they leave the user guessing which thing at the tip
    is meant. Use an arrow for a *direction or a path*: a drag (the `drag` condition draws source → arrow → drop
    zone), a move in a viewport (the `path` shape), which way to scroll or pan, or from the card toward a far area

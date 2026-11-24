@@ -77,11 +77,14 @@ line toward it, saying "off screen"; the card says what to do.
 
 ### Which mark for what
 
-Pick a mark by what it has to say about the thing, not by how it looks:
+Pick a mark by what it has to say about the thing, not by how it looks. One system for everything the overlay
+marks: the steps' targets, the close button of a window in the way (step 0, or a window the app opened by itself
+mid-step) and the highlight after "I can't find it" — the same kind of thing always gets the same mark, whichever
+part of the overlay put it there.
 
 | The thing | Mark |
 |---|---|
-| a button, icon, menu item, tab, checkbox | no `shapes` (`auto`) |
+| a button, icon, close cross, menu item, tab, checkbox | no `shapes` (`auto`) — framed at its own size |
 | a field, panel or big area whose inside must stay readable | `brackets` |
 | one segment or button in a row of alike ones | `pill` |
 | a phrase in text (a document line, help, a dialog's message), anchored with `find.text` | `marker` — never on a control |
@@ -89,10 +92,22 @@ Pick a mark by what it has to say about the thing, not by how it looks:
 | several targets of one step ticked as one | the same `group` |
 | a dangerous control next to the target | a mark of its own with `forbid` |
 | where to drag, which way to move, scroll or pan | `drag` condition, `path` shape (+ `trace`), an arrow |
+| a spot with no edges of its own (a place in a 3D view, counted from a caption) | a ring (`circle`) — never round a control |
+| a window in the way (step 0, or one the app opened by itself) | the overlay's own: a rectangle round the window, its close button framed like any button |
+
+Each colour means one thing, so the user can tell what a mark wants without reading:
+
+| Colour | Means | Where |
+|---|---|---|
+| accent (pink by default, `accent` changes it) | **do this now** | the current step's targets; a window in the way, framed whole, and its close button |
+| green | **done** | a ticked target, a checkbox's tick, a drop that landed, scrolling that counted |
+| yellow | **careful, not that** | `forbid`, a missed or taken-back click, a path the drag left, the card's warning about a problem |
+
+Yellow is never what to press. A colour a spec gives a shape (`color`) overrides the accent only for that shape.
 
 An arrow is a direction or a path, not a pointer at a control: on its own, near several controls, it leaves the
 user guessing which one is meant. Next to a target it goes together with that target's outline. `validate` notes a
-marker on a control and an arrow that is a target's only mark (`shapeNote`).
+marker on a control, a ring round a control and an arrow that is a target's only mark (`shapeNote`).
 
 Layout without overlaps: rings of neighbouring targets shrink, labels, info boxes and buttons without explicit
 `x,y` find free room around the target (a label goes to the arrow's tail), and the card keeps clear of everything
@@ -331,15 +346,23 @@ without the right item chosen, the previous target lights up again and the `sequ
 from one). The default shape is a checkbox of `w × h`. `from` and `step` are easiest to get with
 `pick(anchor, count: 2)` on two neighbouring cells: the answer has a `gridHint`.
 
-### Step 0: getting ready
+### Step 0: getting ready, and windows the app opens by itself
 
-If the app waits for an answer in a dialog the step knows nothing about (a window with a title of the same program
-on top of its main window, for example "Cloud path warning"), the step's text is of no use: the right place cannot be
-reached anyway. The card then shows getting ready instead of the step: before the tutorial starts it is
-**"STEP 0 / N" — "Let's get ready to start"**, later "First, close this window". The dialog is framed, the mascot
-stands next to it (not on it) and asks to answer or close it; scroll hints are not shown, and there are no "Done" and
-"Skip" buttons. As soon as the dialog is closed the card moves on to the step by itself. The agent gets the
-`prepare_started` and `prepare_done` events. While a screenshot tool (Snipping Tool, ShareX and the like) is open,
+A window of the app can be in the way of a step: a dialog the app waits on (modal — the app ignores clicks until it
+is answered, for example "Cloud path warning"), or a window the app opened by itself — an offer, a friends list, a
+reminder — that lies over the step's target, or, before the tutorial starts, over the app (Steam's "Special Offers").
+Such a window is not the user's mistake and the lesson is not broken: it is the step's action for now. Before the
+tutorial starts the card shows **"STEP 0 / N" — "Let's get ready to start"**, later, on the same step, "First, close
+this window". Meanwhile the step's own marks wait (clicks on them count neither as hits nor as misses), and step 1
+begins — its timers, the mascot's walk — only once the window is gone.
+
+The overlay finds the window's close button itself — the button UI Automation names Close, the close box Windows
+reports, or the "X" drawn at the right of its title strip — and marks it as any button is marked (its own size, the
+accent: "do this now"); the window itself is framed whole, a rectangle that says which window. The mascot stands by
+the close button and says "close this window here"; without a close button found it stands by the window. There are no "Done" and "Skip" buttons; as soon as the
+window is closed (or, if it is not a dialog, brought behind the app) the card goes back to the step by itself. A
+window the app opens by itself that covers nothing the step needs is left alone. The agent gets `prepare_started`
+and `prepare_done`; `status` gives the window as `step.dialog` (`close` is the close button). While a screenshot tool (Snipping Tool, ShareX and the like) is open,
 the tutorial still treats the program's window that was in front before it as active.
 
 ## The mascot "Shazhok"

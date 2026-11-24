@@ -30,6 +30,31 @@ internal static partial class Engine
 
     /// <summary>When each top-level window was first seen during this tutorial (MinValue: it was there before it began).</summary>
     private static readonly Dictionary<IntPtr, DateTime> WindowSince = new();
+
+    /// <summary>When the user clicked or pressed a key lately (the last 30 s): what a window that opened came after.</summary>
+    private static readonly Queue<DateTime> InputTimes = new();
+
+    private static void NoteInput() => NoteInputAt(DateTime.UtcNow);
+
+    internal static void NoteInputAt(DateTime now)
+    {
+        lock (InputTimes)
+        {
+            InputTimes.Enqueue(now);
+            while (InputTimes.Count > 0 && (now - InputTimes.Peek()).TotalSeconds > 30) InputTimes.Dequeue();
+        }
+    }
+
+    /// <summary>
+    /// A window the user's own click or key opened (one came in the 3 s before it), as opposed to one the app opened
+    /// by itself — an offer, a friends list, a reminder. Only the first kind is a window the step led to.
+    /// </summary>
+    private static bool OpenedByUser(DateTime at) => OpenedByUserAt(at);
+
+    internal static bool OpenedByUserAt(DateTime at)
+    {
+        lock (InputTimes) return InputTimes.Any(x => x <= at.AddMilliseconds(300) && x >= at.AddMilliseconds(-3000));
+    }
     private static Tutorial? _windowsOf;
     private static readonly Dictionary<string, DateTime> MissingSince = new();
     private static readonly HashSet<string> MissingReported = new();
@@ -78,7 +103,11 @@ internal static partial class Engine
             // the newest window of the app that opened around this step and has been there long enough to be searched
             var win = windows.Where(w => pids.Contains(w.Pid) && WindowSince.TryGetValue(w.Hwnd, out var at)
                                          && at >= step.EnteredAt.AddMilliseconds(-Finder.GraceFor(step.Review))
-                                         && (now - at).TotalMilliseconds >= MissingAfterMs)
+                                         && (now - at).TotalMilliseconds >= MissingAfterMs
+                                         // a window the app opened by itself (Steam's friends list mid-step) is not
+                                         // where the step led: its contents sent the agent repairing the lesson by
+                                         // a stranger's window. Around the step's start it is the previous step's click
+                                         && (at <= step.EnteredAt.AddMilliseconds(MissingAfterMs) || OpenedByUser(at)))
                              .OrderByDescending(w => WindowSince[w.Hwnd]).FirstOrDefault();
             // only a "not found" read once that window stood still counts. One given before it opened says nothing
             // about it (an app with a big, slow UIA tree — Steam's library — keeps the resolver busy for seconds, and

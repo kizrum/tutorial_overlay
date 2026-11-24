@@ -1841,6 +1841,28 @@ public static class CurveTests
         A.Check(Note("""{"anchor":{"element":{"name":"Help","role":"Text"}},"shapes":[{"type":"marker"}]}""") == null, "marker on a text element");
         A.Check(Note("""{"anchor":{"element":{"name":"Bold","role":"Button"}},"shapes":[{"type":"arrow"}]}""")?.Contains("only mark") == true, "a lone arrow");
         A.Check(Note("""{"anchor":{"element":{"name":"Bold","role":"Button"}},"shapes":[{"type":"auto"},{"type":"arrow"}]}""") == null, "an arrow beside the outline");
+        A.Check(Note("""{"anchor":{"process":"Notepad","element":{"name":"Close","role":"Button"}},"shapes":[{"type":"circle","r":18}]}""")?.Contains("ring around a control") == true, "a ring round a button");
+        A.Check(Note("""{"anchor":{"process":"blender","find":{"text":"User Perspective"},"offset":[890,555]},"shapes":[{"type":"circle","r":60}]}""") == null, "a ring on a spot in a 3D view");
+    }
+
+    /// <summary>A close cross counted from a window's corner measures with edges: a control, framed, never ringed.</summary>
+    public static void TestRingRoundAMeasuredControlIsReported()
+    {
+        var cross = new System.Text.Json.Nodes.JsonObject { ["visible"] = new System.Text.Json.Nodes.JsonArray(1906, 144, 40, 40) };
+        A.Check(Engine.ShapeMisfit(Mark.Parse(A.Json("{\"anchor\":{\"process\":\"steamwebhelper\",\"window\":\"Steam Settings\",\"origin\":\"topright\",\"offset\":[-28,24]},\"shapes\":[{\"type\":\"circle\",\"r\":22}]}"), null, "m"), cross) is string s && s.Contains("ring around a control"),
+            "a ring round a close cross counted from the corner");
+        A.Eq(null, Engine.ShapeMisfit(Mark.Parse(A.Json("{\"anchor\":{\"process\":\"steamwebhelper\",\"window\":\"Steam Settings\",\"origin\":\"topright\",\"offset\":[-28,24]}}"), null, "m"), cross), "the same cross with auto");
+    }
+
+    /// <summary>A window opened within 3 s after the user's click or key is the user's doing; one with no input before it opened by itself.</summary>
+    public static void TestWindowOpenedByItselfIsNotTheStepsWindow()
+    {
+        Engine.NoteInputAt(DateTime.UtcNow.AddSeconds(-20));
+        A.Check(!Engine.OpenedByUserAt(DateTime.UtcNow), "nothing pressed for 20 s: the app opened it by itself");
+        var click = DateTime.UtcNow.AddSeconds(-1);
+        Engine.NoteInputAt(click);
+        A.Check(Engine.OpenedByUserAt(click.AddMilliseconds(800)), "opened 0.8 s after a click");
+        A.Check(!Engine.OpenedByUserAt(click.AddSeconds(-2)), "opened before the click");
     }
 
     /// <summary>A template's thing that measures bigger than the template (a hovered button lit with its row) keeps the last fit.</summary>

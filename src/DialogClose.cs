@@ -19,7 +19,10 @@ internal static class DialogClose
 {
     private static readonly object Gate = new();
     // the close spot relative to the window's frame, kept while the window keeps its size
-    private static readonly Dictionary<IntPtr, (Size size, RectangleF? rel)> Known = new();
+    private static readonly Dictionary<IntPtr, (Size size, RectangleF? rel, long at)> Known = new();
+    // a window looked at while it was still drawing itself (Steam's friends list, just opened) showed no cross yet:
+    // "none" is looked again after this long, not kept for good
+    private const int NoneRetryMs = 1000;
     private static readonly HashSet<IntPtr> Looking = new();
 
     /// <summary>The close spot of <paramref name="hwnd"/> in screen pixels, or null (not known yet, or none).</summary>
@@ -28,7 +31,10 @@ internal static class DialogClose
         lock (Gate)
         {
             if (Known.TryGetValue(hwnd, out var k) && k.size == frame.Size)
-                return k.rel is RectangleF r ? new RectangleF(r.X + frame.X, r.Y + frame.Y, r.Width, r.Height) : null;
+            {
+                if (k.rel is RectangleF r) return new RectangleF(r.X + frame.X, r.Y + frame.Y, r.Width, r.Height);
+                if (Environment.TickCount64 - k.at < NoneRetryMs) return null;
+            }
             if (!Looking.Add(hwnd)) return null;
             if (Known.Count > 64) Known.Clear();
         }
@@ -39,7 +45,7 @@ internal static class DialogClose
             catch (Exception e) { Log.Debug("close spot: " + e.Message); }
             lock (Gate)
             {
-                Known[hwnd] = (frame.Size, spot is RectangleF s ? new RectangleF(s.X - frame.X, s.Y - frame.Y, s.Width, s.Height) : null);
+                Known[hwnd] = (frame.Size, spot is RectangleF s ? new RectangleF(s.X - frame.X, s.Y - frame.Y, s.Width, s.Height) : null, Environment.TickCount64);
                 Looking.Remove(hwnd);
             }
             Log.Debug($"close spot of 0x{hwnd.ToInt64():X}: {(spot is RectangleF f ? $"{f.X:0},{f.Y:0} {f.Width:0}x{f.Height:0}" : "none")}");

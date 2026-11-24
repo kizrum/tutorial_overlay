@@ -508,6 +508,7 @@ internal static partial class Engine
         var pt = new PointF(c.X, c.Y);
         var (_, rootPid, childPid) = Native.HitWindow(pt);
         if (rootPid == OwnPid || childPid == OwnPid) return;   // card / buttons handle themselves
+        NoteInput();
 
         lock (Sync)
         {
@@ -1202,22 +1203,26 @@ internal static partial class Engine
         return sb.ToString().TrimEnd();
     }
 
-    /// <summary>Frames the app's blocking dialog so the user sees what has to be answered first.</summary>
+    /// <summary>
+    /// A window in the way is the step's action for now, marked by the same rules as any target (docs/tutorials.md,
+    /// "Which mark for what"): the window is framed whole — a rectangle round it says which window — and its close
+    /// button, when found, is framed at its own size like every button: what to press. Both in the accent colour,
+    /// "do this now"; nothing of it is yellow — yellow means "careful, not that", never what to press.
+    /// </summary>
     private static void AddDialogVisuals(Step s, Scene sc, List<RectangleF> avoid)
     {
         if (BlockingDialogWindow(s) is not { } d) return;
         var center = new PointF(d.frame.X + d.frame.Width / 2f, d.frame.Y + d.frame.Height / 2f);
         float k = Native.ScaleAt(center);
+        var close = CloseSpot(d);
         var r = (RectangleF)d.frame;
         r.Inflate(6 * k, 6 * k);
-        var close = CloseSpot(d);
-        // the close button found: it is what to press, the window's outline only says which window
-        sc.Prims.Add((new Prim { Kind = PrimKind.Rect, Rect = r, Color = Palette.Warn, Width = (close != null ? 2f : 3.5f) * k, Radius = 8 * k, Scale = k }, close != null ? 0.55f : 1f));
+        sc.Prims.Add((new Prim { Kind = PrimKind.Rect, Rect = r, Color = Palette.Accent, Width = 3f * k, Radius = 8 * k, Scale = k, Glow = close == null }, 1f));
         avoid.Add(r);
         if (close is RectangleF c)
         {
-            c.Inflate(3 * k, 3 * k);
-            sc.Prims.Add((new Prim { Kind = PrimKind.Rect, Rect = c, Color = Palette.Warn, Width = 3.5f * k, Radius = 6 * k, Scale = k }, 1f));
+            c.Inflate(3 * k, 3 * k);   // as 'auto' frames a button: its own box, pad 3
+            sc.Prims.Add((new Prim { Kind = PrimKind.Rect, Rect = c, Color = Palette.Accent, Width = 3.5f * k, Radius = 8 * k, Scale = k, Glow = true }, 1f));
             avoid.Add(c);
         }
         // the mascot stands by the dialog and says this itself; a caption of its own only when there is no mascot
@@ -1231,7 +1236,7 @@ internal static partial class Engine
         float y = r.Top - 10 * k - h;
         if (y < mon.Top + 4 * k) y = r.Bottom + 10 * k;
         var box = new RectangleF(x, y, w, h);
-        sc.Prims.Add((new Prim { Kind = PrimKind.Label, Rect = box, Text = text, Size = px, Color = Palette.Warn, Scale = k, Radius = 8 * k }, 1f));
+        sc.Prims.Add((new Prim { Kind = PrimKind.Label, Rect = box, Text = text, Size = px, Color = Palette.Accent, Scale = k, Radius = 8 * k }, 1f));
         avoid.Add(box);
     }
 

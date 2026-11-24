@@ -28,6 +28,15 @@ only fixes things.
   answered (Steam's "Interface" tab); it stays on the caption.
 - The skill: a window the app opens on its own (offers, a friends list, a reminder) is not a broken lesson — no
   repair, restart or stop for it; the overlay holds the step and asks to close it when it is in the way.
+- One mark system: a shape says what the thing is, a colour what to do with it, whichever part of the overlay marks
+  it. A window in the way gets a rectangle round it and its close button a frame of the button's own size, both in
+  the accent colour ("do this now"), like any step's button; yellow means only "careful, not that". `validate` warns
+  about a ring round a button or other control that has edges (a ring is for a spot with none). The docs and the
+  skill have a table of what each colour means.
+- Fixed: a window in the way showed no close button when it was looked at while still drawing itself (Steam's
+  friends list just opened); "none" is looked at again after a second.
+- Fixed: a window the app opened by itself during a step (no click or key in the 3 s before) was taken for the
+  step's window, and its target reported missing there.
 
 - Fixed: the frame on a menu item found by its text (and the mascot pointing at it) jumped — it first hugged the
   words, then grew to the whole item once the pointer lit it up, or was read while the menu still slid in. The item's
