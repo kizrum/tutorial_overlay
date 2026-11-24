@@ -61,7 +61,7 @@ internal sealed class CursorBadge : Form
         {
             float k = Native.ScaleAt(at);
             string word = Settings.Current.Text.CursorAuto;
-            if (!_shown || Math.Abs(k - _scale) > 0.01f || word != _word) Paint(at, k, word);
+            if (!_shown || Math.Abs(k - _scale) > 0.01f || word != _word) Draw(at, k, word);
             if (!_shown)
             {
                 _shown = true;
@@ -88,7 +88,7 @@ internal sealed class CursorBadge : Form
         Native.SetWindowPos(_hwnd, IntPtr.Zero, x + dx, y + dy, 0, 0, Native.SWP_NOSIZE | Native.SWP_NOACTIVATE | SWP_NOZORDER | SWP_ASYNCWINDOWPOS);
     }
 
-    private void Paint(PointF at, float k, string word)
+    private void Draw(PointF at, float k, string word)
     {
         _scale = k;
         _word = word;
