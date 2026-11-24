@@ -160,7 +160,7 @@ spec; they then apply until it ends:
 
 ```json
 { "port": 7788, "lang": "ru", "accent": "#FF4D6D", "animate": true, "hideWhenInactive": true, "autoColor": true,
-  "hideFromCapture": false, "mascot": true, "autoplaySpeed": 1, "dangerWords": ["отправить отчёт"],
+  "hideFromCapture": false, "mascot": true, "autoplaySpeed": 1, "cursorBadge": false, "dangerWords": ["отправить отчёт"],
   "hotkeys": { "done": "Ctrl+Alt+Right", "back": "Ctrl+Alt+Left", "skip": "Ctrl+Alt+Down", "undo": "Ctrl+Alt+Z",
                "stop": "none", "help": "Ctrl+Alt+H", "autoplay": "Ctrl+Alt+P" } }
 ```
@@ -183,7 +183,8 @@ every lesson; a spec can do the same for its own.
 how fast the pointer travels, how long it rests on a target before pressing, how long the card is left to read
 between steps. What it waits for is never scaled — the user's 2 s of stillness, the app's answer to a click, a target
 still loading — so Fast cannot outrun the app, and Slow still moves the pointer all the time (a long move 2 s, the
-card at most 6 s). `dangerWords`: the user's own words for what cannot be undone, added to the overlay's (buy, pay,
+card at most 6 s). `cursorBadge` (default `false`; the "Look" tab): a small blue "auto" tag rides beside the pointer while autoplay moves it.
+`dangerWords`: the user's own words for what cannot be undone, added to the overlay's (buy, pay,
 delete permanently, send, …): a target named so is red, "Press it yourself", and never pressed by autoplay.
 
 A guard watches the mouse and keyboard hooks. If the system sees input while the hooks have been silent for more

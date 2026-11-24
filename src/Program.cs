@@ -337,7 +337,7 @@ internal static class Program
                 card.UpdateModel(frame.Card);
                 long t3 = System.Diagnostics.Stopwatch.GetTimestamp();
                 mascot.Update(frame.Mascot);
-                badge.Update(Engine.Auto.Running);
+                badge.Update(Engine.Auto.Running && Settings.Global.CursorBadge);
                 perf.Add(t0, t1, t2, t3, System.Diagnostics.Stopwatch.GetTimestamp(), frame.Changed, Engine.MarkCount);
                 // the canvas goes on top (it appeared, or its once-a-second re-raise) in one batch with our other
                 // windows above it: the marks never cover the card, the buttons or the mascot, not even for a moment

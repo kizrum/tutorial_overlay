@@ -402,7 +402,8 @@ the card says the mouse will move by itself and waits for "Got it, start".
   `autoplay`, `agent` (complete_step) or `app`/`other` (input from another program) — and `tutorial.completedBy` in
   `status` lists it per step.
 - **It is plain to see that it works:** the card's header starts with a blue "AUTO" pill with a breathing dot (the
-  progress strip turns blue too), a small blue "auto" pill rides beside the pointer while autoplay moves it, and the
+  progress strip turns blue too), a small blue "auto" pill can ride beside the pointer (off by default: `cursorBadge`
+  in the settings, the "Look" tab), and the
   card says what it does ("Showing step 2 of 4 · move the mouse and I stop") with a Stop button. Blue always means
   "not you acting".
 - **The mascot** puts on a blue pilot's cap while autoplay has the controls and pulls its goggles down while it moves

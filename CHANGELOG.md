@@ -19,7 +19,7 @@ only fixes things.
 - Who did it: events caused by input carry `by` (`user`, `autoplay`, `agent`, `app`, `other`), the log says it for
   every completed step, and `status` gives `tutorial.completedBy` and `autoplay`.
 - While autoplay works, the card's header shows a blue "AUTO" pill with a breathing dot, the progress strip is blue,
-  and a small blue "auto" pill rides beside the pointer it moves.
+  and a small blue "auto" pill can ride beside the pointer it moves (off by default; the "Look" tab).
 - The mascot wears a blue pilot's cap while autoplay has the controls, pulls its goggles down while it moves the
   pointer, and throws its hands up as it hands the controls back.
 

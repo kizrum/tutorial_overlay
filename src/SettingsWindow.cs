@@ -26,7 +26,7 @@ internal sealed class SettingsWindow : Form
     private Label _portStatus = null!;
     private readonly DarkButton _ru, _en;
     private readonly List<DarkSwatch> _swatches = new();
-    private readonly DarkToggle _autoColor, _animate, _hideInactive, _hideCapture, _mascot;
+    private readonly DarkToggle _autoColor, _animate, _hideInactive, _hideCapture, _mascot, _cursorBadge;
     private readonly Dictionary<string, DarkField> _keyBoxes = new();
     private readonly Dictionary<string, Chord?> _chords = new();
     private readonly List<(DarkButton tab, Panel page)> _tabs = new();
@@ -47,6 +47,9 @@ internal sealed class SettingsWindow : Form
         _open.Select(_open._tabs[tab switch { "look" => 1, "keys" or "hotkeys" => 2, _ => 0 }].tab);
         _open.Activate();
     }
+
+    /// <summary>Tests: close what <see cref="Open"/> opened.</summary>
+    internal static void CloseForTests() { _open?.Close(); _open?.Dispose(); _open = null; }
 
     private SettingsWindow()
     {
@@ -126,6 +129,7 @@ internal sealed class SettingsWindow : Form
         _mascot = (DarkToggle)FindByTag("mascot");
         _hideInactive = (DarkToggle)FindByTag("hideInactive");
         _hideCapture = (DarkToggle)FindByTag("hideCapture");
+        _cursorBadge = (DarkToggle)FindByTag("cursorBadge");
         Select(_tabs[0].tab);
         ShowLang();
         ShowAccent();
@@ -287,6 +291,7 @@ internal sealed class SettingsWindow : Form
             row2.Add(b);
         }
         add(_t.SetAutoSpeed, Row(row2.ToArray()));
+        add(null, new DarkToggle(_t.SetCursorBadge, g.CursorBadge, _s, tw) { Tag = "cursorBadge" }, wide: true);
         add(null, Note(_t.SetAutoSpeedNote, _pageW - CaptionW));
         return p;
     }
@@ -491,6 +496,7 @@ internal sealed class SettingsWindow : Form
         _mascot.Checked = true;
         _hideInactive.Checked = true;
         _hideCapture.Checked = false;
+        _cursorBadge.Checked = false;
         _speed = 1f; ShowSpeed();
         foreach (var (a, c) in Settings.DefaultHotkeys()) _chords[a] = c;
         ShowChords();
@@ -529,6 +535,7 @@ internal sealed class SettingsWindow : Form
             root["mascot"] = _mascot.Checked;
             root["hideWhenInactive"] = _hideInactive.Checked;
             root["hideFromCapture"] = _hideCapture.Checked;
+            root["cursorBadge"] = _cursorBadge.Checked;
             root["autoplaySpeed"] = _speed;
             var hk = new JsonObject();
             foreach (var a in Settings.Actions) hk[a] = _chords[a] is Chord c ? c.ToString() : "none";

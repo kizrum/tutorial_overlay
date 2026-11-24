@@ -349,6 +349,9 @@ public static class AutoplayTests
         A.Eq(1.6f, new Settings().Apply(A.Json("""{"autoplaySpeed":5}""")).AutoplaySpeed, "too fast for apps and eyes: capped");
         A.Eq(0.6f, new Settings().Apply(A.Json("""{"autoplaySpeed":0.1}""")).AutoplaySpeed, "too slow, it would seem stuck: raised");
         A.Eq(1f, new Settings().AutoplaySpeed, "normal by default");
+        A.Check(!new Settings().CursorBadge, "the 'auto' tag at the pointer is off unless the user turns it on");
+        A.Check(new Settings().Apply(A.Json("""{"cursorBadge":true}""")).CursorBadge, "turned on in config.json");
+        A.Check(new Settings().Apply(A.Json("""{"cursorBadge":true}""")).Clone().CursorBadge, "and kept by a copy of the settings");
         A.Check(Settings.AutoplaySpeeds.All(v => v >= Settings.AutoplaySpeedMin && v <= Settings.AutoplaySpeedMax), "every choice in the window is safe");
         var was = InputSend.Speed;
         try
@@ -429,5 +432,27 @@ public static class AutoplayTests
             A.Eq("paused", a.State, "a click beside its target does");
         }
         finally { Reset(a); a.MissedAt = 0; }
+    }
+}
+
+public static class SettingsWindowTests
+{
+    /// <summary>The tray's settings window builds (every page, every control found by its tag) and closes.</summary>
+    public static void TestTheSettingsWindowOpens()
+    {
+        Exception? err = null;
+        var th = new System.Threading.Thread(() =>
+        {
+            try
+            {
+                SettingsWindow.Open("look");
+                SettingsWindow.CloseForTests();
+            }
+            catch (Exception e) { err = e; }
+        });
+        th.SetApartmentState(System.Threading.ApartmentState.STA);
+        th.Start();
+        th.Join(20000);
+        A.Check(err == null, "the settings window opens: " + err);
     }
 }

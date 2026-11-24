@@ -164,6 +164,7 @@ internal sealed class Loc
         SetHideInactive = "Прятать отметки, когда приложение не на переднем плане",
         SetHideCapture = "Скрывать оверлей от скриншотов и записи экрана",
         SetAutoSpeed = "Скорость «Покажи»", SetSpeedSlow = "Медленно", SetSpeedNormal = "Обычно", SetSpeedFast = "Быстро",
+        SetCursorBadge = "Метка «авто» у курсора, пока его двигает автопрохождение",
         SetAutoSpeedNote = "Как быстро автопрохождение двигает мышь и переходит к следующему шагу. Ответа программы оно ждёт всегда столько, сколько нужно.",
         SetKeysNote = "Щёлкните в поле и нажмите сочетание (с Ctrl, Alt или Win). Backspace или Delete — отключить.",
         KeyStop = "Завершить туториал", KeyNone = "нет", SetSave = "Сохранить", SetDefaults = "По умолчанию",
@@ -336,6 +337,7 @@ internal sealed class Loc
         SetHideInactive = "Hide marks while the app is not in front",
         SetHideCapture = "Hide the overlay from screenshots and screen recording",
         SetAutoSpeed = "“Show me” speed", SetSpeedSlow = "Slow", SetSpeedNormal = "Normal", SetSpeedFast = "Fast",
+        SetCursorBadge = "An “auto” tag beside the pointer while autoplay moves it",
         SetAutoSpeedNote = "How fast autoplay moves the mouse and goes on to the next step. It always waits as long as the app needs to answer.",
         SetKeysNote = "Click a field and press a chord (with Ctrl, Alt or Win). Backspace or Delete turns it off.",
         KeyStop = "Stop tutorial", KeyNone = "none", SetSave = "Save", SetDefaults = "Defaults",
@@ -416,6 +418,7 @@ internal sealed class Settings
     /// Clamped so it is never so fast that apps miss its input, nor so slow that it seems to hang.
     /// </summary>
     public float AutoplaySpeed = 1f;
+    public bool CursorBadge;           // the "auto" pill beside the pointer while the autoplay moves it: off by default
     // The autoplay's own pace only: how fast the pointer travels, how long it rests on a target before pressing, how
     // long the card is left to read between steps. What it waits for from the app is never scaled — the user's 2 s of
     // stillness, the app's time to answer a click, a target still loading — so a fast pace cannot outrun the app.
@@ -465,7 +468,7 @@ internal sealed class Settings
     {
         Lang = Lang, Accent = Accent, Hotkeys = new Dictionary<string, Chord>(Hotkeys), Animate = Animate, HideWhenInactive = HideWhenInactive,
         HideFromCapture = HideFromCapture, AutoColor = AutoColor, Port = Port, Mascot = Mascot,
-        AutoplaySpeed = AutoplaySpeed, DangerWords = DangerWords, AutoplayIntroShown = AutoplayIntroShown,
+        AutoplaySpeed = AutoplaySpeed, CursorBadge = CursorBadge, DangerWords = DangerWords, AutoplayIntroShown = AutoplayIntroShown,
     };
 
     /// <summary>Overlay the fields present in <paramref name="n"/>.</summary>
@@ -480,6 +483,7 @@ internal sealed class Settings
         if (J.Bool(n, "autoColor") is bool ac) AutoColor = ac;
         if (J.Bool(n, "mascot") is bool ms) Mascot = ms;
         if (J.Int(n, "port") is int port && port is > 0 and < 65536) Port = port;
+        if (J.Bool(n, "cursorBadge") is bool cb) CursorBadge = cb;
         if (J.Num(n, "autoplaySpeed") is double sp) AutoplaySpeed = (float)Math.Clamp(sp, AutoplaySpeedMin, AutoplaySpeedMax);
         if (J.Get(n, "dangerWords") is JsonArray dw) DangerWords = dw.Select(x => J.AsStr(x) ?? "").Where(x => x.Trim().Length > 0).ToArray();
         if (J.Bool(n, "autoplayIntroShown") is bool ai) AutoplayIntroShown = ai;
