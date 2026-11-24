@@ -56,8 +56,18 @@ internal static class DialogClose
     private static RectangleF? Find(IntPtr hwnd, Rectangle frame)
     {
         float k = Native.ScaleAt(new PointF(frame.X + frame.Width / 2f, frame.Y + frame.Height / 2f));
-        return ByHitTest(hwnd, frame, k) ?? ByUia(hwnd, frame, k) ?? ByPicture(hwnd, frame, k);
+        if (ByHitTest(hwnd, frame, k) is RectangleF hit) return hit;
+        // UI Automation names the button best, but a Chromium window's tree (Steam's friends list just after a cold
+        // start) takes seconds to walk: past a short wait the drawn "X" is looked for meanwhile, and UIA's answer is
+        // still taken when the picture shows none
+        var uia = Task.Run(() => { try { return ByUia(hwnd, frame, k); } catch (Exception e) { Log.Debug("close spot (UIA): " + e.Message); return null; } });
+        if (uia.Wait(UiaFirstMs) && uia.Result is RectangleF named) return named;
+        if (ByPicture(hwnd, frame, k) is RectangleF drawn) return drawn;
+        try { return uia.Wait(UiaMaxMs) ? uia.Result : null; }
+        catch (AggregateException) { return null; }
     }
+
+    private const int UiaFirstMs = 600, UiaMaxMs = 4000;
 
     // ---- Windows' own close box
 

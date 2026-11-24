@@ -50,6 +50,7 @@ internal static partial class Engine
         public Step? PausedOn;
         public long StartedAt, QuietFrom, Watch, ActedAt, StateAt, BetweenUntil, HeardAt, MissedAt, DialogSince, InactiveSince;
         public int Actions, StepsDone, Tries, ClosedWindows, Scrolls;
+        public Mark? TriedOn;          // the target Tries counts presses on: each target of a step gets its own
         public long MissingSince, AskedAt;  // the target out of sight since; the agent asked for help at
         public string? MissingName;
         public Step? Step;
@@ -143,6 +144,8 @@ internal static partial class Engine
         Auto.ResumeAfterStep = false;
         Auto.PausedOn = null;
         Auto.Step = null;
+        if (!resumed) Auto.StepsDone = Auto.Actions = 0;
+        Auto.TriedOn = null;
         Auto.Tries = Auto.ClosedWindows = Auto.Scrolls = 0;
         Auto.Pressing = null;
         Auto.Seen.Clear();
@@ -170,7 +173,7 @@ internal static partial class Engine
     }
 
     /// <summary>Control back to the user: the reason on the card, to the agent and in the log.</summary>
-    private static void Pause(string reason, string? arg = null, bool afterStep = false)
+    private static void Pause(string reason, string? arg = null, bool afterStep = false, [System.Runtime.CompilerServices.CallerLineNumber] int line = 0)
     {
         InputSend.ReleaseAll();
         var t = _tut;
@@ -181,7 +184,7 @@ internal static partial class Engine
         Auto.Pressing = null;
         SetAuto("paused");
         Events.Emit("autoplay_paused", new() { ["reason"] = reason, ["step"] = t?.Index, ["target"] = arg, ["afterStep"] = afterStep ? true : null });
-        Log.Info($"autoplay paused: step {(t?.Index ?? -1) + 1} {reason}{(arg != null ? $" «{arg}»" : "")}");
+        Log.Info($"autoplay paused: step {(t?.Index ?? -1) + 1} {reason}{(arg != null ? $" «{arg}»" : "")} (EngineAutoplay.cs:{line})");
     }
 
     /// <summary>The lesson stopped, ended or was replaced: the autoplay ends with it.</summary>
@@ -307,7 +310,7 @@ internal static partial class Engine
                 }
             }
             Auto.Step = s;
-            Auto.Tries = Auto.ClosedWindows = Auto.Scrolls = 0;
+            Auto.Tries = Auto.ClosedWindows = Auto.Scrolls = 0; Auto.TriedOn = null;
             Auto.HeardAt = Auto.MissedAt = 0;
             Auto.DialogSince = Auto.InactiveSince = 0;
             Auto.MissingSince = Auto.AskedAt = 0; Auto.MissingName = null;
@@ -348,7 +351,8 @@ internal static partial class Engine
     internal static bool Verify(Tutorial? t, Step s, long now)
     {
         long since = now - Auto.ActedAt;
-        if (Auto.MissedAt >= Auto.ActedAt && Auto.MissedAt > 0) { Pause("missed", Auto.ActTarget?.Label); return false; }
+        // a miss is a press beside the target; a drag or a stroke presses where it starts, not on a target
+        if (Auto.ActKind is "click" or "close" && Auto.MissedAt >= Auto.ActedAt && Auto.MissedAt > 0) { Pause("missed", Auto.ActTarget?.Label); return false; }
         bool heard = Auto.HeardAt >= Auto.ActedAt && Auto.HeardAt > 0;
         switch (Auto.ActKind)
         {
@@ -378,9 +382,9 @@ internal static partial class Engine
         }
     }
 
-    private static bool Fail(string reason, string? arg = null)
+    private static bool Fail(string reason, string? arg = null, [System.Runtime.CompilerServices.CallerLineNumber] int line = 0)
     {
-        Pause(reason, arg ?? Auto.ActTarget?.Label);
+        Pause(reason, arg ?? Auto.ActTarget?.Label, line: line);
         return false;
     }
 
@@ -420,7 +424,7 @@ internal static partial class Engine
         Auto.DialogSince = 0;
         if (plan.Kind == "wait")
         {
-            if (now - Math.Max(Auto.StateAt, Auto.ActedAt) > (plan.Times > 0 ? plan.Times : WaitConditionMs)) Pause(plan.Reason ?? "not_completed", plan.Arg);
+            if (now - Math.Max(Auto.StateAt, Auto.ActedAt) > (plan.WaitMs > 0 ? plan.WaitMs : WaitConditionMs)) Pause(plan.Reason ?? "not_completed", plan.Arg);
             return null;
         }
         // a target: on screen and standing still
@@ -454,7 +458,7 @@ internal static partial class Engine
     }
 
     /// <summary>The target is not on screen: look, then ask the agent, then hand the controls back.</summary>
-    private static void Missing(Tutorial t, Step s, Mark m, long now)
+    internal static void Missing(Tutorial t, Step s, Mark m, long now)
     {
         long from = Math.Max(Auto.StateAt, Auto.ActedAt);
         if (Auto.MissingSince < from) Auto.MissingSince = from;
@@ -570,7 +574,8 @@ internal static partial class Engine
         public string Kind;            // click | key | scroll | drag | trace | type | look | wait | pause | close | front
         public Mark? Target;
         public Condition? Cond;
-        public int Times = 1;          // clicks (count), notches (scroll), or a wait's limit in ms
+        public int Times = 1;          // clicks (count), notches (scroll)
+        public int WaitMs;             // a wait's limit (0: WaitConditionMs) — not Times, whose 1 is one click
         public string? Reason, Arg, Text, Button, Name;
         public Chord? Chord;
         public bool Up, Sideways;
@@ -606,6 +611,8 @@ internal static partial class Engine
                     var (next, wait) = NextTarget(s);
                     if (next != null) return Click(next);
                     if (wait) waiting ??= new AutoPlan("wait") { Reason = "not_completed" };
+                    // all ticked: the step completes on the next frame — wait for it, a moment, not "do it yourself"
+                    else if (s.Required.Any()) waiting ??= new AutoPlan("wait") { Reason = "not_completed", WaitMs = VerifyMs };
                     break;
                 }
                 case "count":
@@ -656,6 +663,8 @@ internal static partial class Engine
                     if (next != null) return Click(next);
                     if (wait || c.Type is "appear" or "disappear")
                         waiting ??= new AutoPlan("wait") { Reason = "not_completed" };
+                    // its targets pressed: the state it waits for comes a moment later (= then "42" on the display)
+                    else if (s.Required.Any()) waiting ??= new AutoPlan("wait") { Reason = "not_completed", WaitMs = VerifyMs };
                     break;
                 }
             }
@@ -816,12 +825,17 @@ internal static partial class Engine
     }
 
     /// <summary>An action is done: the log, the agent, and "verifying" until the step answers.</summary>
-    private static void Acted(AutoPlan p, string what)
+    internal static void Acted(AutoPlan p, string what)
     {
         lock (Sync)
         {
-            Auto.ActedAt = Environment.TickCount64;
+            long now = Environment.TickCount64;
+            // from the moment the press went down: the app's answer (the hit) often comes before this line runs, and
+            // a hit "before the action" would pass for one never heard — and be pressed again
+            Auto.ActedAt = p.Kind is "click" or "close" or "drag" or "trace" && InputSend.LastPressAt > 0 && now - InputSend.LastPressAt < 5000
+                ? InputSend.LastPressAt : now;
             Auto.Actions++;
+            if (!ReferenceEquals(p.Target, Auto.TriedOn)) { Auto.TriedOn = p.Target; Auto.Tries = 0; }
             if (p.Kind is "click" or "key" or "type") Auto.Tries++;
             var idx = _tut?.Index ?? -1;
             Log.Info($"autoplay: step {idx + 1} {what} · by autoplay");

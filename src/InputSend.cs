@@ -59,6 +59,8 @@ internal static class InputSend
 
     /// <summary>The pointer when the last press went down (physical pixels): what the log and the events say.</summary>
     public static Point LastPress;
+    /// <summary>When the last press went down (TickCount64): the app may answer it before the caller logs it.</summary>
+    public static long LastPressAt;
 
     internal static int Ms(double baseMs, int floor) => Math.Max(floor, (int)Math.Round(baseMs / Math.Clamp(Speed, 0.25f, 4f)));
 
@@ -206,6 +208,7 @@ internal static class InputSend
             Check();
             Native.GetCursorPos(out var at);
             LastPress = new Point(at.X, at.Y);
+            LastPressAt = Environment.TickCount64;
             ButtonDown(button);
             Thread.Sleep(60);
             ButtonUp(button);
@@ -259,6 +262,7 @@ internal static class InputSend
             foreach (var k in hold) { KeyDown(k); Wait(Ms(40, 20)); }
             Native.GetCursorPos(out var at);
             LastPress = new Point(at.X, at.Y);
+            LastPressAt = Environment.TickCount64;
             ButtonDown(button);
             Wait(Ms(120, 80));        // a press, then motion: apps tell a drag from a click by it
             Trace(pts);

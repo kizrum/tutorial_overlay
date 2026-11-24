@@ -464,7 +464,8 @@ internal static partial class Engine
             "agent" => "agent",
             "autoplay" => "autoplay",
             "card" or "hotkey" or "button" or "tray" => "user",
-            _ => Events.InputBy ?? RecentInputBy(),
+            // the autoplay at work on this step (a submenu that opened on its hover): its doing, input or not
+            _ => Events.InputBy ?? (Auto.State is "acting" or "verifying" ? "autoplay" : RecentInputBy()),
         };
         s.CompletedBy = by;
         Events.Emit("step_completed", new() { ["index"] = t.Index, ["id"] = s.Id, ["title"] = s.Title, ["how"] = how, ["by"] = by });

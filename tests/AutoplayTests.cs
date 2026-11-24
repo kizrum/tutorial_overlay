@@ -34,7 +34,17 @@ public static class AutoplayTests
         s.Targets[1].Dismissed = true;
         A.Eq("b", Engine.Plan(null, s).Target?.Id, "then the next one");
         s.Targets[2].Dismissed = true;
-        A.Eq("pause", Engine.Plan(null, s).Kind, "nothing left to press: not a click on an optional target");
+        var done = Engine.Plan(null, s);
+        A.Eq("wait", done.Kind, "nothing left to press: not a click on an optional target, and not 'do it yourself' either");
+        A.Eq("not_completed", done.Reason, "the step completes on the next frame; if it never does, the app did not answer");
+        A.Check(done.WaitMs >= 2000, "and it is given seconds for that, not one millisecond");
+        var gone = Engine.Plan(null, StepOf("""{"title":"t","targets":[{"id":"x","anchor":{"element":{"name":"Close"}}}],"until":[{"type":"disappear","title":"Settings"}]}"""));
+        A.Eq("click", gone.Kind, "a window to close: its close button first");
+        var w = StepOf("""{"title":"t","targets":[{"id":"x","anchor":{"element":{"name":"Close"}}}],"until":[{"type":"disappear","title":"Settings"}]}""");
+        w.Targets[0].Dismissed = true;
+        var wp = Engine.Plan(null, w);
+        A.Eq("wait", wp.Kind, "then it waits for the window to go");
+        A.Check(wp.WaitMs == 0 || wp.WaitMs >= 2000, "seconds (0: the default 30 s), never a click count taken for milliseconds");
     }
 
     public static void TestPlanRightButtonAndCount()
@@ -222,5 +232,200 @@ public static class AutoplayTests
             A.Eq(5000, Engine.ReadMs(l), "a long one gets at most 5 s");
         }
         finally { InputSend.Speed = was; }
+    }
+
+    // ---- a target it cannot find: look, ask the agent, hand back
+
+    private static void Reset(Engine.AutoRun a)
+    {
+        a.State = "off"; a.Reason = a.ReasonArg = null; a.MissingSince = a.AskedAt = 0; a.MissingName = null;
+        a.ActedAt = 0; a.StateAt = 0;
+    }
+
+    public static void TestAloneItLooksAsLongAsTheRobotThenHandsBack()
+    {
+        var s = StepOf("""{"title":"t","targets":[{"id":"a","name":"Format","anchor":{"element":{"name":"Format"}}}]}""");
+        var t = new Tutorial { Owner = null };
+        var a = Engine.Auto;
+        try
+        {
+            Reset(a); a.State = "acting"; a.StateAt = 1000;
+            Engine.Missing(t, s, s.Targets[0], 1000 + 9000);
+            A.Eq("acting", a.State, "9 s: still looking (the robot waits 20 s for a step)");
+            A.Eq(0L, a.AskedAt, "no agent: nobody to ask");
+            Engine.Missing(t, s, s.Targets[0], 1000 + 19000);
+            A.Eq("acting", a.State, "19 s: still looking");
+            Engine.Missing(t, s, s.Targets[0], 1000 + 21000);
+            A.Eq("paused", a.State, "past 20 s: the controls go back");
+            A.Eq("target_missing", a.Reason, "saying it could not find it");
+            A.Eq("Format", a.ReasonArg, "naming what");
+        }
+        finally { Reset(a); }
+    }
+
+    public static void TestWithAnAgentItAsksAndWaitsForTheAnswer()
+    {
+        var s = StepOf("""{"title":"t","targets":[{"id":"a","name":"Format","anchor":{"element":{"name":"Format"}}}]}""");
+        const string session = "autoplay-test-session";
+        A.Check(McpServer.Lease.TryUse(session, out _), "the test holds the server like an agent");
+        var t = new Tutorial { Owner = session };
+        var a = Engine.Auto;
+        long ticksWas = System.Threading.Interlocked.Read(ref McpServer.LastRequestTicks);
+        try
+        {
+            System.Threading.Interlocked.Exchange(ref McpServer.LastRequestTicks, 0);
+            Reset(a); a.State = "acting"; a.StateAt = 1000;
+            Engine.Missing(t, s, s.Targets[0], 1000 + 5000);
+            A.Eq(0L, a.AskedAt, "5 s: it only looks (a menu fading in, a slow app)");
+            long seq = Events.LastSeq;
+            Engine.Missing(t, s, s.Targets[0], 1000 + 8500);
+            A.Eq(1000L + 8500, a.AskedAt, "past 8 s: it asks the agent");
+            var help = Events.Since(seq, 50).LastOrDefault(e => J.Str(e, "event") == "help");
+            A.Check(help != null, "a help event");
+            A.Eq("autoplay", J.Str(help, "source"), "from the autoplay, not the user");
+            A.Eq("cant_find", J.Str(help, "reason"), "it cannot find the target");
+            Engine.Missing(t, s, s.Targets[0], 1000 + 8500 + 15000);
+            A.Eq("acting", a.State, "the agent has 20 s to answer");
+            A.Eq(1000L + 8500, a.AskedAt, "asked once, not again and again");
+            Engine.Missing(t, s, s.Targets[0], 1000 + 8500 + 21000);
+            A.Eq("paused", a.State, "no answer in 20 s: the controls go back");
+            A.Eq("target_missing_asked", a.Reason, "saying the assistant was asked and did not help");
+
+            // the agent at work (a call a moment ago): it is given the time again, up to a minute
+            Reset(a); a.State = "acting"; a.StateAt = 1000;
+            Engine.Missing(t, s, s.Targets[0], 1000 + 8500);
+            System.Threading.Interlocked.Exchange(ref McpServer.LastRequestTicks, DateTime.UtcNow.Ticks);
+            Engine.Missing(t, s, s.Targets[0], 1000 + 8500 + 25000);
+            A.Eq("acting", a.State, "the agent called a moment ago: still waiting for its answer");
+            Engine.Missing(t, s, s.Targets[0], 1000 + 8500 + 61000);
+            A.Eq("paused", a.State, "but not beyond a minute");
+        }
+        finally
+        {
+            Reset(a);
+            System.Threading.Interlocked.Exchange(ref McpServer.LastRequestTicks, ticksWas);
+            McpServer.Lease.Release(session, "test");
+        }
+    }
+
+    public static void TestFoundAgainItCarriesOn()
+    {
+        var a = Engine.Auto;
+        try
+        {
+            var s = StepOf("""{"title":"t","targets":[{"id":"a","name":"Format","anchor":{"element":{"name":"Format"}}}]}""");
+            var t = new Tutorial { Owner = null };
+            Reset(a); a.State = "acting"; a.StateAt = 1000;
+            Engine.Missing(t, s, s.Targets[0], 1000 + 15000);
+            A.Eq(1000L, a.MissingSince, "out of sight since the step began");
+            a.ActedAt = 1000 + 16000;           // something happened meanwhile (an action): the clock starts again
+            Engine.Missing(t, s, s.Targets[0], 1000 + 30000);
+            A.Eq("acting", a.State, "14 s since the last action: still looking");
+        }
+        finally { Reset(a); }
+    }
+
+    // ---- the hotkey
+
+    public static void TestTheHotkeyStopsEvenThoughItsOwnKeysPausedFirst()
+    {
+        var a = Engine.Auto;
+        try
+        {
+            Reset(a);
+            a.State = "paused"; a.Reason = "user_took_over"; a.StateAt = Environment.TickCount64;
+            Engine.AutoplayCommand("toggle", "user");
+            A.Eq("off", a.State, "Ctrl+Alt+P while it runs: the keys paused it a moment ago, the hotkey stops it");
+        }
+        finally { Reset(a); }
+    }
+
+    // ---- the tray's speed
+
+    public static void TestSpeedIsKeptInTheSafeRange()
+    {
+        A.Eq(1.6f, new Settings().Apply(A.Json("""{"autoplaySpeed":5}""")).AutoplaySpeed, "too fast for apps and eyes: capped");
+        A.Eq(0.6f, new Settings().Apply(A.Json("""{"autoplaySpeed":0.1}""")).AutoplaySpeed, "too slow, it would seem stuck: raised");
+        A.Eq(1f, new Settings().AutoplaySpeed, "normal by default");
+        A.Check(Settings.AutoplaySpeeds.All(v => v >= Settings.AutoplaySpeedMin && v <= Settings.AutoplaySpeedMax), "every choice in the window is safe");
+        var was = InputSend.Speed;
+        try
+        {
+            var l = StepOf("{\"title\":\"Long\",\"text\":\"" + new string('a', 400) + "\"}");
+            InputSend.Speed = Settings.AutoplaySpeedMin;
+            A.Check(Engine.ReadMs(l) <= 6000, "slow: the card waits at most 6 s, never 'is it stuck?'");
+            A.Check(InputSend.MoveMs(5000) <= 2100, "slow: a long move about 2 s");
+            InputSend.Speed = Settings.AutoplaySpeedMax;
+            A.Check(InputSend.MoveMs(10) >= 200, "fast: a move the eye still follows");
+            A.Check(InputSend.Ms(300, 120) >= 180, "fast: the rest before a press keeps hover effects");
+            A.Check(Engine.ReadMs(StepOf("""{"title":"S","text":"x"}""")) >= 600, "fast: the card still shows a moment");
+        }
+        finally { InputSend.Speed = was; }
+    }
+
+    // ---- a checklist: each target its own tries; the app's answer before the log line still counts
+
+    public static void TestEachTargetOfAStepGetsItsOwnTries()
+    {
+        var s = StepOf("""{"title":"t","targets":[{"id":"a","name":"Line","anchor":{"element":{"name":"Line"}}},{"id":"b","name":"Curve","anchor":{"element":{"name":"Curve"}}}]}""");
+        var a = Engine.Auto;
+        long pressWas = InputSend.LastPressAt;
+        try
+        {
+            Reset(a); a.State = "acting"; a.Tries = 0; a.TriedOn = null;
+            Engine.Acted(new Engine.AutoPlan("click") { Target = s.Targets[0] }, "test");
+            Engine.Acted(new Engine.AutoPlan("click") { Target = s.Targets[0] }, "test");
+            A.Eq(2, a.Tries, "two presses on Line");
+            Engine.Acted(new Engine.AutoPlan("click") { Target = s.Targets[1] }, "test");
+            A.Eq(1, a.Tries, "Curve starts with its own count: Line's retry is not taken from it");
+        }
+        finally { Reset(a); a.Tries = 0; a.TriedOn = null; InputSend.LastPressAt = pressWas; }
+    }
+
+    public static void TestAHitBeforeTheLogLineIsHeard()
+    {
+        var s = StepOf("""{"title":"t","targets":[{"id":"a","name":"Curve","anchor":{"element":{"name":"Curve"}}},{"id":"b","name":"Oval","anchor":{"element":{"name":"Oval"}}}]}""");
+        var a = Engine.Auto;
+        long pressWas = InputSend.LastPressAt;
+        try
+        {
+            Reset(a); a.State = "acting"; a.Tries = 0; a.TriedOn = null; a.MissedAt = 0;
+            long press = Environment.TickCount64 - 80;
+            InputSend.LastPressAt = press;
+            a.HeardAt = press + 10;              // the hit arrived 70 ms before Acted ran
+            s.Targets[0].Dismissed = true;
+            Engine.Acted(new Engine.AutoPlan("click") { Target = s.Targets[0] }, "test");
+            a.ActTarget = s.Targets[0]; a.ActKind = "click";
+            A.Eq(press, a.ActedAt, "the action counts from the press going down");
+            A.Check(Engine.Verify(null, s, press + 300), "heard and ticked: on to the next target at once");
+            A.Eq("verifying", a.State, "not paused");
+        }
+        finally { Reset(a); a.Tries = 0; a.TriedOn = null; a.HeardAt = 0; InputSend.LastPressAt = pressWas; }
+    }
+
+    public static void TestPressedTargetsThenTheStateComesAMomentLater()
+    {
+        var s = StepOf("""{"title":"=","targets":[{"id":"eq","name":"Equals","anchor":{"element":{"name":"Equals"}}}],"until":[{"type":"uia","anchor":{"element":{"name":"Display is 42"}},"property":"exists"}]}""");
+        A.Eq("click", Engine.Plan(null, s).Kind, "first the button");
+        s.Targets[0].Dismissed = true;
+        var p = Engine.Plan(null, s);
+        A.Eq("wait", p.Kind, "pressed: the display answers a moment later — wait, not 'do it yourself'");
+        A.Check(p.WaitMs >= 2000 && p.WaitMs <= 10000, "a short wait, but long enough: the app's time to answer");
+    }
+
+    public static void TestAStrokePressingOffTheTargetIsNotAMiss()
+    {
+        var s = StepOf("""{"title":"t","targets":[{"id":"a","anchor":{"element":{"name":"Canvas"}}}],"until":[{"type":"trace","path":[[0,0],[100,0]]}]}""");
+        var a = Engine.Auto;
+        try
+        {
+            Reset(a); a.State = "verifying"; a.ActKind = "trace"; a.ActedAt = 1000; a.MissedAt = 1001;
+            Engine.Verify(null, s, 1200);
+            A.Eq("verifying", a.State, "a stroke presses where it starts: the overlay's 'miss' there does not stop it");
+            a.ActKind = "click";
+            Engine.Verify(null, s, 1200);
+            A.Eq("paused", a.State, "a click beside its target does");
+        }
+        finally { Reset(a); a.MissedAt = 0; }
     }
 }
