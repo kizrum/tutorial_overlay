@@ -279,6 +279,8 @@ internal static class Program
         var card = new CardWindow();
         var mascot = new MascotWindow();
         _ = mascot.Handle;
+        var badge = new CursorBadge();
+        _ = badge.Handle;
         _mascot = mascot;
         var buttons = new ButtonHost();
         _ = overlay.Handle;
@@ -335,6 +337,7 @@ internal static class Program
                 card.UpdateModel(frame.Card);
                 long t3 = System.Diagnostics.Stopwatch.GetTimestamp();
                 mascot.Update(frame.Mascot);
+                badge.Update(Engine.Auto.Running);
                 perf.Add(t0, t1, t2, t3, System.Diagnostics.Stopwatch.GetTimestamp(), frame.Changed, Engine.MarkCount);
                 // the canvas goes on top (it appeared, or its once-a-second re-raise) in one batch with our other
                 // windows above it: the marks never cover the card, the buttons or the mascot, not even for a moment
@@ -344,6 +347,7 @@ internal static class Program
                     foreach (var h in buttons.Handles) order.Add((h, 0));
                     order.Add((mascot.Handle, 0));
                     order.Add((card.Handle, 0));
+                    order.Add((badge.Handle, 0));
                     Native.RaiseTogether(order);
                 }
             }

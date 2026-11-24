@@ -287,6 +287,7 @@ internal static partial class Engine
         // someone else's hands since it began: control goes back to them, nothing more is pressed
         if (InputHook.ForeignInputAt > Auto.Watch)
         {
+            Log.Info($"autoplay: input by {InputHook.Name(InputHook.ForeignInputBy)} {now - InputHook.ForeignInputAt} ms ago");
             Pause(Auto.State == "acting" ? "user_took_over" : "user_active");
             return null;
         }

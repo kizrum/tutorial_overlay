@@ -177,8 +177,10 @@ public static class AutoplayTests
         A.Eq(0L, InputHook.ForeignInputAt, "2 px: the desk was knocked");
         InputHook.NoteForeignMove(InputSource.Autoplay, 900, 900, t0 + 30);
         A.Eq(0L, InputHook.ForeignInputAt, "the autoplay's own moves are not someone else's");
-        InputHook.NoteForeignMove(InputSource.User, 512, 500, t0 + 40);
-        A.Eq(t0 + 40, InputHook.ForeignInputAt, "10 px: a hand on the mouse");
+        InputHook.NoteForeignMove(InputSource.User, 902, 901, t0 + 40);
+        A.Eq(0L, InputHook.ForeignInputAt, "a hand resting on the mouse trembles around where the autoplay put the pointer: not a move");
+        InputHook.NoteForeignMove(InputSource.User, 912, 900, t0 + 50);
+        A.Eq(t0 + 50, InputHook.ForeignInputAt, "10 px: a hand on the mouse");
         A.Eq(InputSource.User, InputHook.ForeignInputBy, "the user's");
         InputHook.NoteForeignAt(0);
     }

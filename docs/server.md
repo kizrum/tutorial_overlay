@@ -176,7 +176,7 @@ between Russian buttons. `"none"`
 turns a hotkey off. The hint line at the bottom of the card is built from the hotkeys in effect.
 
 Default hotkeys (active while the card is shown): **Ctrl+Alt+→** done, **←** back, **↓** skip, **Z** undo a hit,
-**X** stop, **H** help, **P** "Show me" (autoplay; again — stop). `mascot` (default `true`) turns the mascot off for
+**X** stop, **H** help, **P** "Do this step" (autoplay; again — stop). `mascot` (default `true`) turns the mascot off for
 every lesson; a spec can do the same for its own.
 
 `autoplaySpeed` (the "Look" tab: Slow 0.6, Normal 1, Fast 1.6; kept within 0.6–1.6) is the autoplay's own pace only:

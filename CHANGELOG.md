@@ -6,7 +6,7 @@ only fixes things.
 
 ## [Unreleased]
 
-- Autoplay: "Show me" and "To the end" on the card (Ctrl+Alt+P), or the agent's new `autoplay` tool at the user's
+- Autoplay: "Do this step" and "Do them all" on the card (Ctrl+Alt+P), or the agent's new `autoplay` tool at the user's
   request — the overlay does the steps itself with the real pointer, by the same targets and conditions the user
   sees. The user always wins: their own mouse or keys give the controls back at once (held buttons and keys
   released), and the card says why. A target it cannot find is looked for 8 s, then the agent is asked (`help`,
@@ -18,6 +18,8 @@ only fixes things.
   the user presses, then "Continue automatically". `validate` warns about such a target left unmarked.
 - Who did it: events caused by input carry `by` (`user`, `autoplay`, `agent`, `app`, `other`), the log says it for
   every completed step, and `status` gives `tutorial.completedBy` and `autoplay`.
+- While autoplay works, the card's header shows a blue "AUTO" pill with a breathing dot, the progress strip is blue,
+  and a small blue "auto" pill rides beside the pointer it moves.
 - The mascot wears a blue pilot's cap while autoplay has the controls, pulls its goggles down while it moves the
   pointer, and throws its hands up as it hands the controls back.
 

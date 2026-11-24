@@ -142,6 +142,7 @@ internal static class InputSend
         int ax = (int)Math.Round((x - vx) * 65535.0 / Math.Max(1, vw - 1));
         int ay = (int)Math.Round((y - vy) * 65535.0 / Math.Max(1, vh - 1));
         Send(M(MOVE | ABSOLUTE | VIRTUALDESK, 0, ax, ay));
+        CursorBadge.Follow(x, y);     // the "auto" pill keeps up with the pointer, step by step
     }
 
     /// <summary>How long a move takes: about 900 px/s at speed 1, eased, never shorter than a person could follow.</summary>

@@ -106,7 +106,7 @@ internal static class Tools
             Obj(("index", T("integer", "0-based")), ("id", T("string", "step id")), ("relative", T("string", "'next'|'back'")))),
         Tool("complete_step", "Complete the current step as if Done was pressed.",
             Obj(("expectIndex", T("integer", "only if still this step")), ("immediate", T("boolean", "skip the ✓ pause")))),
-        Tool("autoplay", "Do the lesson's steps for the user while they watch (the card's \"Show me\") — ONLY when the user asks you to. " +
+        Tool("autoplay", "Do the lesson's steps for the user while they watch (the card's \"Do this step\" / \"Do them all\") — ONLY when the user asks you to. " +
             "It moves the real pointer and presses what the marks frame; the user's own hand on the mouse takes control back at once. " +
             "It never presses what cannot be undone (pay, order, delete for good: mark such targets danger:true), and stops when it cannot go on — " +
             "autoplay_paused says why. Returns its state.",

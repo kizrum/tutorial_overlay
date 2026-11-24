@@ -21,7 +21,7 @@ What `start_tutorial` takes. Only `steps` is required.
 | `hideWhenInactive` | hide the marks while the app is not in front (default `true`) |
 | `accent`, `autoColor`, `animate`, `hotkeys`, `hideFromCapture` | the [settings](server.md#settings), for this lesson only |
 | `replace` | take over a lesson another agent runs (after asking the user); that agent gets `tutorial_stopped`, reason `replaced` |
-| `autoplay` | `false`: a lesson for practice — no "Show me", the steps are the user's to do (see [Autoplay](#autoplay-show-me)) |
+| `autoplay` | `false`: a lesson for practice — no "Do this step" / "Do them all", the steps are the user's to do (see [Autoplay](#autoplay-do-this-step)) |
 | `name` | instead of a spec: replay a saved lesson from the library (with `startAt`) |
 
 A saved lesson also carries `scale` (see [Display scale](#end-of-a-tutorial-and-the-library)) and `templates` (the
@@ -368,10 +368,10 @@ window the app opens by itself that covers nothing the step needs is left alone.
 and `prepare_done`; `status` gives the window as `step.dialog` (`close` is the close button). While a screenshot tool (Snipping Tool, ShareX and the like) is open,
 the tutorial still treats the program's window that was in front before it as active.
 
-## Autoplay ("Show me")
+## Autoplay ("Do this step")
 
-The card has **"Show me"** (this step) and **"To the end"** (hotkey **Ctrl+Alt+P**): the overlay does the steps
-itself while the user watches — it moves the real pointer along the way a person would, presses what the marks frame,
+The card has **"Do this step"** and **"Do them all"** (the rest of the lesson; hotkey **Ctrl+Alt+P** for one step):
+the overlay does the steps itself while the user watches — it moves the real pointer along the way a person would, presses what the marks frame,
 types, scrolls and drags. The agent can start it with the `autoplay` tool, only when the user asks. The first time,
 the card says the mouse will move by itself and waits for "Got it, start".
 
@@ -401,6 +401,10 @@ the card says the mouse will move by itself and waits for "Got it, start".
 - **Who did it** is in the log and on the events: `step_completed`, `hit`, `miss` and others carry `by` — `user`,
   `autoplay`, `agent` (complete_step) or `app`/`other` (input from another program) — and `tutorial.completedBy` in
   `status` lists it per step.
+- **It is plain to see that it works:** the card's header starts with a blue "AUTO" pill with a breathing dot (the
+  progress strip turns blue too), a small blue "auto" pill rides beside the pointer while autoplay moves it, and the
+  card says what it does ("Showing step 2 of 4 · move the mouse and I stop") with a Stop button. Blue always means
+  "not you acting".
 - **The mascot** puts on a blue pilot's cap while autoplay has the controls and pulls its goggles down while it moves
   the pointer; handing the controls back it throws its hands up and the cap comes off.
 

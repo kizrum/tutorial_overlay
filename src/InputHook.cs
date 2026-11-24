@@ -95,7 +95,10 @@ internal static class InputHook
     /// <summary>A mouse move by someone else: it counts once it has gone further than a jolt within a moment.</summary>
     internal static void NoteForeignMove(InputSource src, int x, int y, long now)
     {
-        if (src is InputSource.Autoplay or InputSource.Probe) return;
+        if (src is InputSource.Probe) return;
+        // the autoplay moved the pointer: a hand resting on the mouse now jitters around the new spot, not the old one
+        // (else its next tremor, read against where the pointer was, looks like a big move and takes the controls)
+        if (src == InputSource.Autoplay) { _jitterX = x; _jitterY = y; _jitterAt = now; return; }
         if (now - _jitterAt > JitterWindowMs) { _jitterX = x; _jitterY = y; _jitterAt = now; return; }
         _jitterAt = now;
         int dx = x - _jitterX, dy = y - _jitterY;

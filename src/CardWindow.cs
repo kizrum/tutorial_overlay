@@ -572,7 +572,7 @@ internal sealed class CardWindow : NoActivateForm
     }
 
     /// <summary>Waiting for the next steps or for an answer to "help": show motion, not a frozen card.</summary>
-    private static bool Busy(CardModel m) => m.State == "waiting" || (m.HelpPending && m.Hint == null) || m.Checking;
+    private static bool Busy(CardModel m) => m.State == "waiting" || (m.HelpPending && m.Hint == null) || m.Checking || AutoRunning(m);
 
     /// <summary>
     /// One message: the agent's hint, else "checking / sent", else why targets are hidden. A problem that blocks the
@@ -654,6 +654,27 @@ internal sealed class CardWindow : NoActivateForm
         string b = _chatOpen || waiting || outro || m.Total == 0 ? "" : string.Format(loc.HeadOf, m.Total);
         var fa = HeadFont(true);
         var fb = HeadFont(false);
+        // the autoplay has the controls: a blue "AUTO" pill with a breathing dot leads the header (blue: not you acting)
+        bool auto = AutoRunning(m) && !_chatOpen;
+        if (auto)
+        {
+            var pf = Theme.Font(11 * s, true);
+            string pt = loc.HeadAuto;
+            float pw = Theme.Measure(pt, pf, 200 * s).Width + 26 * s, ph = 20 * s;
+            var pill = new RectangleF(r.X, cy - ph / 2, pw, ph);
+            using (var pp = Theme.Rounded(pill, ph / 2))
+            {
+                using (var bg = new SolidBrush(Palette.WithAlpha(Palette.Machine, 0.18f))) g.FillPath(bg, pp);
+                using var rim = new Pen(Palette.Machine, 1.3f * s);
+                g.DrawPath(rim, pp);
+            }
+            float breath = 0.55f + 0.45f * MathF.Sin(Environment.TickCount64 % 1400 / 1400f * MathF.Tau);
+            using (var dot = new SolidBrush(Palette.WithAlpha(Palette.Machine, breath)))
+                g.FillEllipse(dot, pill.X + 8 * s, cy - 3.5f * s, 7 * s, 7 * s);
+            using (var tb = new SolidBrush(Palette.Machine)) g.DrawString(pt, pf, tb, pill.X + 19 * s, cy - pf.Height / 2f);
+            r = new RectangleF(pill.Right + 8 * s, r.Y, r.Right - pill.Right - 8 * s, r.Height);
+            a = a.ToLowerInvariant();
+        }
         float aw = Theme.Measure(a, fa, 300 * s).Width;
         using (var br = new SolidBrush(outro ? Palette.Success : Palette.Text)) g.DrawString(a, fa, br, r.X, cy - fa.Height / 2f);
         float tx = r.X + aw;
@@ -705,7 +726,8 @@ internal sealed class CardWindow : NoActivateForm
             for (int i = 0; i < m.Total; i++)
             {
                 var seg = new RectangleF(x + i * (segW + gap), cy - h / 2, segW, h);
-                Color c = i < passed ? Palette.Accent : i == now ? Palette.WithAlpha(Palette.Accent, 0.5f) : Palette.Line;
+                var accent = auto ? Palette.Machine : Palette.Accent;
+                Color c = i < passed ? accent : i == now ? Palette.WithAlpha(accent, 0.5f) : Palette.Line;
                 using var path = Theme.Rounded(seg, 1 * s);
                 using var br = new SolidBrush(c);
                 g.FillPath(br, path);
@@ -721,9 +743,11 @@ internal sealed class CardWindow : NoActivateForm
             float fw = bw * passed / m.Total;
             if (fw > 0.5f)
                 using (var path = Theme.Rounded(new RectangleF(track.X, track.Y, fw, h), 1 * s))
-                using (var br = new SolidBrush(Palette.Accent)) g.FillPath(br, path);
+                using (var br = new SolidBrush(auto ? Palette.Machine : Palette.Accent)) g.FillPath(br, path);
         }
     }
+
+    private static bool AutoRunning(CardModel m) => m.AutoState is "starting" or "acting" or "verifying" or "between";
 
     /// <summary>The folded "why": a bulb, the label, the start of the text (while folded), a chevron.</summary>
     private void DrawWhyRow(Graphics g, RectangleF r)
