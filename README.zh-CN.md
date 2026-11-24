@@ -1,6 +1,6 @@
 <img alt="TutorialOverlay —— 直接画在任何 Windows 程序上的课程" src="docs/media/logo.webp" width="100%">
 
-<a href="README.md">English</a> · <a href="README.ru.md">Русский</a> · <a href="README.es.md">Español</a> · <a href="README.de.md">Deutsch</a> · <b>简体中文</b>
+<a href="README.md">English</a> · <a href="README.ru.md">Русский</a> · <a href="README.es.md">Español</a> · <a href="README.de.md">Deutsch</a> · <a href="README.fr.md">Français</a> · <a href="README.pt-BR.md">Português</a> · <b>简体中文</b> · <a href="README.ja.md">日本語</a>
 
 [![kizrum/tutorial_overlay MCP server](https://glama.ai/mcp/servers/kizrum/tutorial_overlay/badges/score.svg)](https://glama.ai/mcp/servers/kizrum/tutorial_overlay)
 
