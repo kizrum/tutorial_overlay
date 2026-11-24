@@ -6,6 +6,8 @@ only fixes things.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-24
+
 - Autoplay: "Do this step" and "Do them all" on the card (Ctrl+Alt+P), or the agent's new `autoplay` tool at the user's
   request — the overlay does the steps itself with the real pointer, by the same targets and conditions the user
   sees. The user always wins: their own mouse or keys give the controls back at once (held buttons and keys
@@ -399,7 +401,8 @@ The first public release.
 - The tutorial library: saved tutorials run again from the tray menu, without the agent.
 - A self-contained single-file exe: no .NET install needed to run it.
 
-[Unreleased]: https://github.com/kizrum/tutorial_overlay/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/kizrum/tutorial_overlay/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/kizrum/tutorial_overlay/releases/tag/v0.7.0
 [0.6.0]: https://github.com/kizrum/tutorial_overlay/releases/tag/v0.6.0
 [0.5.0]: https://github.com/kizrum/tutorial_overlay/releases/tag/v0.5.0
 [0.4.0]: https://github.com/kizrum/tutorial_overlay/releases/tag/v0.4.0
