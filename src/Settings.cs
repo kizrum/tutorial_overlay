@@ -389,6 +389,7 @@ internal sealed class Loc
         // a few accents settle what the short words leave open
         if (text.IndexOfAny(new[] { 'ñ', '¿', '¡' }) >= 0 && best is "en" or "pt") best = "es";
         if (text.IndexOfAny(new[] { 'ß', 'ä', 'ö', 'ü' }) >= 0 && best == "en") best = "de";
+        if (text.IndexOfAny(new[] { 'ã', 'õ' }) >= 0 && best is "en" or "es") best = "pt";
         return best;
     }
 }

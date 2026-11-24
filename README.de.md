@@ -60,8 +60,8 @@ Maus: Es bewegt den echten Mauszeiger und klickt, was eingerahmt ist, während S
 Ihnen. Was sich nicht rückgängig machen lässt – bezahlen, bestellen, endgültig löschen, senden –, drückt es nie:
 Diese Schaltfläche ist rot mit einem Schloss, und drücken müssen Sie sie selbst.
 
-Karte, Infobereich und Einstellungen sprechen Deutsch, Englisch, Russisch, Spanisch und Chinesisch; eine eigene
-Sprache lässt sich hinzufügen ([wie](docs/server.md)).
+Karte, Infobereich und Einstellungen sprechen Deutsch, Englisch, Russisch, Spanisch, Französisch, Portugiesisch,
+Chinesisch und Japanisch; eine eigene Sprache lässt sich hinzufügen ([wie](docs/server.md)).
 
 Das vollständige Format einer Lektion steht in [`docs/tutorials.md`](docs/tutorials.md) (auf Englisch).
 

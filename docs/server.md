@@ -177,7 +177,7 @@ it gets the card in the language its steps are written in (told by the script, t
 Spanish steps never sit between English buttons. Chinese, Japanese and Korean are drawn in Windows' own UI font for
 them (Microsoft YaHei UI and the like): Segoe UI has no such characters.
 
-Built in: English, Русский, Español, Deutsch, 简体中文. Each is a file in `src/lang/<code>.json`. To add a language
+Built in: English, Русский, Español, Deutsch, Français, Português (Brasil), 简体中文, 日本語. Each is a file in `src/lang/<code>.json`. To add a language
 or change words, put a file of the same shape in `%LOCALAPPDATA%\TutorialOverlay\lang\<code>.json` ("Your own
 translation…" on the "Look" tab opens the folder and puts English there as `_example.en.json` to start from). A key
 the file lacks shows in English; `{0}`, `{1}` are values put in and must stay. The file is read at the next start.

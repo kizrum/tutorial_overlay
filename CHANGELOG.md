@@ -7,13 +7,14 @@ only fixes things.
 ## [Unreleased]
 
 - Languages: the overlay's own words (the card, the hints, the tray, the settings) live in language files instead of
-  the code, and there are five: English, Русский, Español, Deutsch, 简体中文. The settings list them by their own
+  the code, and there are eight: English, Русский, Español, Deutsch, Français, Português (Brasil), 简体中文, 日本語.
+  The settings list them by their own
   names; the default is the language of Windows. One's own translation goes into `%LOCALAPPDATA%\TutorialOverlay\lang\`
   ("Your own translation…" opens the folder). A spec's `lang` takes any language code; without it the card's language
   is told from the steps' text (Chinese, Japanese, Korean, Russian by the script; Spanish, German, French, Portuguese
   by common words). Chinese, Japanese and Korean are drawn in Windows' own UI font for them instead of characters
-  borrowed into Segoe UI. What cannot be undone is recognised in Spanish, German and Chinese too ("Comprar ahora",
-  "Zahlungspflichtig bestellen", "立即支付"), and a window's close button by its name in these languages.
+  borrowed into Segoe UI. What cannot be undone is recognised in each of them ("Comprar ahora",
+  "Zahlungspflichtig bestellen", "Passer la commande", "Finalizar pedido", "立即支付", "注文を確定"), and a window's close button by its name in these languages.
 - Fixed: the autoplay's pause on a danger read "This step is it cannot be undone"; it is "This step: …" now.
 
 ## [0.7.0] - 2026-11-24

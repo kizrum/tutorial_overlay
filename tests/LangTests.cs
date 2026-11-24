@@ -51,7 +51,7 @@ public static class LangTests
     {
         var en = Strings(File_("en")).ToDictionary(x => x.key, x => x.text);
         var codes = Directory.GetFiles(LangDir, "*.json").Select(f => Path.GetFileNameWithoutExtension(f)).ToList();
-        foreach (var c in new[] { "en", "ru", "es", "de", "zh-Hans" }) A.Check(codes.Contains(c), $"{c}.json is built in");
+        foreach (var c in new[] { "en", "ru", "es", "de", "zh-Hans", "fr", "pt-BR", "ja" }) A.Check(codes.Contains(c), $"{c}.json is built in");
         foreach (var code in codes.Where(c => c != "en"))
         {
             var o = File_(code);
@@ -96,6 +96,10 @@ public static class LangTests
         A.Eq("zh-Hans", Loc.Resolve("zh-CN"), "zh-CN → simplified");
         A.Eq("zh-Hans", Loc.Resolve("zh"), "zh → simplified");
         A.Eq("ru", Loc.Resolve("RU"), "any case");
+        A.Eq("pt-BR", Loc.Resolve("pt"), "pt → Brazilian Portuguese");
+        A.Eq("pt-BR", Loc.Resolve("pt-PT"), "European Portuguese → the Portuguese there is");
+        A.Eq("fr", Loc.Resolve("fr-CA"), "Canadian French → French");
+        A.Eq("ja", Loc.Resolve("ja-JP"), "ja-JP → Japanese");
         A.Eq("en", Loc.Resolve("xx-YY"), "no words for it: English");
         A.Eq("en", Loc.Resolve(null), "none given: English");
         A.Eq("en", Loc.For("xx").Code, "For falls back the same way");
@@ -114,6 +118,9 @@ public static class LangTests
         A.Eq("de", Loc.LangOf(Spec("Öffnen Sie das Menü Ansicht", "Klicken Sie auf Zeilenumbruch, damit die Zeilen in das Fenster passen")), "German");
         A.Eq("zh-Hans", Loc.LangOf(Spec("打开“视图”菜单", "点击“自动换行”，长行就会在窗口边缘换行")), "Chinese");
         A.Eq("zh-Hans", Loc.LangOf(Spec("点击 File 菜单", "选择 Save As 保存文件")), "Chinese naming Latin items");
+        A.Eq("fr", Loc.LangOf(Spec("Ouvrez le menu Affichage", "Cliquez sur Retour automatique à la ligne pour que les lignes tiennent dans la fenêtre")), "French");
+        A.Eq("pt-BR", Loc.Resolve(Loc.LangOf(Spec("Abra o menu Exibir", "Clique em Quebra automática de linha para que as linhas caibam na janela"))), "Portuguese");
+        A.Eq("ja", Loc.LangOf(Spec("「表示」メニューを開きます", "「右端で折り返す」をクリックすると、長い行がウィンドウに収まります")), "Japanese");
         A.Eq("en", Loc.LangOf(Spec("Open the View menu", "Click Word wrap so long lines fit the window")), "English stays English");
     }
 
@@ -130,7 +137,7 @@ public static class LangTests
         A.Eq("Microsoft YaHei UI", Theme.OwnFont("zh-Hans"), "the lesson's language decides before the settings'");
     }
 
-    /// <summary>What cannot be undone is known in Spanish, German and Chinese too, whatever language the overlay speaks.</summary>
+    /// <summary>What cannot be undone is known in every built-in language, whatever language the overlay speaks.</summary>
     public static void TestDangerInOtherLanguages()
     {
         A.Eq("payment", Danger.Of("Comprar ahora")?.Kind, "Spanish: buy now");
@@ -143,6 +150,16 @@ public static class LangTests
         A.Check(Danger.Of("Añadir al carrito") == null, "Spanish: add to cart is not");
         A.Check(Danger.Of("In den Warenkorb") == null, "German: into the cart is not");
         A.Check(Danger.Of("加入购物车") == null, "Chinese: add to cart is not");
+        A.Eq("payment", Danger.Of("Passer la commande")?.Kind, "French: place the order");
+        A.Eq("payment", Danger.Of("Finalizar pedido")?.Kind, "Portuguese: place the order");
+        A.Eq("payment", Danger.Of("注文を確定する")?.Kind, "Japanese: confirm the order");
+        A.Eq("irreversible", Danger.Of("Supprimer définitivement")?.Kind, "French: delete for good");
+        A.Eq("irreversible", Danger.Of("Excluir permanentemente")?.Kind, "Portuguese: delete for good");
+        A.Eq("irreversible", Danger.Of("ごみ箱を空にする")?.Kind, "Japanese: empty the bin");
+        A.Eq("send", Danger.Of("送信")?.Kind, "Japanese: send");
+        A.Check(Danger.Of("Ajouter au panier") == null, "French: add to cart is not");
+        A.Check(Danger.Of("Adicionar ao carrinho") == null, "Portuguese: add to cart is not");
+        A.Check(Danger.Of("カートに入れる") == null, "Japanese: into the cart is not");
         A.Check(Danger.Of("支付宝设置") != null, "Chinese has no spaces: the word inside a longer name counts");
     }
 

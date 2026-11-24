@@ -59,8 +59,8 @@ tarjeta indica que está trabajando. Toca el ratón y el control vuelve a ser tu
 deshacer (pagar, pedir, borrar para siempre, enviar) nunca lo pulsa: ese botón aparece en rojo con un candado y lo
 pulsas tú.
 
-La tarjeta, la bandeja y los ajustes hablan español, inglés, ruso, alemán y chino; puedes añadir tu propio idioma
-([cómo](docs/server.md)).
+La tarjeta, la bandeja y los ajustes hablan español, inglés, ruso, alemán, francés, portugués, chino y japonés; puedes
+añadir tu propio idioma ([cómo](docs/server.md)).
 
 El formato completo de una lección está en [`docs/tutorials.md`](docs/tutorials.md) (en inglés).
 

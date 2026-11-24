@@ -55,8 +55,8 @@ moves the real pointer and presses what the marks frame while you watch, and a b
 says it is at work. Touch the mouse and the controls are yours again at once. What cannot be undone — pay, order,
 delete for good, send — it never presses: that button is red with a padlock, and yours to press.
 
-The card, the tray and the settings speak English, Russian, Spanish, German and Chinese, and you can add a language
-of your own ([how](docs/server.md)).
+The card, the tray and the settings speak English, Russian, Spanish, German, French, Portuguese, Chinese and
+Japanese, and you can add a language of your own ([how](docs/server.md)).
 
 For the full spec format see [`docs/tutorials.md`](docs/tutorials.md).
 

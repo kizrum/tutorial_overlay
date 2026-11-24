@@ -31,6 +31,12 @@ internal static class Danger
             "geld überweisen",
             "购买", "立即购买", "支付", "立即支付", "付款", "结算", "去结算", "提交订单", "确认订单", "确认支付", "确认付款",
             "订阅", "转账",
+            "acheter", "acheter maintenant", "payer", "payer maintenant", "commander", "passer la commande",
+            "valider la commande", "confirmer la commande", "confirmer l'achat", "confirmer le paiement", "s'abonner",
+            "virer de l'argent",
+            "comprar agora", "finalizar pedido", "fazer pedido", "confirmar pagamento", "assinar", "transferir dinheiro",
+            "購入", "今すぐ購入", "支払う", "支払い", "注文を確定", "注文する", "注文確定", "購入手続き", "決済", "定期購入",
+            "振り込む", "送金",
         }),
         ("irreversible", new[]
         {
@@ -43,11 +49,17 @@ internal static class Danger
             "endgültig löschen", "dauerhaft löschen", "konto löschen", "papierkorb leeren", "alles löschen",
             "auf werkseinstellungen zurücksetzen", "datenträger formatieren",
             "永久删除", "彻底删除", "删除账户", "删除帐户", "清空回收站", "全部清除", "恢复出厂设置", "格式化磁盘",
+            "supprimer définitivement", "supprimer le compte", "vider la corbeille", "tout effacer",
+            "réinitialiser les paramètres d'usine", "formater le disque",
+            "excluir permanentemente", "excluir definitivamente", "excluir conta", "esvaziar lixeira", "apagar tudo",
+            "restaurar padrões de fábrica", "formatar disco",
+            "完全に削除", "完全削除", "アカウントを削除", "ごみ箱を空にする", "すべて消去", "初期化", "ディスクをフォーマット",
         }),
         ("send", new[]
         {
             "отправить", "опубликовать", "send", "publish", "post",
             "enviar", "publicar", "senden", "absenden", "veröffentlichen", "发送", "发布",
+            "envoyer", "publier", "送信", "投稿", "公開",
         }),
     };
 
@@ -60,6 +72,10 @@ internal static class Danger
         "añadir al carrito", "agregar al carrito", "comprar más tarde", "lista de deseos", "eliminar filtro", "enviar comentarios",
         "in den warenkorb", "zum warenkorb hinzufügen", "später kaufen", "wunschliste", "merkliste", "filter entfernen", "feedback senden",
         "加入购物车", "添加到购物车", "稍后购买", "愿望单", "删除筛选", "发送反馈",
+        "ajouter au panier", "acheter plus tard", "liste de souhaits", "liste d'envies", "supprimer le filtre",
+        "envoyer des commentaires",
+        "adicionar ao carrinho", "comprar depois", "lista de desejos", "remover filtro", "enviar feedback",
+        "カートに入れる", "カートに追加", "あとで買う", "ほしい物リスト", "フィルターを削除", "フィードバックを送信",
     };
 
     /// <summary>The user's own words (settings), added to the list.</summary>
