@@ -456,3 +456,38 @@ public static class SettingsWindowTests
         A.Check(err == null, "the settings window opens: " + err);
     }
 }
+
+public static class CursorBadgeTests
+{
+    /// <summary>
+    /// The "auto" pill draws itself, shows and hides — and its own drawing does not hide the Paint event every
+    /// control has (it was a method named Paint: warning CS0108).
+    /// </summary>
+    public static void TestTheBadgeDrawsShowsAndHides()
+    {
+        A.Check(typeof(CursorBadge).GetMember("Paint", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic
+                | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.DeclaredOnly).Length == 0,
+            "CursorBadge declares nothing named Paint: Control.Paint stays itself");
+        Exception? err = null;
+        bool shown = false, hidden = false;
+        var th = new System.Threading.Thread(() =>
+        {
+            try
+            {
+                using var b = new CursorBadge();
+                _ = b.Handle;
+                b.Update(true);
+                shown = Native.IsWindowVisible(b.Handle);
+                b.Update(false);
+                hidden = !Native.IsWindowVisible(b.Handle);
+            }
+            catch (Exception e) { err = e; }
+        });
+        th.SetApartmentState(System.Threading.ApartmentState.STA);
+        th.Start();
+        th.Join(20000);
+        A.Check(err == null, "the badge draws without an error: " + err);
+        A.Check(shown, "on: the badge is on screen");
+        A.Check(hidden, "off: the badge is gone");
+    }
+}
