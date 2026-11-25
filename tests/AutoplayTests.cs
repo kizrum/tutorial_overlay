@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace TutorialOverlay.Tests;
 
-/// <summary>The autoplay ("Show me"), what cannot be undone, and who pressed what. Design: docs/autoplay-design.md.</summary>
+/// <summary>The autoplay ("Show me"), what cannot be undone, and who pressed what. Docs: docs/tutorials.md, "Autoplay".</summary>
 public static class AutoplayTests
 {
     private static Step StepOf(string json) => Step.Parse(A.Json(json), new AnchorSpec { Process = "Notepad" }, 0);

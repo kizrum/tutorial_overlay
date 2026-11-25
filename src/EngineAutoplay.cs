@@ -15,7 +15,7 @@ namespace TutorialOverlay;
 /// user always wins: their hand on the mouse or keyboard takes control back at once, and before every action the
 /// autoplay waits until they have been still for <see cref="QuietMs"/>. What cannot be undone (pay, order, delete
 /// for good) it never presses: it stops in front of it and the user decides. Every action is logged with who made it.
-/// Design: docs/autoplay-design.md.
+/// Docs: docs/tutorials.md, "Autoplay".
 /// </summary>
 internal static partial class Engine
 {
