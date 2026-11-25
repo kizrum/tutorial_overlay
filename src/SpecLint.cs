@@ -192,7 +192,22 @@ internal static class SpecLint
             i++;
         }
         if (J.Unwrap(J.Get(o, "find")) is JsonObject fo) Keys(fo, Find, at + "find.", res);
+        // "window" is its title, or {title, class}; anything else names no window and the anchor looks in the app's
+        switch (J.Unwrap(J.Get(o, "window")))
+        {
+            case JsonObject wo:
+                Keys(wo, WindowKeys, at + "window.", res);
+                if (J.Str(wo, "title") == null && J.Str(wo, "class") == null)
+                    res.Add($"{at}window: give the window's title (\"window\": \"Save as\") or {{title, class}} — as it is, no window is named");
+                break;
+            case JsonValue wv when wv.GetValueKind() != System.Text.Json.JsonValueKind.String:
+            case JsonArray:
+                res.Add($"{at}window: a window's title is text (\"window\": \"Save as\") — as it is, no window is named");
+                break;
+        }
     }
+
+    private static readonly HashSet<string> WindowKeys = Set("title", "class");
 
     private static void Keys(JsonObject o, HashSet<string> known, string at, List<string> res)
     {

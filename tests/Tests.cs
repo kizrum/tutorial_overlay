@@ -250,6 +250,19 @@ public static class LintTests
         A.Check(w.Any(x => x.Contains("unknown control 'dne'")), "control");
     }
 
+    /// <summary>"window" is a title or {title, class}: anything else names no window, and the anchor looks in the app's.</summary>
+    public static void TestTheWindowIsNamedByItsTitle()
+    {
+        string W(string window) => string.Join("; ", SpecLint.CheckSteps(A.Json("[{\"title\":\"t\",\"targets\":[{\"anchor\":{\"window\":" + window + ",\"element\":{\"name\":\"x\"}}}]}]"), 0));
+        A.Eq("", W("\"Save as\""), "a title");
+        A.Eq("", W("{\"title\":\"Save as\",\"class\":\"#32770\"}"), "title and class");
+        A.Check(W("{\"titel\":\"Save as\"}").Contains("'title'"), "a typo inside: " + W("{\"titel\":\"Save as\"}"));
+        A.Check(W("5").Contains("window"), "not text: " + W("5"));
+        var a = AnchorSpec.Parse(A.Json("""{"window":{"title":"Save as","class":"#32770"}}"""), null);
+        A.Eq("Save as", a.Window, "the title");
+        A.Eq("#32770", a.WindowClass, "the class");
+    }
+
     public static void TestDrawArguments()
     {
         A.Eq(0, SpecLint.CheckDraw(A.Json("""{"anchor":{"process":"x"},"shapes":[{"type":"label","text":"hi"}],"id":"m"}""")).Count, "clean draw");

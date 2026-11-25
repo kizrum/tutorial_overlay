@@ -15,6 +15,10 @@ only fixes things.
   by common words). Chinese, Japanese and Korean are drawn in Windows' own UI font for them instead of characters
   borrowed into Segoe UI. What cannot be undone is recognised in each of them ("Comprar ahora",
   "Zahlungspflichtig bestellen", "Passer la commande", "Finalizar pedido", "立即支付", "注文を確定"), and a window's close button by its name in these languages.
+- Fixed: the autoplay closed a dialog the lesson itself had opened — Ctrl+S in Paint, then "type the file name" in
+  "Save as" — as "a dialog in the way". A window a target is anchored in by its title, or one that opened as the
+  previous step was done (also when the next steps were appended later), is the lesson's own window now. An anchor's
+  `window` also takes `{title, class}`, as `find.in` does, and `validate` warns about a `window` that names nothing.
 - Fixed: the autoplay's pause on a danger read "This step is it cannot be undone"; it is "This step: …" now.
 
 ## [0.7.0] - 2026-11-24

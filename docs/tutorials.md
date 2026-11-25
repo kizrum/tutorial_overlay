@@ -126,6 +126,10 @@ stays where it was put.
   "origin": "topleft|center|…", "offset": [dx, dy], "relativeTo": "frame|client" }
 ```
 
+- `window` is part of the window's title as text, or `{ "title": "Save as", "class": "#32770" }` (`validate` warns
+  about anything else: it names no window, and the anchor would look in the app's main one). A dialog a target is
+  anchored in this way, or one that opened as the previous step was done (Ctrl+S → "Save as"), is the lesson's own
+  window: never "a dialog to close first", and the autoplay never closes it.
 - Names match as a case-insensitive substring. Of several elements with the same name the largest is taken
   (`pick: largest`). FL needs this: each of its sub-windows shows up in UIA as two Panes.
 - The resolver looks through **all** the process's windows, menus and dialogs included. UIA is queried on a

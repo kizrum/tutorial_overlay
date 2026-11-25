@@ -327,6 +327,43 @@ public static class AutoplayTests
         finally { Reset(a); }
     }
 
+    // ---- a window the lesson opened is where it goes on, never a dialog to close
+
+    /// <summary>
+    /// Ctrl+S opened "Save as", the steps for it came after: it is the lesson's window (the autoplay once closed it as
+    /// "a dialog in the way" and the file name had nowhere to go). One that pops up by itself later still is in the way.
+    /// </summary>
+    public static void TestAWindowTheLessonOpenedIsNotClosed()
+    {
+        var t0 = new DateTime(2026, 11, 25, 0, 51, 14, DateTimeKind.Utc);
+        Tutorial Lesson(string second)
+        {
+            var t = new Tutorial { Defaults = new AnchorSpec { Process = "mspaint" }, Index = 1 };
+            t.Steps.Add(StepOf("""{"title":"Ctrl+S","until":[{"type":"key","keys":"Ctrl+S"}]}"""));
+            t.Steps.Add(StepOf(second));
+            t.Steps[0].CompletedAt = t0;
+            t.Steps[1].EnteredAt = t0.AddSeconds(37);     // appended once the window was seen
+            return t;
+        }
+        var byTitle = Lesson("""{"title":"name","targets":[{"anchor":{"window":"Save as","element":{"name":"File name:"}}}]}""");
+        A.Check(Engine.LedTo(byTitle, "Save as", "#32770", null), "a target anchored in it by its title");
+        var asObject = Lesson("""{"title":"name","targets":[{"anchor":{"window":{"title":"Save as"},"element":{"name":"File name:"}}}]}""");
+        A.Eq("Save as", asObject.Steps[1].Targets[0].Anchor.Window, "window as {title} names it too");
+        A.Check(Engine.LedTo(asObject, "Save as", "#32770", null), "and is the lesson's window");
+        var plain = Lesson("""{"title":"name","targets":[{"anchor":{"element":{"name":"File name:"}}}]}""");
+        A.Check(Engine.LedTo(plain, "Save as", "#32770", t0.AddMilliseconds(600)), "opened just after the previous step");
+        A.Check(!Engine.LedTo(plain, "Save changes?", "#32770", t0.AddSeconds(30)), "popped up by itself later: still in the way");
+        A.Check(!Engine.LedTo(plain, "Save as", "#32770", null), "open before the lesson knew of it: in the way");
+        // before the steps for it are appended: the lesson waits after Ctrl+S, the window is not "to close first"
+        var waiting = new Tutorial { Defaults = new AnchorSpec { Process = "mspaint" }, Index = 0, State = TutorialState.Waiting };
+        waiting.Steps.Add(StepOf("""{"title":"Ctrl+S","until":[{"type":"key","keys":"Ctrl+S"}]}"""));
+        waiting.Steps[0].CompletedAt = t0;
+        A.Check(Engine.LedTo(waiting, "Save as", "#32770", t0.AddMilliseconds(400)), "waiting after the step that opened it");
+        A.Check(!Engine.LedTo(waiting, "Save as", "#32770", t0.AddSeconds(-20)), "open before that step: in the way");
+        waiting.State = TutorialState.Running;     // the ✓ moment: done, not moved on yet
+        A.Check(Engine.LedTo(waiting, "Save as", "#32770", t0.AddMilliseconds(300)), "the step's ✓ moment too");
+    }
+
     // ---- the hotkey
 
     public static void TestTheHotkeyStopsEvenThoughItsOwnKeysPausedFirst()

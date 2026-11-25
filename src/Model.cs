@@ -160,6 +160,12 @@ internal sealed class AnchorSpec
             a.Process = NormalizeProcess(J.Str(n, "process") ?? J.Str(n, "app"));
             a.Window = J.Str(n, "window");
             a.WindowClass = J.Str(n, "windowClass");
+            // "window": {"title": "Save as", "class": "#32770"}, the way find.in names a window
+            if (J.Unwrap(J.Get(n, "window")) is JsonObject wo)
+            {
+                a.Window = J.Str(wo, "title");
+                a.WindowClass ??= J.Str(wo, "class");
+            }
             a.Title = J.Str(n, "title");
             a.Hwnd = J.Num(n, "hwnd") is double h ? (long)h : ParseHex(J.Str(n, "hwnd"));
             a.Client = (J.Str(n, "relativeTo") ?? "").Equals("client", StringComparison.OrdinalIgnoreCase) || J.Bool(n, "client") == true;
@@ -756,6 +762,7 @@ internal sealed class Step
     public string? Why;                          // "why it works this way" — the card teaches, not just instructs
     public string? Say;                          // the mascot's short line (default: the title)
     public DateTime EnteredAt;                   // when the step became current (mascot / highlight sync)
+    public DateTime? CompletedAt;                // when it was last completed (a window opened right after is the lesson's)
     public List<Mark> Targets = new();
     public List<Condition> Until = new();
     public bool UntilAll;                // false: any condition completes the step

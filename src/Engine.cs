@@ -468,6 +468,7 @@ internal static partial class Engine
             _ => Events.InputBy ?? (Auto.State is "acting" or "verifying" ? "autoplay" : RecentInputBy()),
         };
         s.CompletedBy = by;
+        s.CompletedAt = DateTime.UtcNow;
         Events.Emit("step_completed", new() { ["index"] = t.Index, ["id"] = s.Id, ["title"] = s.Title, ["how"] = how, ["by"] = by });
         Log.Info($"step {t.Index + 1} completed ({how}) · by {by}");
         int delay = immediate ? 0 : s.AdvanceDelayMs ?? t.AdvanceDelayMs;
@@ -1114,7 +1115,8 @@ internal static partial class Engine
             var sfr = Native.FrameRect(sd.hwnd);
             // a modal dialog is in the way wherever focus goes; a window that only covered the app is out of the way
             // once the app is brought over it (the user clicked the app: what lay under that window is in reach again)
-            if (Native.IsWindow(sd.hwnd) && Native.IsWindowVisible(sd.hwnd) && !Native.IsIconic(sd.hwnd) && (sd.modal || OnTop(sd.hwnd, sfr)))
+            if (Native.IsWindow(sd.hwnd) && Native.IsWindowVisible(sd.hwnd) && !Native.IsIconic(sd.hwnd) && (sd.modal || OnTop(sd.hwnd, sfr))
+                && !LessonsOwnWindow(sd.hwnd))
                 return new Blocker(sd.hwnd, CleanTitle(Native.WindowTitle(sd.hwnd)), sfr, sd.modal);
             _stickyDialog = null;
         }
@@ -1210,23 +1212,41 @@ internal static partial class Engine
     /// </summary>
     private static bool LessonsOwnWindow(IntPtr hwnd)
     {
-        if (_tut is not { } t || t.Index < 0 || t.Current is not { } cur) return false;
+        if (_tut is not { } t) return false;
         // a target of this or an earlier step was shown in it: the lesson works there. Explorer's folder window is
         // small beside the desktop, the biggest window of its process, and passed for a dialog over it
         if (t.MarkedWindows.Contains(hwnd)) return true;
-        string title = CleanTitle(Native.WindowTitle(hwnd)), cls = Native.ClassName(hwnd);
+        return LedTo(t, CleanTitle(Native.WindowTitle(hwnd)), Native.ClassName(hwnd),
+                     Resolver.Since.TryGetValue(hwnd, out var opened) ? opened : null);
+    }
+
+    /// <summary><see cref="LessonsOwnWindow"/> by the window's title, class and when it opened (no screen: tests).</summary>
+    internal static bool LedTo(Tutorial t, string title, string cls, DateTime? opened)
+    {
+        if (t.Index < 0 || t.Current is not { } cur) return false;
         // a target of this or an earlier step lives in it
         if (t.Steps.Take(t.Index + 1).SelectMany(s => s.Targets)
             .Any(m => m.Anchor.Find is { HasIn: true, InMain: false } f && f.InMatches(title, cls))) return true;
         // the step itself is about it ("type a name in Preset name", until it disappears)
         bool Names(AnchorSpec? a) => a != null && title.Length > 0
-            && (a.Window != null && title.Contains(a.Window, StringComparison.OrdinalIgnoreCase)
+            && (a.Window != null && a.Window != t.Defaults.Window && title.Contains(a.Window, StringComparison.OrdinalIgnoreCase)
                 || a.Title != null && title.Contains(a.Title, StringComparison.OrdinalIgnoreCase)
                 || a.WindowClass != null && cls.Equals(a.WindowClass, StringComparison.OrdinalIgnoreCase));
         if (cur.Until.Any(c => Names(c.Anchor))) return true;
+        // a target of this or an earlier step is anchored in it by its title ("window": "Save as")
+        if (t.Steps.Take(t.Index + 1).SelectMany(s => s.Targets).Any(m => Names(m.Anchor))) return true;
+        if (opened is not DateTime at) return false;
+        bool RightAfter(Step s) => s.CompletedAt is DateTime done
+                                   && at >= done.AddMilliseconds(-1000) && at <= done.AddMilliseconds(Finder.OpenedBeforeStepMs);
+        // this step's own keys opened it as it was done (Ctrl+S → "Save as"): the ✓ moment, or the lesson waits for
+        // the steps that go on in it
+        if (cur.CompletedAt >= cur.EnteredAt && RightAfter(cur)) return true;
+        if (t.Index == 0) return false;
         // the previous step's click opened it (Save preset… → Preset name): the lesson led there
-        return Resolver.Since.TryGetValue(hwnd, out var opened) && opened <= cur.EnteredAt.AddMilliseconds(500)
-               && opened >= cur.EnteredAt.AddMilliseconds(-Finder.OpenedBeforeStepMs) && t.Index > 0;
+        if (at <= cur.EnteredAt.AddMilliseconds(500) && at >= cur.EnteredAt.AddMilliseconds(-Finder.OpenedBeforeStepMs)) return true;
+        // or the previous step's keys or click did, and this step came long after (appended once the window was
+        // seen). Closing it would undo what the lesson just did
+        return RightAfter(t.Steps[t.Index - 1]);
     }
 
     /// <summary>Window titles may carry control or invisible characters (FL Studio's do): spaces instead, once.</summary>
