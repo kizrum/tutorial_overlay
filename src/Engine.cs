@@ -244,9 +244,35 @@ internal static partial class Engine
             // steps measured at another display scale (args.scale) are converted to the tutorial's
             if (J.Num(_tut.Spec, "scale") is double now && J.Num(args, "scale") is double was && was > 0 && Math.Abs(now / was - 1) >= 0.02)
                 foreach (var r in raw) SpecScale.Apply(r, now / was);
-            var parsed = raw.Select(s => Step.Parse(s, _tut.Defaults, i++)).ToList();
             if (_tut.Spec["steps"] is not JsonArray specSteps) _tut.Spec["steps"] = specSteps = new JsonArray();
             _tut.Changed = true;
+            // a step with the id of one still ahead (or of the current one, while it is a step written later) takes
+            // its place: the plan stays as it was announced, only filled in
+            var replaced = new JsonArray();
+            long? waited = null;
+            bool refill = false;
+            raw = raw.Where(r =>
+            {
+                if (J.Str(r, "id") is not string id) return true;
+                int j = _tut.Steps.FindIndex(x => x.Id == id);
+                if (j < 0 || j < _tut.Index || (j == _tut.Index && _tut.Steps[j].Later == null && _tut.State != TutorialState.Waiting)) return true;
+                if (j == _tut.Index && _tut.State == TutorialState.Waiting) return true;
+                var old = _tut.Steps[j];
+                var step = Step.Parse(r, _tut.Defaults, j);
+                step.AheadSent = true;
+                _tut.Steps[j] = step;
+                if (j < specSteps.Count) specSteps[j] = r.DeepClone();
+                replaced.Add((JsonNode)id);
+                if (j == _tut.Index)
+                {
+                    waited = (long)(DateTime.UtcNow - old.EnteredAt).TotalMilliseconds;
+                    refill = true;
+                }
+                return false;
+            }).ToList();
+            if (_tut.State == TutorialState.Waiting && _tut.WaitingSince is DateTime ws && raw.Count > 0)
+                waited = (long)(DateTime.UtcNow - ws).TotalMilliseconds;
+            var parsed = raw.Select(s => Step.Parse(s, _tut.Defaults, i++)).ToList();
             if (insertAt is int at && at > _tut.Index && at <= _tut.Steps.Count)
             {
                 _tut.Steps.InsertRange(at, parsed);
@@ -258,10 +284,19 @@ internal static partial class Engine
                 foreach (var r in raw) specSteps.Add(r.DeepClone());
             }
             added = parsed.Count;
-            Events.Emit("steps_appended", new() { ["added"] = added, ["total"] = _tut.Steps.Count });
+            Events.Emit("steps_appended", new() { ["added"] = added, ["total"] = _tut.Steps.Count, ["replaced"] = replaced.Count > 0 ? replaced.DeepClone() : null });
             if (_tut.State == TutorialState.Waiting && added > 0) { _tut.State = TutorialState.Running; Enter(_tut.Index + 1); }
+            else if (refill) Enter(_tut.Index, "filled");
             _stepVersion++;
             var res = TutorialJson();
+            if (replaced.Count > 0) res["replaced"] = replaced;
+            if (waited is long w)
+            {
+                res["userWaitedMs"] = w;
+                if (w >= 3000)
+                    res["note"] = $"the user waited {w / 1000} s for this step. Write the whole lesson up front; a step that cannot " +
+                                  "be known yet goes in as {id, title, later} and is filled when plan_ahead comes, before the user gets there";
+            }
             if (warnings.Count > 0) res["warnings"] = Warnings(warnings);
             return res;
         }
@@ -449,6 +484,33 @@ internal static partial class Engine
             ["index"] = idx, ["total"] = t.Steps.Count, ["id"] = s.Id, ["title"] = s.Title,
             ["targets"] = s.Targets.Count, ["until"] = new JsonArray(s.Until.Select(c => (JsonNode)c.Type).ToArray()), ["source"] = source,
         });
+        // the plan: the user is on a step not written yet — fill it now; one coming soon — fill it before they get there
+        if (s.Later != null)
+            Events.Emit("step_needed", new()
+            {
+                ["index"] = idx, ["id"] = s.Id, ["title"] = s.Title, ["later"] = s.Later,
+                ["advice"] = "the user is on this step now and sees only its title: append_steps with this id fills it in place",
+            });
+        PlanAhead(t, idx);
+    }
+
+    /// <summary>How many steps ahead a step written later is announced: time for the agent to fill it.</summary>
+    internal const int PlanAheadSteps = 2;
+
+    /// <summary>Tells the agent about the plan's later steps that are coming within <see cref="PlanAheadSteps"/>.</summary>
+    private static void PlanAhead(Tutorial t, int idx)
+    {
+        for (int k = idx + 1; k <= idx + PlanAheadSteps && k < t.Steps.Count; k++)
+        {
+            var n = t.Steps[k];
+            if (n.Later == null || n.AheadSent) continue;
+            n.AheadSent = true;
+            Events.Emit("plan_ahead", new()
+            {
+                ["index"] = k, ["id"] = n.Id, ["title"] = n.Title, ["later"] = n.Later, ["stepsAway"] = k - idx,
+                ["advice"] = "the user reaches this step soon: look at what it needs now (inspect) and fill it with append_steps by its id",
+            });
+        }
     }
 
     private static void Complete(string how, bool immediate = false)
@@ -2332,6 +2394,8 @@ internal static partial class Engine
             card.HintTitle = s.HintTitle;
             card.HelpPending = s.HelpPending;
             card.Checking = s.Checking;
+            // a step of the plan not written yet: its title, and that the assistant is preparing it
+            if (s.Later != null) { card.Checking = true; card.Hint ??= Settings.Current.Text.LaterPreparing; }
             card.Highlighting = s.HighlightUntil != null;
             card.Issue = TargetIssue(s);
             card.Review = s.Review && !s.Until.Any(c => c.SeenUnmet && c.Type != "manual");
@@ -2728,6 +2792,10 @@ internal static partial class Engine
             ["app"] = t.Defaults.Process, ["completing"] = t.AdvanceAt != null, ["owner"] = OwnerLabel(t),
             ["savedAs"] = t.SavedAs,   // the library name: a lesson repaired on the way is saved back under it
         };
+        // the plan's steps not written yet: what is left to fill, and where
+        var later = new JsonArray(t.Steps.Select((x, k) => (x, k)).Where(p => p.x.Later != null && p.k >= t.Index)
+            .Select(p => (JsonNode)new JsonObject { ["index"] = p.k, ["id"] = p.x.Id, ["title"] = p.x.Title, ["later"] = p.x.Later }).ToArray());
+        if (later.Count > 0) o["later"] = later;
         var s = t.Current;
         if (s != null && t.Active)
             o["step"] = new JsonObject

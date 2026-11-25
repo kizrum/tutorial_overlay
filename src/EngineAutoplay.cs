@@ -600,6 +600,8 @@ internal static partial class Engine
     /// </summary>
     internal static AutoPlan Plan(Tutorial? t, Step s)
     {
+        // a step of the plan not written yet: wait for the agent to fill it (it carries on by itself once it is)
+        if (s.Later != null) return new AutoPlan("wait") { Reason = "preparing", WaitMs = 120_000 };
         if (s.Buttons.Count > 0) return new AutoPlan("pause") { Reason = "choice" };
         if (s.AutoplayOff) return new AutoPlan("pause") { Reason = "cant_do", Arg = s.AutoplayNote };
         if (s.Until.Count == 0) return LookAt(s);

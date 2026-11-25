@@ -179,6 +179,7 @@
   "HelpSent": "已告诉助手——提示马上就来。",
   "Highlighting": "正在高亮要点击的地方…",
   "Checking": "正在确认这一项的位置…",
+  "LaterPreparing": "助手正在准备这一步。如果迟迟没有内容，请在聊天中联系助手，或跳过这一步。",
   "IssueMinimized": "窗口已最小化——请还原它。",
   "IssueOccluded": "另一个窗口挡住了该位置。",
   "IssueInactive": "请切换到该程序。",
@@ -243,6 +244,7 @@
     "not_completed": "我点击了，但程序没有响应。",
     "loop": "课程一直把我带回前面。",
     "elevated": "此窗口以管理员身份运行——Windows 不允许我在其中点击。请自己点击。",
-    "input_blocked": "Windows 阻止了我的输入（锁屏或权限请求）。"
+    "input_blocked": "Windows 阻止了我的输入（锁屏或权限请求）。",
+    "preparing": "助手仍在准备这一步；准备好后我会继续。"
   }
 }

@@ -158,6 +158,8 @@ internal static class Events
         "help", "continue_requested", "button", "outro", "answer", "area", "pick", "pick_finished",
         // the lesson needs fixing: a target that is not there, a click that did nothing or went wide, a dialog in the way
         "target_not_found", "no_effect", "miss", "blocked", "prepare_started", "step_skipped",
+        // a step of the plan to write: soon (plan_ahead), or the user is on it now (step_needed)
+        "plan_ahead", "step_needed",
         // the lesson ran out of steps, ended or was taken over; the server is going away
         "tutorial_waiting", "tutorial_finished", "tutorial_stopped", "tutorial_save_failed", "exit", "already_running",
     };

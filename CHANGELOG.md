@@ -15,6 +15,13 @@ only fixes things.
   by common words). Chinese, Japanese and Korean are drawn in Windows' own UI font for them instead of characters
   borrowed into Segoe UI. What cannot be undone is recognised in each of them ("Comprar ahora",
   "Zahlungspflichtig bestellen", "Passer la commande", "Finalizar pedido", "立即支付", "注文を確定"), and a window's close button by its name in these languages.
+- The whole plan up front: a step that cannot be known when the lesson starts (the user's own files, a dialog never
+  seen) goes in as `{id, title, later: "why"}`. The card counts it from the start ("Step 3 of 7"); `plan_ahead` tells
+  the agent two steps before the user gets there, and `append_steps` with the same `id` fills it in place (any step
+  still ahead can be replaced the same way). Reached before it is filled: `step_needed`, the card shows its title and
+  "The assistant is preparing this step", the autoplay waits; the answer to `append_steps` says how long the user
+  waited. `validate` warns about a lesson of a step or two with `keepOpen` and nothing written later (made one step at
+  a time), and about "later" right after Ctrl+S / Ctrl+Shift+S: what to do in "Save as" is known.
 - Fixed: the autoplay closed a dialog the lesson itself had opened — Ctrl+S in Paint, then "type the file name" in
   "Save as" — as "a dialog in the way". A window a target is anchored in by its title, or one that opened as the
   previous step was done (also when the next steps were appended later), is the lesson's own window now. An anchor's

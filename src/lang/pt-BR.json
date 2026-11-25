@@ -179,6 +179,7 @@
   "HelpSent": "Avisei o assistente: uma dica está chegando.",
   "Highlighting": "Destacando onde clicar…",
   "Checking": "Verificando onde fica este item…",
+  "LaterPreparing": "O assistente está preparando este passo. Se nada aparecer, escreva para ele no chat ou pule o passo.",
   "IssueMinimized": "A janela está minimizada: restaure-a.",
   "IssueOccluded": "Outra janela cobre o lugar.",
   "IssueInactive": "Mude para o aplicativo.",
@@ -243,6 +244,7 @@
     "not_completed": "Cliquei, mas o aplicativo não respondeu.",
     "loop": "A lição fica me levando de volta.",
     "elevated": "Esta janela roda como administrador: o Windows não me deixa clicar nada nela. Clique você.",
-    "input_blocked": "O Windows bloqueou minha entrada (a tela de bloqueio ou um pedido de permissão)."
+    "input_blocked": "O Windows bloqueou minha entrada (a tela de bloqueio ou um pedido de permissão).",
+    "preparing": "O assistente ainda está preparando este passo; continuo assim que ficar pronto."
   }
 }

@@ -179,6 +179,7 @@
   "HelpSent": "Told the assistant — a hint is coming.",
   "Highlighting": "Highlighting where to click…",
   "Checking": "Checking where this item is…",
+  "LaterPreparing": "The assistant is preparing this step. If nothing comes, write to the assistant in the chat — or skip the step.",
   "IssueMinimized": "The window is minimized — restore it.",
   "IssueOccluded": "Another window covers the spot.",
   "IssueInactive": "Switch to the app.",
@@ -243,6 +244,7 @@
     "not_completed": "I pressed it, but the app didn't respond.",
     "loop": "The lesson keeps taking me back.",
     "elevated": "This window runs as administrator — Windows doesn't let me press anything in it. Press it yourself.",
-    "input_blocked": "Windows blocked my input (the lock screen or a permission prompt)."
+    "input_blocked": "Windows blocked my input (the lock screen or a permission prompt).",
+    "preparing": "The assistant is still preparing this step; I carry on once it is ready."
   }
 }

@@ -29,7 +29,7 @@ internal static class SpecLint
     private static readonly HashSet<string> Grid = Set("from", "step", "dx", "dy", "rows", "cols", "cells", "w", "h");
     private static readonly HashSet<string> Step = Union(Mark, Set("id", "title", "text", "description", "body", "why", "explain", "because", "say",
         "untilMode", "toggle", "dim", "advanceDelayMs", "numbered", "anchor", "targets", "marks", "shapes", "buttons", "controls", "checklist",
-        "sequence", "until", "complete", "done", "inMenu", "autoplay", "autoplayNote"));
+        "sequence", "until", "complete", "done", "inMenu", "autoplay", "autoplayNote", "later"));
     private static readonly HashSet<string> Cond = Union(Anchor, Set("type", "count", "anchor", "at", "expr", "when", "radius", "keys", "key", "from", "to",
         "button", "show", "hold", "holding", "path", "points", "smooth", "ordered", "direction", "tolerance", "coverage", "in", "area", "over", "dir",
         "notches", "until", "untilVisible", "property", "prop", "equals", "is", "contains", "matches", "regex", "not"));
@@ -55,7 +55,41 @@ internal static class SpecLint
         if (J.Get(o, "anchor") is JsonNode a) AnchorNode(a, "anchor.", res);
         int i = 0;
         foreach (var s in J.Items(J.Get(o, "steps"))) CheckStep(s, $"steps[{i++}].", res);
+        Plan(J.Items(J.Get(o, "steps")).ToList(), 0, res);
+        // keepOpen with a step or two and nothing marked for later: the lesson made one step at a time
+        if (J.Bool(o, "keepOpen") == true && J.Items(J.Get(o, "steps")).Count() is > 0 and <= 2 && !J.Items(J.Get(o, "steps")).Any(s => J.Str(s, "later") != null))
+            res.Add("keepOpen: the lesson must reach its goal from the start — write every step you can, and a step you cannot " +
+                    "know yet as {id, title, later: 'why'} (the user's own files, a dialog never seen); the user sees the whole " +
+                    "path, plan_ahead tells you when to fill it. Without such a step, keepOpen only waits for more you add later");
         return res;
+    }
+
+    // keys that open "Save as": what to type and press there is the lesson's own choice, known ahead — never "later"
+    // (Open and Print are not here: which file or printer is the user's)
+    private static readonly string[] DialogKeys = { "ctrl+s", "ctrl+shift+s", "f12" };
+
+    /// <summary>The plan's steps written later (later): an id to fill them by, nothing of their own, not a known dialog.</summary>
+    private static void Plan(List<JsonNode> steps, int first, List<string> res)
+    {
+        for (int k = 0; k < steps.Count; k++)
+        {
+            var s = J.Unwrap(steps[k]);
+            if (J.Get(s, "later") is not JsonNode lv) continue;
+            string at = $"steps[{first + k}].";
+            if (J.AsStr(lv) is not { Length: > 0 })
+            {
+                res.Add($"{at}later: say why this step cannot be written yet (\"the user's own files\")");
+                continue;
+            }
+            if (J.Str(s, "id") == null)
+                res.Add($"{at}id: a later step needs an id — append_steps fills it by that id, in its place");
+            if (J.Has(s, "targets") || J.Has(s, "until") || J.Has(s, "marks"))
+                res.Add($"{at}later: a step written later has no targets or until of its own yet — they come when it is filled");
+            if (k > 0 && J.Items(J.Get(J.Unwrap(steps[k - 1]), "until")).SelectMany(c => J.Items(J.Get(c, "keys") ?? J.Get(c, "key")))
+                    .Select(x => (J.AsStr(x) ?? "").Replace(" ", "").ToLowerInvariant()).FirstOrDefault(x => DialogKeys.Contains(x)) is string key)
+                res.Add($"{at}later: {key} opens \"Save as\" — the file name and the Save button are known: " +
+                        "write its steps now, anchored with \"window\": \"<its title>\"");
+        }
     }
 
     /// <summary>Problems in steps given to append_steps.</summary>
@@ -64,6 +98,7 @@ internal static class SpecLint
         var res = new List<string>();
         int i = firstIndex;
         foreach (var s in J.Items(steps)) CheckStep(s, $"steps[{i++}].", res);
+        Plan(J.Items(steps).ToList(), firstIndex, res);
         return res;
     }
 

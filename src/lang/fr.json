@@ -179,6 +179,7 @@
   "HelpSent": "Transmis à l'assistant : un indice arrive.",
   "Highlighting": "Je mets en évidence où cliquer…",
   "Checking": "Je vérifie où se trouve cet élément…",
+  "LaterPreparing": "L'assistant prépare cette étape. Si rien n'arrive, écrivez-lui dans le chat ou passez l'étape.",
   "IssueMinimized": "La fenêtre est réduite : restaurez-la.",
   "IssueOccluded": "Une autre fenêtre cache l'endroit.",
   "IssueInactive": "Passez à l'application.",
@@ -243,6 +244,7 @@
     "not_completed": "J'ai appuyé, mais l'application n'a pas réagi.",
     "loop": "La leçon me ramène sans cesse en arrière.",
     "elevated": "Cette fenêtre tourne en administrateur : Windows ne me laisse rien y presser. Appuyez vous-même.",
-    "input_blocked": "Windows a bloqué ma saisie (écran de verrouillage ou demande d'autorisation)."
+    "input_blocked": "Windows a bloqué ma saisie (écran de verrouillage ou demande d'autorisation).",
+    "preparing": "L'assistant prépare encore cette étape ; je continue dès qu'elle est prête."
   }
 }

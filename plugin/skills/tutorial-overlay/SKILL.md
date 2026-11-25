@@ -39,11 +39,19 @@ Do not try to install or download it yourself.
    **Start with the whole lesson, not two steps.** The user waits on every `append_steps`: adding one step at a
    time, after reading each menu, leaves them idle for most of the lesson. The app's own menus and commands you know
    (Blender's Add → Mesh → Monkey, Object → Shade Smooth; Steam's game menu → Properties…; an editor's File → Save
-   As…) are written ahead like any target — `target_not_found` + `retarget` catches a wording that differs. Only what
-   cannot be known ahead waits: the values of a drop-down, items that depend on the user's data (their files,
-   games, presets), a dialog you have never seen. Write that step as "open the list", read it when it is open
-   (`find_text`, `inspect`), and `append_steps` everything after it in one call. (Without `retarget`, an older
-   TutorialOverlay: watch `anchor_found`/`no_effect` events, then `describe` the new window and `append_steps`.)
+   As…) are written ahead like any target — `target_not_found` + `retarget` catches a wording that differs. So are
+   Windows' standard dialogs: "Save as" / "Open" have the `File name:` field and `Save` / `Open` / `Cancel` buttons —
+   anchor them with `"window": "Save as"` (the start of its title). Before `start_tutorial`, list every action from
+   where the user is to the goal; each becomes a step. A short lesson is right only for a simple task.
+   Only what cannot be known ahead waits: the values of a drop-down, items that depend on the user's data (their
+   files, games, presets), a dialog you have never seen. It still belongs to the plan: write it as
+   `{id: 'pick', title: 'Pick the photo', later: 'their files'}` — the card counts it from the start, and
+   `plan_ahead` tells you two steps before the user gets there: look then (`inspect`, `find_text`) and fill it with
+   `append_steps` and a step of the same `id`, which takes its place. `step_needed`: the user is on it already —
+   fill it at once. A step of the same `id` replaces any step still ahead, when you or the user change the plan.
+   (An older TutorialOverlay — `validate` calls `later` an unknown field: write that step as "open the list", read it
+   when it is open, and `append_steps` everything after it in one call. Without `retarget`: watch
+   `anchor_found`/`no_effect` events, then `describe` the new window and `append_steps`.)
 3. **Leave the outline to the overlay; pick a mark by what it must say.** Give a target no `shapes` (or
    `{type: 'auto'}`): it is framed at its own size — the element, the found text, the icon, the caption at a spot,
    measured live. Your own shapes add to the outline; `validate` warns when a hand-made ring or frame does not fit
@@ -102,9 +110,10 @@ Do not try to install or download it yourself.
    it by its caption as the note says (`find.text`, `match: 'exact'`), or its mark comes late on every visit. An
    older TutorialOverlay does not say `slow`: when `inspect` takes many seconds on a window, do the same there.
 8. **Start and follow:** `start_tutorial(spec)`, then `events(since, timeoutMs)` to see hits, misses, `no_effect`
-   and `help`. For a long lesson use `keepOpen: true` and `append_steps`. While the lesson runs, keep an `events`
-   long-poll going all the time (`timeoutMs: 100000, wake: 'decisions'`: it returns at once when something needs
-   you — help, a miss, a target not found, no more steps — and brings the lesson's progress (hits, steps, windows)
+   and `help`. `keepOpen: true` only when the lesson may go on past its plan ("Keep learning"). While the lesson
+   runs, keep an `events` long-poll going all the time (`timeoutMs: 100000, wake: 'decisions'`: it returns at once
+   when something needs you — help, a miss, a target not found, a step of the plan to fill (`plan_ahead`,
+   `step_needed`), no more steps — and brings the lesson's progress (hits, steps, windows)
    along with it, none dropped; an older TutorialOverlay ignores `wake` and returns on any event; an older server
    cuts the poll to 60 s, and Claude Code moves a call longer than 120 s to the background) and do nothing slow in between (no builds, no restarts, no long reading): the user
    is waiting on you. **Do not end your turn while the lesson runs** (in Claude Code the plugin's Stop hook holds

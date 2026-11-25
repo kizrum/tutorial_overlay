@@ -12,7 +12,7 @@ What `start_tutorial` takes. Only `steps` is required.
 | `app`, `window` | the default process (and window) for every anchor that names none |
 | `steps` | the steps — see [Steps and conditions](#steps-and-conditions) |
 | `lang` | the language code of the steps (`en`, `ru`, `es`, `de`, `zh-Hans`, …): the card's own words follow it, English where the overlay has none; default: told from the steps' text |
-| `keepOpen` | after the last step, wait for `append_steps` instead of finishing (a lesson fed step by step) |
+| `keepOpen` | after the last step, wait for `append_steps` instead of finishing (the lesson goes on: "Keep learning", a part decided later) |
 | `advanceDelayMs` | the pause on a completed step before the next one shows (default 450; a step may set its own) |
 | `startAt` | the index of the step to start from |
 | `outro` | `false` turns the end card off |
@@ -372,6 +372,30 @@ window the app opens by itself that covers nothing the step needs is left alone.
 and `prepare_done`; `status` gives the window as `step.dialog` (`close` is the close button). While a screenshot tool (Snipping Tool, ShareX and the like) is open,
 the tutorial still treats the program's window that was in front before it as active.
 
+### The whole plan up front: steps written later
+
+A lesson starts with its whole path to the goal. Every step that can be known is written as a step; one that cannot be
+known yet — the user's own files, presets or games, a dialog never seen — goes in as a step **written later**:
+
+```json
+{ "id": "pick", "title": "Pick the photo to edit", "later": "the user's own files" }
+```
+
+It has an `id`, a `title` (what the user sees on the card) and `later` (why it cannot be written yet), nothing else.
+The card counts it in ("Step 3 of 7") from the start, so the lesson is never a stub that grows one step at a time.
+`plan_ahead` tells the agent two steps before the user reaches it (`index`, `id`, `title`, `later`, `stepsAway`):
+the agent looks at what it needs and calls `append_steps` with a step of the same `id`, which takes its place —
+the plan stays as it was announced. If the user gets there first, `step_needed` comes; the card shows the step's
+title with "The assistant is preparing this step", Done and Skip stay (skipping it is the user's call), and the
+autoplay waits. A step filled while the user stands on it shows at once, and the `append_steps` answer says how
+long the user waited (`userWaitedMs`). `status` and `start_tutorial` list what is left to fill (`later`).
+
+`append_steps` with the `id` of any step still ahead replaces it in the same way — the agent or the user changing the
+plan; steps with new ids are added (at the end, or at `insertAt`). `validate` warns about a later step without an
+`id`, one with targets of its own, one right after a key that opens "Save as" (Ctrl+S, Ctrl+Shift+S, F12 — the name to
+type and the Save button are known: write those steps; which file to open is the user's, so after Ctrl+O it is fine), and a `keepOpen` lesson of one or two steps with nothing
+written later (a lesson made one step at a time). A short lesson for a simple task, without `keepOpen`, is fine.
+
 ## Autoplay ("Do this step")
 
 The card has **"Do this step"** and **"Do them all"** (the rest of the lesson; hotkey **Ctrl+Alt+P** for one step):
@@ -417,6 +441,7 @@ the card says the mouse will move by itself and waits for "Got it, start".
 |---|---|---|
 | `autoplay` | spec | `false`: no autoplay in this lesson |
 | `autoplay`, `autoplayNote` | step | `false`: this step is the user's to do; the note says why |
+| `later` | step | a step written later: the autoplay waits until the agent fills it (`preparing`) |
 | `danger`, `dangerNote` | target | cannot be undone: red, "Press it yourself", never pressed by autoplay; the note says what happens |
 
 ## The mascot "Shazhok"

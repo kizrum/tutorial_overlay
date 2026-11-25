@@ -179,6 +179,7 @@
   "HelpSent": "Se lo he dicho al asistente: ahora viene una pista.",
   "Highlighting": "Resaltando dónde hacer clic…",
   "Checking": "Comprobando dónde está este elemento…",
+  "LaterPreparing": "El asistente está preparando este paso. Si no llega nada, escríbele en el chat o salta el paso.",
   "IssueMinimized": "La ventana está minimizada: restáurala.",
   "IssueOccluded": "Otra ventana tapa el lugar.",
   "IssueInactive": "Cambia a la aplicación.",
@@ -243,6 +244,7 @@
     "not_completed": "Lo pulsé, pero la aplicación no respondió.",
     "loop": "La lección me hace volver atrás una y otra vez.",
     "elevated": "Esta ventana se ejecuta como administrador: Windows no me deja pulsar nada en ella. Púlsalo tú.",
-    "input_blocked": "Windows bloqueó mi entrada (la pantalla de bloqueo o una solicitud de permisos)."
+    "input_blocked": "Windows bloqueó mi entrada (la pantalla de bloqueo o una solicitud de permisos).",
+    "preparing": "El asistente aún prepara este paso; sigo en cuanto esté listo."
   }
 }

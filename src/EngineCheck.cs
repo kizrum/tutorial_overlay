@@ -176,7 +176,8 @@ internal static partial class Engine
             so["id"] = step.Id;
             so["title"] = step.Title;
             var notes = new JsonArray();
-            if (step.Targets.Count == 0 && step.Until.Count == 0) notes.Add((JsonNode)"no targets and no 'until': the step waits for Done / complete_step");
+            if (step.Later != null) { so["later"] = step.Later; notes.Add((JsonNode)$"written later ({step.Later}): plan_ahead comes {Engine.PlanAheadSteps} steps before it — fill it with append_steps by its id"); }
+            else if (step.Targets.Count == 0 && step.Until.Count == 0) notes.Add((JsonNode)"no targets and no 'until': the step waits for Done / complete_step");
             if (step.Title.Length == 0 && step.Text.Length == 0) { notes.Add((JsonNode)"no title or text: the card will be empty"); warnings++; }
 
             var targets = new JsonArray();

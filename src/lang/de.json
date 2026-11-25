@@ -179,6 +179,7 @@
   "HelpSent": "Dem Assistenten Bescheid gegeben – ein Tipp kommt gleich.",
   "Highlighting": "Hebe hervor, wo Sie klicken…",
   "Checking": "Prüfe, wo dieses Element ist…",
+  "LaterPreparing": "Der Assistent bereitet diesen Schritt vor. Kommt nichts, schreiben Sie ihm im Chat – oder überspringen Sie den Schritt.",
   "IssueMinimized": "Das Fenster ist minimiert – stellen Sie es wieder her.",
   "IssueOccluded": "Ein anderes Fenster verdeckt die Stelle.",
   "IssueInactive": "Wechseln Sie zur App.",
@@ -243,6 +244,7 @@
     "not_completed": "Ich habe gedrückt, aber die App hat nicht reagiert.",
     "loop": "Die Lektion schickt mich immer wieder zurück.",
     "elevated": "Dieses Fenster läuft als Administrator – Windows lässt mich darin nichts drücken. Drücken Sie selbst.",
-    "input_blocked": "Windows hat meine Eingabe blockiert (Sperrbildschirm oder eine Berechtigungsabfrage)."
+    "input_blocked": "Windows hat meine Eingabe blockiert (Sperrbildschirm oder eine Berechtigungsabfrage).",
+    "preparing": "Der Assistent bereitet diesen Schritt noch vor; ich mache weiter, sobald er fertig ist."
   }
 }

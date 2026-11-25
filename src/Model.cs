@@ -858,6 +858,7 @@ internal sealed class Step
             Numbered = J.Bool(n, "numbered") ?? false,
             AutoplayOff = J.Bool(n, "autoplay") == false,
             AutoplayNote = J.Str(n, "autoplayNote"),
+            Later = J.Str(n, "later") is { Length: > 0 } later ? later : null,
         };
         // a step-level "anchor" is the default for all of its targets
         var stepDefaults = J.Has(n, "anchor") ? AnchorSpec.Parse(J.Get(n, "anchor"), defaults) : defaults;
@@ -892,6 +893,12 @@ internal sealed class Step
     public bool InMenu;                              // its targets are in a menu / popup the previous step opens
     public bool AutoplayOff;                         // autoplay:false — the autoplay leaves this step to the user
     public string? AutoplayNote;                     // and says why
+    /// <summary>
+    /// A step of the plan not written yet ("later": why it cannot be known ahead — the user's files): the lesson's
+    /// whole path is known from the start; the agent fills it with append_steps by its id, told by plan_ahead.
+    /// </summary>
+    public string? Later;
+    public bool AheadSent;                           // plan_ahead was sent for it
     public string? CompletedBy;                      // who completed it last: user | autoplay | agent | other | app
     public string? DoneHow;                          // how it was last completed (targets, key, agent, …)
     public bool SeenThisVisit;                       // its target was on screen during this visit

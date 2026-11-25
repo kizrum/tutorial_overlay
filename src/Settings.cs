@@ -184,7 +184,7 @@ internal sealed class Loc
         AgentOff = "",
         AgentOffFor = "",
         AgentOffContinue = "";
-    public string HelpSent = "", Highlighting = "", Checking = "";
+    public string HelpSent = "", Highlighting = "", Checking = "", LaterPreparing = "";
     public string IssueMinimized = "", IssueOccluded = "",
         IssueInactive = "", IssueMissing = "",
         IssueClosed = "",

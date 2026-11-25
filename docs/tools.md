@@ -9,7 +9,7 @@
 | `draw(shapes, anchor, dismissOnClick, …)` | marks outside a tutorial; a click dismisses the mark and still reaches the app |
 | `clear(id?)` | remove marks |
 | `start_tutorial(spec)` | start a tutorial (only the current step is shown) |
-| `append_steps(steps)` | add steps (with `keepOpen` the tutorial waits for them after the last one) |
+| `append_steps(steps)` | add steps (with `keepOpen` the tutorial waits for them after the last one); a step with the `id` of one still ahead replaces it — that is how a step written later (`later`) is filled. The answer has `replaced` and, when the user stood waiting, `userWaitedMs` |
 | `goto_step(index\|id\|relative)` | go to a step; its targets are shown again |
 | `complete_step(expectIndex?)` | complete the step on the agent's behalf |
 | `autoplay(action, steps?)` | only when the user asks: do the steps for them while they watch (`start` with `steps` 1 or `all`, `stop`, `resume`). The user's own hand on the mouse takes the controls back; it never presses a `danger` target; `autoplay_paused` says why it stopped. Its state is `autoplay` in `status` |
@@ -39,7 +39,7 @@
 `hit`, `unhit`, `miss`, `undo`, `check_changed`, `uia_changed`, `key_matched`, `drag`, `opened`, `no_effect`,
 `button`, `help`, `sequence_reset`, `pick_started`, `pick`, `pick_finished`, `ask`, `answer`, `ask_area`, `area`,
 `window_opened/closed`, `anchor_found/lost`, `target_not_found`, `target_changed`, `target_pinned`, `blocked`,
-`scroll_done`, `trace_done`, `trace_off`, `prepare_started/done`, `outro`, `continue_requested`,
+`scroll_done`, `trace_done`, `trace_off`, `prepare_started/done`, `plan_ahead`, `step_needed`, `outro`, `continue_requested`,
 `tutorial_saved`, `tutorial_save_failed`, `autoplay_started/resumed/paused/action/finished/stopped`,
 `hook_reinstalled`, `already_running`, `exit`. Events caused by input carry `by`: `user`, `autoplay`, `agent`,
 `app` or `other` (another program's input). `miss` carries
@@ -54,6 +54,8 @@ Some of them in a few words:
 | `scroll_done` | a `scroll` step counted: enough notches, or the content it waited for came into view |
 | `trace_done` / `trace_off` | a `trace` step: the path was followed (`progress`) / the drag left it (`reason`) |
 | `prepare_started` / `prepare_done` | step 0: a window is in the way before step 1 can start — a modal dialog, or one over the app (Steam's "Special Offers"); step 1's marks wait and its close button is marked / the window is gone, step 1 begins |
+| `plan_ahead` | a step written later (`later`) is `stepsAway` steps ahead of the user: fill it now with `append_steps` by its `id` |
+| `step_needed` | the user has reached a step written later that is not filled yet: the card shows its title and "preparing" |
 | `outro` | the user chose on the end card (`choice`: `save`, `repeat`, `continue`, `close`) |
 | `continue_requested` | “Keep learning” on the end card: the agent should append the next lesson |
 | `tutorial_saved` / `tutorial_save_failed` | saving the lesson to the library worked / failed (`error`) |
